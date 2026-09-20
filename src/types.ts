@@ -18,6 +18,7 @@ export interface QiaomuSettings {
   systemPrompt: string;
   quickPrompts: string[];
   autoAttachActiveNote: boolean;
+  useObsidianCli: boolean;
   skillDirectories: string[];
   mcpConfig: string;
   lastConversation: ChatMessage[];
@@ -43,7 +44,17 @@ export interface ChatRequest {
   activeFileContent?: string;
   skill?: AgentSkill;
   mcpConfig?: Record<string, unknown>;
+  obsidianCli?: ObsidianCliConnection;
   history: ChatMessage[];
+}
+
+export type ObsidianCliState = "unavailable" | "disabled" | "ready" | "error";
+
+export interface ObsidianCliConnection {
+  path: string;
+  version: string | null;
+  state: ObsidianCliState;
+  detail: string;
 }
 
 export interface ChatCallbacks {

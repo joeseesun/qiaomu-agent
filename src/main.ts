@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS, normalizeSettings } from "./defaults";
 import { BackendService } from "./services/backend-service";
 import { discoverLocalClis } from "./services/cli-discovery";
 import { SkillService } from "./services/skill-service";
+import { ObsidianCliService } from "./services/obsidian-cli";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
 
@@ -11,11 +12,13 @@ export default class QiaomuAgentPlugin extends Plugin {
   override settings: QiaomuSettings = { ...DEFAULT_SETTINGS, api: { ...DEFAULT_SETTINGS.api } };
   backendService!: BackendService;
   skillService!: SkillService;
+  obsidianCliService!: ObsidianCliService;
 
   override async onload(): Promise<void> {
     this.settings = normalizeSettings(await this.loadData());
     this.backendService = new BackendService(this.app, () => this.settings);
     this.skillService = new SkillService(this.app);
+    this.obsidianCliService = new ObsidianCliService();
 
     this.registerView(VIEW_TYPE_QIAOMU_AGENT, (leaf) => new ChatView(leaf, this));
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
@@ -57,6 +60,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     const [detections, skills] = await Promise.all([
       discoverLocalClis(),
       this.skillService.refresh(this.settings.skillDirectories),
+      this.obsidianCliService.detect(),
     ]);
     this.backendService.setDetections(detections);
     this.eachView((view) => view.refreshControls());

@@ -219,6 +219,9 @@ export class ChatView extends ItemView {
           activeFileContent,
           skill: this.selectedSkill ?? undefined,
           mcpConfig,
+          obsidianCli: this.plugin.settings.useObsidianCli
+            ? this.plugin.obsidianCliService.getConnection()
+            : undefined,
           history,
         },
         {

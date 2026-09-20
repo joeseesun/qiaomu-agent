@@ -2,6 +2,17 @@ import type { ChatRequest, CliProfile } from "../types";
 
 function promptWithContext(request: ChatRequest): string {
   const sections: string[] = [];
+  if (request.obsidianCli?.state === "ready") {
+    const executable = JSON.stringify(request.obsidianCli.path);
+    sections.push(
+      `<obsidian_cli executable=${executable}>\n` +
+        `The official Obsidian CLI is connected to the running app. Prefer it for vault-aware reads, search, properties, links, tasks, and link-safe moves. ` +
+        (request.permissionMode === "edit"
+          ? "Writes are allowed for this turn, but inspect the target first and do not use permanent deletion."
+          : "This turn is read-only: use only read, search, listing, and inspection commands; do not modify files or properties.") +
+        `\nRun the executable from the vault working directory. CLI parameters use key=value syntax.\n</obsidian_cli>`
+    );
+  }
   if (request.skill) {
     sections.push(
       `<active_skill name="${request.skill.name}" path="${request.skill.path}">\n${request.skill.body}\n</active_skill>`
