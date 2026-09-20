@@ -163,7 +163,6 @@ export class NativeAgentBackend implements ChatBackend {
       await this.ensureConnected(request);
       signal.throwIfAborted();
       if (!this.process) throw new Error("原生 Agent 连接未建立");
-      callbacks.onStatus(`${this.label} · 已连接`);
       if (this.detection.id === "codex") await this.sendCodex(request, signal);
       else await this.sendAcp(request);
     } finally {

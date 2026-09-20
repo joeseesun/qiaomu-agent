@@ -23,6 +23,14 @@ it("forwards actual selected model, effort and image to Codex App Server", async
   expect(state.calls.find((c) => c.method === "turn/start")?.params).toMatchObject({ model: "test-model", effort: "high", input: [{ type: "text" }, { type: "image", url: "data:image/png;base64,AA==" }] });
 });
 
+it("does not surface a persistent connected status after App Server starts", async () => {
+  vi.stubGlobal("window", {});
+  const status = vi.fn();
+  const backend = new NativeAgentBackend({ id: "codex", label: "Codex", command: "codex", path: "/test/codex", version: "test", available: true, callable: true });
+  await backend.send({ prompt: "hello", systemPrompt: "system", cwd: "/test", permissionMode: "plan", history: [] }, { onText() {}, onStatus: status }, new AbortController().signal);
+  expect(status).not.toHaveBeenCalledWith(expect.stringContaining("已连接"));
+});
+
 it.each([
   ["plan", { type: "readOnly" }],
   ["edit", { type: "workspaceWrite", writableRoots: ["/test"], networkAccess: false }],

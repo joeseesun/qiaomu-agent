@@ -240,6 +240,7 @@ export class ChatView extends ItemView {
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
       onHistory: (event: MouseEvent) => this.openHistory(event),
       onSkill: (event: MouseEvent) => this.openSkillMenu(event),
+      onEditMessage: () => this.plugin.backendService.resetSessions(this.backendOwner),
       onPermission: (mode: PermissionMode) => {
         if (this.running() || this.plugin.settings.permissionMode === mode) return;
         this.plugin.settings.permissionMode = mode;

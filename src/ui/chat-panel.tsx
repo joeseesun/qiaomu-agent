@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles, Shield, FolderPen, ShieldAlert } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles, Shield, FolderPen, ShieldAlert, Pencil } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate, ModelChoice } from "../types";
 import { ModelList } from "./model-list";
@@ -21,6 +21,7 @@ interface Props {
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
+  onEditMessage: () => void;
   onToggleNote: () => void; onPersist: () => Promise<void>;
   efforts: string[]; effort: string; modelLoading: boolean; onModels: () => void; onEffort: (effort: string) => void;
   models: ModelChoice[]; selectedModel: string; modelError: string; onSelectModel: (model: ModelChoice) => void;
@@ -75,9 +76,11 @@ function Activities({ activities, running }: { activities: ChatActivity[]; runni
   </details>;
 }
 
+const messageTime = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+
 export function ChatPanel(props: Props) {
   const [showModelList, setShowModelList] = useState(false);
-  const { messages, status, error, sendMessage, stop, clearError } = useChat({ chat: props.chat, experimental_throttle: 75 });
+  const { messages, status, error, sendMessage, regenerate, setMessages, stop, clearError } = useChat({ chat: props.chat, experimental_throttle: 75 });
   const [input, setInput] = useState("");
   const [stopped, setStopped] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -85,6 +88,8 @@ export function ChatPanel(props: Props) {
   const [attachmentError, setAttachmentError] = useState("");
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
   const upload = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -138,6 +143,24 @@ export function ChatPanel(props: Props) {
     // A retry is explicit, not an automatic replay of possibly side-effecting tools.
     setInput(messageText(lastUser)); setAttachments(lastUser.metadata?.attachments ?? []); clearError(); textarea.current?.focus();
   };
+  const beginEdit = (message: AgentMessage) => {
+    setEditingId(message.id); setEditText(messageText(message));
+  };
+  const submitEdit = async (message: AgentMessage) => {
+    const text = editText.trim();
+    if (!text || running || locked.current) return;
+    locked.current = true; clearError(); setStopped(false);
+    props.onEditMessage();
+    setMessages((current) => {
+      const index = current.findIndex((item) => item.id === message.id);
+      if (index < 0) return current;
+      const edited = { ...message, parts: message.parts.map((part) => part.type === "text" ? { ...part, text } : part) };
+      return [...current.slice(0, index), edited];
+    });
+    setEditingId(null);
+    try { await regenerate({ messageId: message.id }); }
+    finally { locked.current = false; await props.onPersist(); }
+  };
   const title = messages.find((m) => m.role === "user");
   return <>
     <header className="qa-header">
@@ -156,12 +179,24 @@ export function ChatPanel(props: Props) {
           const text = messageText(message);
           const active = running && index === visible.length - 1 && message.role === "assistant";
           const activities = message.parts.filter((p) => p.type === "data-activity").map((p) => p.data);
-          return <Message key={message.id} from={message.role}>
+          return <Message key={message.id} from={message.role} className={editingId === message.id ? "is-editing" : ""}>
             <MessageContent>
               <Attachments files={message.metadata?.attachments ?? []} />
               <Activities activities={activities} running={active} />
-              {text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking">正在处理…</div> : <div className="qa-thinking">没有文本回复</div>}
+              {message.role === "user" && editingId === message.id ? <form className="qa-message-editor" onSubmit={(event) => { event.preventDefault(); void submitEdit(message); }}>
+                <label className="qiaomu-agent__sr-only" htmlFor={`${inputId}-edit-${message.id}`}>编辑消息内容</label>
+                <textarea id={`${inputId}-edit-${message.id}`} value={editText} onChange={(event) => setEditText(event.currentTarget.value)} autoFocus rows={3}
+                  onKeyDown={(event) => { if (Platform.isDesktopApp && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submitEdit(message); } }} />
+                <div className="qa-message-editor-actions"><button type="button" onClick={() => setEditingId(null)}>取消</button><button type="submit" className="mod-cta" disabled={!editText.trim()}>发送</button></div>
+              </form> : text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking">正在处理…</div> : <div className="qa-thinking">没有文本回复</div>}
             </MessageContent>
+            {message.role === "user" && text && editingId !== message.id && <div className="qa-user-message-meta">
+              <time dateTime={new Date(message.metadata?.createdAt ?? Date.now()).toISOString()}>{messageTime.format(message.metadata?.createdAt ?? Date.now())}</time>
+              <MessageActions>
+                <MessageAction label="复制消息" onClick={() => void navigator.clipboard.writeText(text).then(() => new Notice("已复制")).catch(() => new Notice("复制失败，请手动选择文本"))}><Copy size={14} /></MessageAction>
+                <MessageAction label="编辑消息" disabled={running} onClick={() => beginEdit(message)}><Pencil size={14} /></MessageAction>
+              </MessageActions>
+            </div>}
             {message.role === "assistant" && text && !active && <MessageActions>
               <MessageAction label="复制回复" onClick={() => void navigator.clipboard.writeText(text).then(() => new Notice("已复制")).catch(() => new Notice("复制失败，请手动选择文本"))}><Copy size={14} /></MessageAction>
               <MessageAction label="追加到今日日记" onClick={() => props.onAppend(text, true)}><CalendarPlus size={14} /></MessageAction>

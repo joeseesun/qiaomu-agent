@@ -15,6 +15,7 @@ export class ModelManagerModal extends Modal {
 }
 
 export class QiaomuSettingTab extends PluginSettingTab {
+  private activeSection: "models" | "chat" | "tools" = "models";
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly connectionsOnly = false) {
     super(app, plugin);
   }
@@ -23,32 +24,42 @@ export class QiaomuSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("qiaomu-agent-settings");
-    containerEl.createEl("h2", { text: this.connectionsOnly ? "模型管理" : "乔木 Agent" });
+    containerEl.createEl("h2", { text: this.connectionsOnly ? "模型与连接" : "乔木 Agent" });
     containerEl.createEl("p", {
       cls: "setting-item-description",
-      text: "默认优先使用已验证可调用的本地 Agent；移动端自动回退到模型 API。",
+      text: this.connectionsOnly ? "在对话框直接切换模型；这里只管理本地 Agent 和模型 API。" : "常用设置直接可见，低频连接细节按需展开。",
     });
 
-    this.renderConnectionSection(containerEl);
-    if (this.connectionsOnly) return;
-    this.renderBehaviorSection(containerEl);
-    this.renderSkillsSection(containerEl);
-    this.renderAdvancedSection(containerEl);
+    if (this.connectionsOnly) { this.renderConnectionSection(containerEl); return; }
+    const tabs = containerEl.createDiv({ cls: "qiaomu-agent-settings__tabs" });
+    tabs.setAttribute("role", "tablist");
+    for (const section of [{ id: "models", label: "模型" }, { id: "chat", label: "对话" }, { id: "tools", label: "工具" }] as const) {
+      const button = tabs.createEl("button", { text: section.label, cls: "qiaomu-agent-settings__tab" });
+      button.type = "button"; button.setAttribute("role", "tab"); button.setAttribute("aria-selected", String(this.activeSection === section.id));
+      if (this.activeSection === section.id) button.addClass("is-active");
+      button.addEventListener("click", () => { this.activeSection = section.id; this.display(); });
+    }
+    const body = containerEl.createDiv({ cls: "qiaomu-agent-settings__body" });
+    body.setAttribute("role", "tabpanel");
+    if (this.activeSection === "models") this.renderConnectionSection(body);
+    if (this.activeSection === "chat") this.renderBehaviorSection(body);
+    if (this.activeSection === "tools") { this.renderToolsSection(body); this.renderSkillsSection(body); this.renderAdvancedSection(body); }
   }
 
   private renderConnectionSection(containerEl: HTMLElement): void {
-    containerEl.createEl("h3", { text: "模型连接" });
+    containerEl.createEl("h3", { text: "模型与连接" });
 
     new Setting(containerEl)
       .setName("默认连接")
-      .setDesc("自动模式优先选择本地 CLI，其次使用已配置的 API。")
+      .setDesc("桌面端推荐自动选择；手机使用模型 API。")
       .addDropdown((dropdown) => {
-        dropdown.addOption("auto", "自动选择").addOption("api", "模型 API");
-        if (Platform.isDesktopApp) dropdown.addOption("cli", "本地 CLI");
+        dropdown.addOption("auto", "自动（推荐）").addOption("api", "模型 API");
+        if (Platform.isDesktopApp) dropdown.addOption("cli", "本地 Agent");
         dropdown.setValue(Platform.isDesktopApp ? this.plugin.settings.backendKind : "api");
         dropdown.onChange(async (value) => {
           this.plugin.settings.backendKind = value === "cli" ? "cli" : value === "api" ? "api" : "auto";
           await this.plugin.saveSettings();
+          this.display();
         });
       });
 
@@ -81,29 +92,17 @@ export class QiaomuSettingTab extends PluginSettingTab {
       );
     detectionSetting.settingEl.addClass("qiaomu-agent-settings__detection");
 
-    const obsidianCli = this.plugin.obsidianCliService.getConnection();
-    new Setting(containerEl)
-      .setName("Obsidian CLI")
-      .setDesc(obsidianCli.detail)
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.useObsidianCli)
-          .setDisabled(obsidianCli.state !== "ready")
-          .onChange(async (value) => {
-            this.plugin.settings.useObsidianCli = value;
-            await this.plugin.saveSettings();
-          })
-      )
-      .addButton((button) =>
-        button.setButtonText("检测").onClick(async () => {
-          button.setDisabled(true).setButtonText("检测中…");
-          await this.plugin.obsidianCliService.detect();
-          this.display();
-        })
-      );
-
     }
 
+    if (this.plugin.settings.backendKind === "api" || !Platform.isDesktopApp) this.renderApiSection(containerEl);
+    else {
+      const api = containerEl.createEl("details", { cls: "qiaomu-agent-settings__disclosure" });
+      api.createEl("summary", { text: "添加模型 API" });
+      this.renderApiSection(api.createDiv({ cls: "qiaomu-agent-settings__disclosure-body" }));
+    }
+  }
+
+  private renderApiSection(containerEl: HTMLElement): void {
     new Setting(containerEl).setName("API 服务商").addDropdown((dropdown) => {
       for (const [value, provider] of Object.entries(API_PROVIDERS)) dropdown.addOption(value, provider.label);
       dropdown.setValue(this.plugin.settings.api.provider);
@@ -183,6 +182,24 @@ export class QiaomuSettingTab extends PluginSettingTab {
           } catch (error) { new Notice(error instanceof Error ? error.message : "地址无效"); }
         });
       });
+  }
+
+  private renderToolsSection(containerEl: HTMLElement): void {
+    containerEl.createEl("h3", { text: "Obsidian 与 Agent 工具" });
+    if (!Platform.isDesktopApp) {
+      containerEl.createEl("p", { cls: "setting-item-description", text: "本地 CLI、外部 Skills 和 MCP 仅在桌面端可用。" });
+      return;
+    }
+    const obsidianCli = this.plugin.obsidianCliService.getConnection();
+    new Setting(containerEl)
+      .setName("Obsidian CLI")
+      .setDesc(obsidianCli.detail)
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.useObsidianCli).setDisabled(obsidianCli.state !== "ready").onChange(async (value) => {
+        this.plugin.settings.useObsidianCli = value; await this.plugin.saveSettings();
+      }))
+      .addButton((button) => button.setButtonText("重新检测").onClick(async () => {
+        button.setDisabled(true).setButtonText("检测中…"); await this.plugin.obsidianCliService.detect(); this.display();
+      }));
   }
 
   private renderBehaviorSection(containerEl: HTMLElement): void {

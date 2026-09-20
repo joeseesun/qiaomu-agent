@@ -15,6 +15,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - Desktop-native transports are preferred: Codex App Server and ACP where supported. Model APIs remain the mobile fallback.
 - Markdown is rendered through Obsidian's renderer so GFM-like tables, code, internal links, and Mermaid follow the host application.
 - Tool activity is grouped into one expandable execution summary per response. Failures initially expand; user expansion choices survive streaming updates.
+- User messages show a quiet timestamp with copy and edit actions. Editing happens in place; resubmitting truncates the later branch, resets the Agent session and regenerates from the edited message.
 - File changes require an explicit access choice. A dedicated shield control offers read-only, current-vault write, and desktop-only full filesystem access; no `仅建议` label is permanently shown in the composer.
 
 ## Visual language
@@ -64,6 +65,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 ### Reply actions and persistence
 
 - Reply action buttons are Lucide icons only: Copy, CalendarPlus, FilePlus2. Accessible names and targeted tooltips are retained per the user's explicit icon requirement.
+- Assistant reply actions stay hidden until pointer hover or keyboard focus on desktop; touch devices keep them visible. User-message time, copy and edit remain visible below the bubble.
 - File append shows an exact path and Markdown preview before committing. It uses Vault.process and offers conservative undo, refusing to overwrite edits in the affected prefix. Manual user writes are distinct from AI tool permission mode.
 - Daily target resolution and creation use official Obsidian CLI so host folder/date/template settings remain authoritative. Mobile users can append to an explicitly selected Markdown file; daily CLI actions require desktop.
 - New conversations archive the previous transcript instead of discarding it. Persistence retains attachment snapshots (local plugin data); they are not encrypted separately from Obsidian storage.
@@ -75,6 +77,12 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - Dials unchanged: restrained variation 5, minimal motion 3, compact density 6. No new decorative assets.
 - Notion reference DNA: flat reading surface, 1px neutral boundaries, 8px spacing; translate through existing Obsidian theme variables rather than copying brand colors/fonts.
 - Deliberate details: anchored menu, checked current model, theme-aware diagrams, collapsible source, visible focus, Chinese system fonts, bounded mobile controls.
+
+### Settings
+
+- Follow Qiaomu Reader's task-based progressive disclosure: top-level tabs are 模型、对话、工具; the default 模型 page puts connection choice first and folds API fallback details until requested.
+- Selecting 模型 API reveals provider, key and model immediately. Protocol, Base URL, MCP and filesystem paths remain under advanced disclosures.
+- Connection success is not a persistent chat message; only running, interruption and actionable error states may occupy the composer status area.
 
 ## Responsive behavior
 

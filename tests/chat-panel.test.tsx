@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Chat } from "@ai-sdk/react";
 import { ChatPanel } from "../src/ui/chat-panel";
-import { AgentTransport, type AgentMessage } from "../src/services/chat-transport";
+import { AgentTransport, messageText, type AgentMessage } from "../src/services/chat-transport";
 import { Platform, type App, type Component } from "obsidian";
 import type { ComponentProps, ReactNode } from "react";
 vi.mock("obsidian", () => ({
@@ -19,12 +19,12 @@ vi.mock("../src/components/ai-elements/conversation", () => ({
 afterEach(() => { cleanup(); Platform.isDesktopApp = true; });
 function setup() {
   const send = vi.fn(async (_request, callbacks) => { callbacks.onText("测试回复"); });
-  const chat = new Chat<AgentMessage>({ transport: new AgentTransport(async (messages) => ({ backend: { id: "mock", label: "Mock", send }, request: { prompt: "test", systemPrompt: "", cwd: null, permissionMode: "plan", history: [], attachments: messages.at(-1)?.metadata?.attachments } })) });
+  const chat = new Chat<AgentMessage>({ transport: new AgentTransport(async (messages) => ({ backend: { id: "mock", label: "Mock", send }, request: { prompt: messageText(messages.at(-1)!), systemPrompt: "", cwd: null, permissionMode: "plan", history: [], attachments: messages.at(-1)?.metadata?.attachments } })) });
   const props: ComponentProps<typeof ChatPanel> = {
     chat, app: {} as App, parent: { addChild() {}, removeChild() {} } as unknown as Component,
     backendLabel: "Mock", skillLabel: "技能", permission: "plan", fileAccessAvailable: true, fullAccessAvailable: true, note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
     models: [{ id: "mock", name: "Mock model", efforts: [] }], selectedModel: "mock", modelError: "", onSelectModel: vi.fn(), onManualModel: vi.fn(), onManageModels: vi.fn(),
-    onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {},
+    onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {},
     efforts: ["low", "high"], effort: "", modelLoading: false, onModels: vi.fn(), onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
   };
   const result = render(<ChatPanel {...props} />);
@@ -47,7 +47,7 @@ it("slash Enter inserts a template, Escape preserves draft, and IME Enter does n
   fireEvent.compositionStart(input); fireEvent.keyDown(input, { key: "Enter", isComposing: true }); expect(send).not.toHaveBeenCalled(); fireEvent.compositionEnd(input);
 });
 it("pasted images become removable attachments and reach the request", async () => {
-  const { input, container, send, chat } = setup();
+  const { input, container, send, chat, props } = setup();
   const image = new File([new Uint8Array([1, 2, 3])], "test.png", { type: "image/png" });
   fireEvent.paste(input, { clipboardData: { files: [image], getData: () => "" } });
   await screen.findByRole("button", { name: "移除 test.png" });
@@ -78,6 +78,24 @@ it("model/effort actions and icon-only reply actions invoke the right callbacks"
   expect(screen.queryByText("🧠")).toBeNull();
   fireEvent.change(input, { target: { value: "hello" } }); fireEvent.submit(container.querySelector("form")!);
   fireEvent.click(await screen.findByRole("button", { name: "追加到指定文件" })); expect(props.onAppend).toHaveBeenCalledWith("测试回复", false);
+});
+
+it("shows user time and can edit a message before regenerating its reply", async () => {
+  const { input, container, send, chat, props } = setup();
+  fireEvent.change(input, { target: { value: "原始问题" } }); fireEvent.submit(container.querySelector("form")!);
+  await waitFor(() => expect(chat.status).toBe("ready"));
+  expect(container.querySelector(".qa-user-message-meta time")?.textContent).toMatch(/^\d{2}:\d{2}$/);
+  expect(screen.getByRole("button", { name: "复制消息" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "编辑消息" }));
+  const editor = screen.getByLabelText("编辑消息内容");
+  fireEvent.change(editor, { target: { value: "修改后的问题" } });
+  fireEvent.submit(editor.closest("form")!);
+  expect((screen.getByRole("button", { name: "编辑消息" }) as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(chat.status).toBe("ready"));
+  expect(send.mock.calls[1]![0].prompt).toBe("修改后的问题");
+  expect(props.onEditMessage).toHaveBeenCalledOnce();
+  expect(screen.queryByLabelText("编辑消息内容")).toBeNull();
 });
 
 it("composer popovers close with Escape, outside click and focus departure without losing draft", () => {
