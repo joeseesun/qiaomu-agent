@@ -142,6 +142,7 @@ export class BackendService {
   }
 
   private hasApiKey(): boolean {
-    return Boolean(this.app.secretStorage.getSecret(this.getSettings().api.secretId));
+    return Boolean(this.app.secretStorage.getSecret(this.getSettings().api.secretId)) || permitsEmptyKey(this.getSettings().api);
   }
 }
+import { permitsEmptyKey } from "./api-providers";

@@ -1,19 +1,8 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type QiaomuAgentPlugin from "./main";
 import type { ApiConnection } from "./types";
-
-const PROVIDERS: Record<
-  ApiConnection["provider"],
-  { label: string; baseUrl: string; model: string }
-> = {
-  openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-5-mini" },
-  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-5-mini" },
-  anthropic: { label: "Anthropic", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-4-5" },
-  google: { label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash" },
-  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-  xai: { label: "xAI", baseUrl: "https://api.x.ai/v1", model: "grok-4-fast" },
-  custom: { label: "自定义兼容接口", baseUrl: "", model: "" },
-};
+import { API_PROVIDERS, apiProtocol, selectApiProvider, validateApiUrl } from "./services/api-providers";
+import { ApiBackend } from "./services/api-backend";
 
 export class QiaomuSettingTab extends PluginSettingTab {
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin) {
@@ -105,20 +94,18 @@ export class QiaomuSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl).setName("API 服务商").addDropdown((dropdown) => {
-      for (const [value, provider] of Object.entries(PROVIDERS)) dropdown.addOption(value, provider.label);
+      for (const [value, provider] of Object.entries(API_PROVIDERS)) dropdown.addOption(value, provider.label);
       dropdown.setValue(this.plugin.settings.api.provider);
       dropdown.onChange(async (value) => {
         const provider = value as ApiConnection["provider"];
-        const preset = PROVIDERS[provider];
-        this.plugin.settings.api.provider = provider;
-        if (provider !== "custom") {
-          this.plugin.settings.api.baseUrl = preset.baseUrl;
-          this.plugin.settings.api.model = preset.model;
-        }
+        selectApiProvider(this.plugin.settings, provider);
         await this.plugin.saveSettings();
         this.display();
       });
     });
+
+    const website = API_PROVIDERS[this.plugin.settings.api.provider]?.website;
+    if (website) containerEl.createEl("a", { text: "获取 API Key / 服务商控制台 ↗", href: website }).setAttribute("rel", "noopener noreferrer");
 
     new Setting(containerEl)
       .setName("API Key")
@@ -137,12 +124,54 @@ export class QiaomuSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(containerEl).setName("Base URL").addText((text) =>
-      text.setValue(this.plugin.settings.api.baseUrl).onChange(async (value) => {
-        this.plugin.settings.api.baseUrl = value.trim();
+    const modelResults = containerEl.createDiv();
+    new Setting(containerEl).setName("可用模型").setDesc("只获取模型目录，不发送笔记或生成付费回复；也可直接填写模型 ID。")
+      .addButton((button) => button.setButtonText("获取模型").onClick(async () => {
+        const connection = this.plugin.settings.api;
+        button.setDisabled(true);
+        try {
+          const backend = new ApiBackend(connection, this.app.secretStorage.getSecret(connection.secretId) ?? "");
+          const models = await backend.listModels();
+          if (this.plugin.settings.api !== connection || !modelResults.isConnected) return;
+          modelResults.empty();
+          if (!models.length) { new Notice("服务未返回模型，请手动填写模型 ID"); return; }
+          new Setting(modelResults).setName("选择模型").addDropdown((dropdown) => {
+            dropdown.addOption("", "请选择");
+            for (const model of models) dropdown.addOption(model.id, model.name);
+            dropdown.setValue(connection.model);
+            dropdown.onChange(async (model) => {
+              if (!model || this.plugin.settings.api !== connection) return;
+              connection.model = model;
+              await this.plugin.saveSettings();
+              this.display();
+            });
+          });
+        } catch { new Notice("模型目录获取失败，请检查地址与密钥；仍可手动填写模型 ID"); }
+        finally { button.setDisabled(false); }
+      }));
+
+    const advanced = containerEl.createEl("details");
+    advanced.createEl("summary", { text: "高级连接设置" });
+    new Setting(advanced).setName("协议").addDropdown((dropdown) => dropdown
+      .addOptions({ "openai-chat": "OpenAI Chat Completions", "openai-responses": "OpenAI Responses", anthropic: "Anthropic Messages", google: "Google Generative AI" })
+      .setValue(apiProtocol(this.plugin.settings.api)).onChange(async (value) => {
+        this.plugin.settings.api.protocol = value as ApiConnection["protocol"];
         await this.plugin.saveSettings();
-      })
-    );
+      }));
+    new Setting(advanced).setName("Base URL").setDesc("修改地址需重新填写密钥，防止发送到错误的服务。手机上的 localhost 指手机本身。")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.api.baseUrl);
+        text.inputEl.addEventListener("change", async () => {
+          try {
+            const next = validateApiUrl(text.getValue());
+            if (next === this.plugin.settings.api.baseUrl) return;
+            this.plugin.settings.api.baseUrl = next;
+            this.plugin.settings.api.secretId = `qiaomu-agent-${crypto.randomUUID()}`;
+            await this.plugin.saveSettings();
+            this.display();
+          } catch (error) { new Notice(error instanceof Error ? error.message : "地址无效"); }
+        });
+      });
   }
 
   private renderBehaviorSection(containerEl: HTMLElement): void {

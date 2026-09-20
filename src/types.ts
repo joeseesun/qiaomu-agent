@@ -3,7 +3,8 @@ export type PermissionMode = "plan" | "edit";
 export type BackendKind = "auto" | "cli" | "api";
 
 export interface ApiConnection {
-  provider: "openai" | "openrouter" | "anthropic" | "google" | "deepseek" | "xai" | "custom";
+  provider: string;
+  protocol?: "openai-chat" | "openai-responses" | "anthropic" | "google";
   baseUrl: string;
   model: string;
   secretId: string;
@@ -15,6 +16,7 @@ export interface QiaomuSettings {
   preferredCli: string;
   permissionMode: PermissionMode;
   api: ApiConnection;
+  apiProfiles?: Record<string, ApiConnection>;
   systemPrompt: string;
   quickPrompts: string[];
   autoAttachActiveNote: boolean;

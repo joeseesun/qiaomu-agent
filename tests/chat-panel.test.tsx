@@ -65,7 +65,8 @@ it("unsupported file upload is explicit and does not erase text", async () => {
 it("model/effort actions and icon-only reply actions invoke the right callbacks", async () => {
   const { input, container, props } = setup();
   fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
-  expect(container.querySelector(".lucide-brain")).toBeTruthy();
+  expect(container.querySelector(".lucide-brain")).toBeNull();
+  expect(container.querySelector(".qa-effort-label")).toBeTruthy();
   fireEvent.change(screen.getByRole("slider", { name: /推理强度/ }), { target: { value: "2" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
   fireEvent.click(screen.getByRole("button", { name: "Mock" })); expect(props.onModels).toHaveBeenCalledOnce();
   expect(props.onModels).toHaveBeenCalledWith({ x: expect.any(Number), y: expect.any(Number) });

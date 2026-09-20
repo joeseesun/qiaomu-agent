@@ -256,3 +256,4 @@
 .qiaomu-agent--react .qa-mermaid iframe { display: block; width: 100%; height: 160px; border: 0; background: transparent; }
 .qiaomu-agent--react .qa-mermaid summary { color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .qiaomu-agent--react .qa-mermaid pre { max-height: 300px; overflow: auto; white-space: pre-wrap; }
+.qiaomu-agent--react .qa-effort-label { color: var(--text-muted); font-size: var(--font-ui-small); }

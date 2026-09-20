@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Brain, Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
@@ -208,11 +208,11 @@ export function ChatPanel(props: Props) {
           </ComposerPopover>
         </PromptInputTools>
         <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running || props.modelLoading}
-          trigger={<><span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <><Brain size={14} aria-hidden="true" /><span>{effortLabel(props.effort)}</span></>}<ChevronDown size={12} /></>}>
+          trigger={<><span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
           {(close) => <>
             <button className="qa-model" type="button" aria-haspopup="menu" onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); close(); props.onModels({ x: rect.left, y: rect.top }); }}><span>{props.backendLabel}</span><ChevronRight size={14} /></button>
             {!!props.efforts.length && <div className="qa-reasoning">
-              <label htmlFor={`${inputId}-effort`}><Brain size={16} aria-hidden="true" /><span>推理强度</span><span className="qa-reasoning-value">{effortLabel(props.effort)}</span></label>
+              <label htmlFor={`${inputId}-effort`}><span>推理强度</span><span className="qa-reasoning-value">{effortLabel(props.effort)}</span></label>
               <input id={`${inputId}-effort`} type="range" min={0} max={props.efforts.length} step={1}
                 value={Math.max(0, props.efforts.indexOf(props.effort) + 1)} aria-valuetext={effortLabel(props.effort)}
                 onChange={(e) => props.onEffort(props.efforts[Number(e.target.value) - 1] ?? "")} />

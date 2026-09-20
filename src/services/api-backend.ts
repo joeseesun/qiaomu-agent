@@ -4,6 +4,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { ApiConnection, ChatBackend, ChatCallbacks, ChatRequest, ModelChoice } from "../types";
 import { attachmentContext } from "./attachments";
+import { apiProtocol, permitsEmptyKey, validateApiUrl } from "./api-providers";
 
 export function buildApiMessages(request: ChatRequest): ModelMessage[] {
   const sections: string[] = [];
@@ -34,15 +35,18 @@ export class ApiBackend implements ChatBackend {
   readonly id = "api";
   readonly label: string;
   constructor(private readonly connection: ApiConnection, private readonly apiKey: string) {
+    this.connection = { ...connection };
     this.label = connection.model || "Model API";
   }
   async listModels(): Promise<ModelChoice[]> {
-    const base = this.connection.baseUrl.replace(/\/+$/, "");
+    if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("请先配置 API Key");
+    const base = validateApiUrl(this.connection.baseUrl);
     const provider = this.connection.provider;
-    const headers: Record<string, string> = provider === "anthropic"
+    const protocol = apiProtocol(this.connection);
+    const headers: Record<string, string> = protocol === "anthropic"
       ? { "x-api-key": this.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }
-      : provider === "google" ? { "x-goog-api-key": this.apiKey } : { Authorization: `Bearer ${this.apiKey}` };
-    const response = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(15_000) });
+      : protocol === "google" ? { "x-goog-api-key": this.apiKey } : this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+    const response = await fetch(`${base}/models`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`无法获取模型列表（${response.status}），可继续使用已配置模型`);
     const body = await response.json() as { data?: { id: string; display_name?: string }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
     const models = body.data?.map((m) => ({ id: m.id, name: m.display_name || m.id }))
@@ -50,16 +54,17 @@ export class ApiBackend implements ChatBackend {
     return models.map((m) => ({ ...m, efforts: apiEfforts(provider, m.id), isDefault: m.id === this.connection.model }));
   }
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
-    if (!this.apiKey) throw new Error("尚未配置 API Key，请打开连接设置");
+    if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("尚未配置 API Key，请打开连接设置");
     if (!(request.model || this.connection.model).trim()) throw new Error("尚未选择模型");
     signal.throwIfAborted();
-    const options = { apiKey: this.apiKey, baseURL: this.connection.baseUrl.replace(/\/+$/, "") };
+    const protocol = apiProtocol(this.connection);
+    const options = { apiKey: this.apiKey || "local", baseURL: validateApiUrl(this.connection.baseUrl), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, redirect: "error" }) };
     const modelId = request.model || this.connection.model;
-    const model = this.connection.provider === "anthropic"
+    const model = protocol === "anthropic"
       ? createAnthropic({ ...options, headers: { "anthropic-dangerous-direct-browser-access": "true" } })(modelId)
-      : this.connection.provider === "google"
+      : protocol === "google"
         ? createGoogleGenerativeAI(options)(modelId)
-        : createOpenAI(options).chat(modelId);
+        : protocol === "openai-responses" ? createOpenAI(options).responses(modelId) : createOpenAI(options).chat(modelId);
     const effort = request.reasoningEffort;
     if (effort && !apiEfforts(this.connection.provider, modelId).includes(effort)) throw new Error("此模型未配置所选推理强度，请改为默认");
     callbacks.onStatus(`正在连接 ${this.label}…`);
