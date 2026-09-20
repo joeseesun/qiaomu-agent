@@ -2,17 +2,19 @@
 
 ## Direction
 
-Selected direction: **A — Obsidian-native calm workspace**.
+Selected direction: **A — Codex 静流**, confirmed 2026-09-20. Dials: variance 5, motion 3, density 6.
+
+Build brief: make conversation the primary surface in a narrow Obsidian sidebar. Translate Codex's quiet transcript and unified composer, and ZCode's inspectable execution process, into host-native controls. No promotional assets, duplicate identities, permanent protocol labels, or simulated review/undo controls. Success means readable Chinese text, compact inspectable tools, stable streaming scroll, and one coherent input surface. Research sources are recorded in `docs/research/ai-sidebar-interface-patterns-2026-09-20.md`.
 
 The chat sidebar should feel like a focused part of Obsidian, not an embedded web dashboard. The connection experience may use a larger modal because it is an occasional setup and switching task; routine chat stays compact.
 
 ## Functional contract
 
-- The sidebar always shows the active Agent, connection state, conversation, current-note context, Skill selector, permission mode, composer, and new-conversation action.
+- The sidebar shows a conversation title, conversation, attached-note context, Skill selector, permission mode, Agent selector, composer, and new-conversation action. Status appears only when actionable or running.
 - Clicking the active Agent opens the connection center. Provider cards expose availability, native transport, and version without permanently occupying sidebar space.
 - Desktop-native transports are preferred: Codex App Server and ACP where supported. Model APIs remain the mobile fallback.
 - Markdown is rendered through Obsidian's renderer so GFM-like tables, code, internal links, and Mermaid follow the host application.
-- Tool activity is progressive disclosure: compact while successful, automatically expanded while running or failed.
+- Tool activity is grouped into one expandable execution summary per response. Failures initially expand; user expansion choices survive streaming updates.
 - File changes require the explicit `允许修改` mode. `仅建议` remains the default-safe posture.
 
 ## Visual language
@@ -28,8 +30,8 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 
 ### Sidebar header
 
-- Active connection is a text button with a quiet status dot and chevron.
-- Status copy is short: `准备就绪`, `正在连接`, `已连接`, `连接异常`.
+- The first prompt supplies the conversation title; long titles truncate.
+- No permanent provider, protocol, or unverified green connection indicator.
 - The only persistent secondary action is new conversation.
 
 ### Connection center
@@ -47,7 +49,9 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 
 ### Composer
 
-- Context, Skill, and permission controls sit above the text field.
+- A single outlined composer contains context chips, text input, and a bottom toolbar for Skill, permission, Agent and send/stop.
+- Agent selection opens the existing connection center. Context only appears when an actual note is attached.
+- Reading older content disables automatic scroll-follow; returning near the bottom resumes it.
 - Enter sends; Shift+Enter inserts a line break.
 - The permission selector uses plain-language Chinese labels.
 

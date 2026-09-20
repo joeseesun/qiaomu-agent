@@ -20,6 +20,12 @@ export class ChatView extends ItemView {
   private selectedBackend = "auto";
   private abortController: AbortController | null = null;
   private renderComponents = new Map<string, Component>();
+  private titleEl!: HTMLElement;
+  private newButton!: HTMLButtonElement;
+  private modeSelect!: HTMLSelectElement;
+  private followOutput = true;
+  private activityExpanded = new Map<string, boolean>();
+  private opening: Promise<void> | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: QiaomuAgentPlugin) {
     super(leaf);
@@ -38,6 +44,17 @@ export class ChatView extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
+    return this.ensureReady();
+  }
+
+  async ensureReady(): Promise<void> {
+    if (this.opening) return this.opening;
+    if (this.contentEl.querySelector(".qiaomu-agent__composer")) return;
+    this.opening = this.buildView();
+    try { await this.opening; } finally { this.opening = null; }
+  }
+
+  private async buildView(): Promise<void> {
     this.messages = [...this.plugin.settings.lastConversation];
     this.selectedBackend = this.plugin.settings.backendKind === "cli" && this.plugin.settings.preferredCli
       ? `cli:${this.plugin.settings.preferredCli}`
@@ -47,21 +64,17 @@ export class ChatView extends ItemView {
     root.addClass("qiaomu-agent");
 
     const header = root.createDiv({ cls: "qiaomu-agent__header" });
-    const session = header.createDiv({ cls: "qiaomu-agent__session" });
-    session.createSpan({ cls: "qiaomu-agent__connection-dot" });
-    this.backendButton = session.createEl("button", { cls: "qiaomu-agent__backend" });
-    this.backendButton.addEventListener("click", () => {
-      new AgentConnectionModal(this.app, this.plugin, this.selectedBackend, (value) => {
-        void this.selectBackend(value);
-      }).open();
-    });
-    this.statusEl = session.createSpan({ cls: "qiaomu-agent__status", text: "准备就绪" });
+    this.titleEl = header.createDiv({ cls: "qiaomu-agent__title" });
     const newButton = header.createEl("button", { cls: "qiaomu-agent__new" });
+    this.newButton = newButton;
     setIcon(newButton, "square-pen");
     newButton.createSpan({ cls: "qiaomu-agent__sr-only", text: "新对话" });
     newButton.addEventListener("click", () => this.newConversation());
 
     this.messagesEl = root.createDiv({ cls: "qiaomu-agent__messages" });
+    this.messagesEl.addEventListener("scroll", () => {
+      this.followOutput = this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight < 64;
+    });
     this.emptyEl = this.messagesEl.createDiv({ cls: "qiaomu-agent__empty" });
     this.renderEmptyState();
     for (const message of this.messages) await this.renderMessage(message);
@@ -83,11 +96,12 @@ export class ChatView extends ItemView {
   }
 
   newConversation(): void {
-    if (this.abortController) this.abortController.abort();
+    if (this.abortController) return;
     this.messages = [];
     this.plugin.backendService.resetSessions();
     this.plugin.settings.lastConversation = [];
     this.releaseRenderers();
+    this.activityExpanded.clear();
     this.messagesEl.querySelectorAll(".qiaomu-agent__message").forEach((element) => element.remove());
     this.updateEmptyState();
     this.setStatus("准备就绪");
@@ -105,7 +119,7 @@ export class ChatView extends ItemView {
     this.selectedBackend = values.includes(fallback) ? fallback : values.includes(current) ? current : "auto";
     const selected = options.find((option) => option.value === this.selectedBackend);
     this.backendButton.empty();
-    this.backendButton.createSpan({ text: selected?.label || "连接 Agent" });
+    this.backendButton.createSpan({ text: selected?.label.replace(/\s*·.*$/, "") || "连接 Agent" });
     const chevron = this.backendButton.createSpan({ cls: "qiaomu-agent__backend-chevron" });
     setIcon(chevron, "chevron-down");
     this.updateContext();
@@ -125,13 +139,19 @@ export class ChatView extends ItemView {
 
   private buildComposer(root: HTMLElement): void {
     const composer = root.createDiv({ cls: "qiaomu-agent__composer" });
-    const contextRow = composer.createDiv({ cls: "qiaomu-agent__context-row" });
+    this.statusEl = composer.createDiv({ cls: "qiaomu-agent__status", attr: { role: "status", "aria-live": "polite" } });
+    const box = composer.createDiv({ cls: "qiaomu-agent__composer-box" });
+    const contextRow = box.createDiv({ cls: "qiaomu-agent__context-row" });
     this.contextEl = contextRow.createDiv({ cls: "qiaomu-agent__context" });
-
-    this.skillButton = contextRow.createEl("button", { cls: "qiaomu-agent__chip", text: "技能" });
+    const inputRow = box.createDiv({ cls: "qiaomu-agent__input-row" });
+    const toolbar = box.createDiv({ cls: "qiaomu-agent__toolbar" });
+    this.skillButton = toolbar.createEl("button", { cls: "qiaomu-agent__chip", text: "技能" });
     this.skillButton.addEventListener("click", (event) => this.openSkillMenu(event));
 
-    const mode = contextRow.createEl("select", { cls: "qiaomu-agent__mode" });
+    const modeLabel = toolbar.createEl("label", { cls: "qiaomu-agent__mode-label" });
+    modeLabel.createSpan({ cls: "qiaomu-agent__sr-only", text: "修改权限" });
+    const mode = modeLabel.createEl("select", { cls: "qiaomu-agent__mode" });
+    this.modeSelect = mode;
     mode.createEl("option", { value: "plan", text: "仅建议" });
     mode.createEl("option", { value: "edit", text: "允许修改" });
     mode.value = this.plugin.settings.permissionMode;
@@ -140,10 +160,11 @@ export class ChatView extends ItemView {
       void this.plugin.saveSettings();
     });
 
-    const inputRow = composer.createDiv({ cls: "qiaomu-agent__input-row" });
-    this.textarea = inputRow.createEl("textarea", {
+    const inputLabel = inputRow.createEl("label", { cls: "qiaomu-agent__input-label" });
+    inputLabel.createSpan({ cls: "qiaomu-agent__sr-only", text: "给 Agent 的消息" });
+    this.textarea = inputLabel.createEl("textarea", {
       cls: "qiaomu-agent__input",
-      attr: { placeholder: "询问、整理或修改你的知识库…", rows: "1" },
+      attr: { placeholder: "询问或修改你的笔记…", rows: "2" },
     });
     this.textarea.addEventListener("input", () => this.resizeComposer());
     this.textarea.addEventListener("keydown", (event) => {
@@ -153,7 +174,13 @@ export class ChatView extends ItemView {
       }
     });
 
-    this.sendButton = inputRow.createEl("button", { cls: "qiaomu-agent__send" });
+    this.backendButton = toolbar.createEl("button", { cls: "qiaomu-agent__backend" });
+    this.backendButton.addEventListener("click", () => {
+      new AgentConnectionModal(this.app, this.plugin, this.selectedBackend, (value) => {
+        void this.selectBackend(value);
+      }).open();
+    });
+    this.sendButton = toolbar.createEl("button", { cls: "qiaomu-agent__send" });
     setIcon(this.sendButton, "arrow-up");
     this.sendButton.createSpan({ cls: "qiaomu-agent__sr-only", text: "发送" });
     this.sendButton.addEventListener("click", () => {
@@ -209,23 +236,25 @@ export class ChatView extends ItemView {
       backend: backend.label,
     };
     this.messages.push(userMessage, assistantMessage);
+    this.abortController = new AbortController();
+    this.followOutput = true;
+    this.setRunning(true);
     this.textarea.value = "";
     this.resizeComposer();
     this.updateEmptyState();
-    await this.renderMessage(userMessage);
-    const assistantEl = await this.renderMessage(assistantMessage);
-    this.setRunning(true);
-
+    let assistantEl: HTMLElement | undefined;
+    let renderTimer: number | null = null;
     try {
+      await this.renderMessage(userMessage);
+      assistantEl = await this.renderMessage(assistantMessage);
       const activeFile = this.plugin.settings.autoAttachActiveNote ? this.plugin.getActiveMarkdownFile() : null;
       const activeFileContent = activeFile ? await this.app.vault.cachedRead(activeFile) : undefined;
-      this.abortController = new AbortController();
-      let renderTimer: number | null = null;
+      this.abortController.signal.throwIfAborted();
       const scheduleRender = (): void => {
         if (renderTimer !== null) return;
         renderTimer = window.setTimeout(() => {
           renderTimer = null;
-          void this.renderMessageContent(assistantMessage, assistantEl);
+          if (assistantEl?.isConnected) void this.renderMessageContent(assistantMessage, assistantEl);
         }, 90);
       };
       await backend.send(
@@ -259,16 +288,17 @@ export class ChatView extends ItemView {
       );
       if (renderTimer !== null) window.clearTimeout(renderTimer);
       if (!assistantMessage.content) assistantMessage.content = "已完成，但模型没有返回可显示的文本。";
-      await this.renderMessageContent(assistantMessage, assistantEl);
+      if (assistantEl?.isConnected) await this.renderMessageContent(assistantMessage, assistantEl);
       this.setStatus("已连接");
     } catch (error) {
       const aborted = this.abortController?.signal.aborted;
       assistantMessage.content = aborted
-        ? `${assistantMessage.content}\n\n_已停止_`.trim()
-        : `运行失败：${error instanceof Error ? error.message : String(error)}`;
-      await this.renderMessageContent(assistantMessage, assistantEl);
+        ? `${assistantMessage.content}\n\n已停止。`.trim()
+        : `${assistantMessage.content}\n\n运行失败：${error instanceof Error ? error.message : String(error)}`.trim();
+      if (assistantEl?.isConnected) await this.renderMessageContent(assistantMessage, assistantEl);
       this.setStatus(aborted ? "已停止" : "连接异常");
     } finally {
+      if (renderTimer !== null) window.clearTimeout(renderTimer);
       this.abortController = null;
       this.setRunning(false);
       this.plugin.settings.lastConversation = this.messages.slice(-80);
@@ -280,8 +310,6 @@ export class ChatView extends ItemView {
     const article = this.messagesEl.createEl("article", {
       cls: `qiaomu-agent__message qiaomu-agent__message--${message.role}`,
     });
-    const meta = article.createDiv({ cls: "qiaomu-agent__message-meta" });
-    meta.createSpan({ text: message.role === "user" ? "你" : message.backend || "乔木" });
     const content = article.createDiv({ cls: "qiaomu-agent__message-content" });
     await this.renderMessageContent(message, content);
     this.scrollToBottom();
@@ -295,7 +323,7 @@ export class ChatView extends ItemView {
       this.renderComponents.delete(message.id);
     }
     element.empty();
-    if (message.activities?.length) this.renderActivities(message.activities, element);
+    if (message.activities?.length) this.renderActivities(message.id, message.activities, element);
     if (!message.content) {
       element.createDiv({ cls: "qiaomu-agent__thinking", text: "正在思考…" });
       return;
@@ -309,10 +337,22 @@ export class ChatView extends ItemView {
     this.scrollToBottom();
   }
 
-  private renderActivities(activities: ChatActivity[], element: HTMLElement): void {
+  private renderActivities(messageId: string, activities: ChatActivity[], element: HTMLElement): void {
     const visible = activities.filter((item) => item.label !== "userMessage");
     if (visible.length === 0) return;
-    const group = element.createDiv({ cls: "qiaomu-agent__activities" });
+    const group = element.createEl("details", { cls: "qiaomu-agent__activities" });
+    const failed = visible.filter((item) => item.status === "failed").length;
+    const running = visible.find((item) => item.status === "running");
+    group.open = this.activityExpanded.get(messageId) ?? failed > 0;
+    group.addEventListener("toggle", () => {
+      if (group.isConnected) this.activityExpanded.set(messageId, group.open);
+    });
+    const heading = group.createEl("summary", { cls: "qiaomu-agent__activity-heading" });
+    const indicator = heading.createSpan();
+    setIcon(indicator, running ? "loader-circle" : failed ? "circle-alert" : "check");
+    heading.createSpan({ text: running ? running.label : failed ? `${failed} 个步骤失败 · 查看过程` : `${visible.length} 个执行步骤` });
+    const chevron = heading.createSpan({ cls: "qiaomu-agent__activity-chevron" });
+    setIcon(chevron, "chevron-right");
     for (const activity of visible) {
       const details = group.createEl("details", { cls: `qiaomu-agent__activity is-${activity.status}` });
       if (activity.status === "running" || activity.status === "failed") details.open = true;
@@ -350,13 +390,18 @@ export class ChatView extends ItemView {
   private updateContext(): void {
     if (!this.contextEl) return;
     const file = this.plugin.getActiveMarkdownFile();
-    this.contextEl.setText(
-      this.plugin.settings.autoAttachActiveNote && file ? file.basename : "无当前笔记"
-    );
+    this.contextEl.empty();
+    const attached = this.plugin.settings.autoAttachActiveNote && file;
+    this.contextEl.parentElement?.toggle(!!attached);
+    if (attached) {
+      setIcon(this.contextEl.createSpan(), "file-text");
+      this.contextEl.createSpan({ text: file.basename });
+    }
   }
 
   private updateEmptyState(): void {
     this.emptyEl.toggle(this.messages.length === 0);
+    this.titleEl.setText(this.messages.find((message) => message.role === "user")?.content.split("\n")[0]?.slice(0, 60) || "新对话");
   }
 
   private setRunning(running: boolean): void {
@@ -364,10 +409,13 @@ export class ChatView extends ItemView {
     setIcon(this.sendButton, running ? "square" : "arrow-up");
     this.sendButton.createSpan({ cls: "qiaomu-agent__sr-only", text: running ? "停止" : "发送" });
     this.backendButton.disabled = running;
+    this.newButton.disabled = running;
+    this.modeSelect.disabled = running;
+    this.skillButton.disabled = running;
   }
 
   private setStatus(status: string): void {
-    this.statusEl.setText(status);
+    this.statusEl.setText(["准备就绪", "已连接"].includes(status) ? "" : status);
   }
 
   private resizeComposer(): void {
@@ -376,7 +424,10 @@ export class ChatView extends ItemView {
   }
 
   private scrollToBottom(): void {
-    window.requestAnimationFrame(() => this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight }));
+    if (!this.followOutput) return;
+    window.requestAnimationFrame(() => {
+      if (this.followOutput) this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight });
+    });
   }
 
   private releaseRenderers(): void {

@@ -47,8 +47,14 @@ export default class QiaomuAgentPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() => {
       this.rememberActiveMarkdownFile();
+      this.eachView((view) => void view.ensureReady());
       void this.refreshIntegrations();
     });
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => {
+        this.eachView((view) => void view.ensureReady());
+      })
+    );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.rememberActiveMarkdownFile();
@@ -96,7 +102,10 @@ export default class QiaomuAgentPlugin extends Plugin {
     }
     await this.app.workspace.revealLeaf(leaf);
     const view = leaf.view;
-    if (view instanceof ChatView && prefill) view.setComposer(prefill);
+    if (view instanceof ChatView) {
+      await view.ensureReady();
+      if (prefill) view.setComposer(prefill);
+    }
   }
 
   getActiveMarkdownFile(): TFile | null {
