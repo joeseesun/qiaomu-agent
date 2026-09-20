@@ -11,6 +11,7 @@ vi.mock("obsidian", () => ({
   Platform: { isDesktopApp: true },
   MarkdownRenderer: { render: async (_: unknown, text: string, target: HTMLElement) => { target.textContent = text; } },
 }));
+vi.mock("mermaid/dist/mermaid.min.js", () => ({ default: "" }));
 vi.mock("../src/components/ai-elements/conversation", () => ({
   Conversation: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   ConversationContent: ({ children }: { children: ReactNode }) => <div>{children}</div>, ConversationScrollButton: () => null,
@@ -63,7 +64,11 @@ it("unsupported file upload is explicit and does not erase text", async () => {
 });
 it("model/effort actions and icon-only reply actions invoke the right callbacks", async () => {
   const { input, container, props } = setup(); fireEvent.click(screen.getByRole("button", { name: "Mock" })); expect(props.onModels).toHaveBeenCalledOnce();
-  fireEvent.change(screen.getByLabelText("推理强度"), { target: { value: "high" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
+  expect(props.onModels).toHaveBeenCalledWith({ x: expect.any(Number), y: expect.any(Number) });
+  expect(screen.getByRole("button", { name: "Mock" }).getAttribute("aria-haspopup")).toBe("menu");
+  expect(screen.queryByText("仅建议")).toBeNull();
+  expect(screen.getByText("🧠")).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: "推理强度" }), { target: { value: "high" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
   fireEvent.change(input, { target: { value: "hello" } }); fireEvent.submit(container.querySelector("form")!);
   fireEvent.click(await screen.findByRole("button", { name: "追加到指定文件" })); expect(props.onAppend).toHaveBeenCalledWith("测试回复", false);
 });

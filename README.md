@@ -26,7 +26,7 @@
 | 当前笔记读取 | 支持 | 支持 | 已实现 |
 | 本地 Agent CLI | 支持 | 不支持 | Codex App Server、ACP 与兼容 CLI 回退 |
 | 模型 API 对话 | 支持 | 支持，受服务商网络策略影响 | 已实现流式适配器 |
-| Markdown / GFM / Mermaid | 支持 | 支持 | 交给 Obsidian 原生渲染器 |
+| Markdown / GFM / Mermaid | 支持 | 待真机验收 | Markdown 使用宿主渲染，Mermaid 在本地隔离框架中自动展示 |
 | Skills | 库内与外部目录 | 仅库内 | 已实现选择与注入 |
 | MCP | ACP 会话传入；Codex 使用本机配置；兼容 CLI 透传 | 尚未内置直连 | 已接入原生 Agent 会话 |
 | API 模式直接改库 | 尚未支持 | 尚未支持 | 后续使用受控工具层实现 |

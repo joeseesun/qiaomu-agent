@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { Chat } from "@ai-sdk/react";
 import type QiaomuAgentPlugin from "./main";
 import type { AgentSkill, PermissionMode, ChatAttachment, ChatRequest, ModelChoice } from "./types";
-import { FilePicker, ModelPicker, ModelIdDialog, PromptManager, AppendDialog } from "./ui/host-dialogs";
+import { FilePicker, ModelIdDialog, PromptManager, AppendDialog } from "./ui/host-dialogs";
 import { readAttachment, validateAttachments, MAX_ATTACHMENT_BYTES } from "./services/attachments";
 import { AgentConnectionModal } from "./agent-connection-modal";
 import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage } from "./services/chat-transport";
@@ -122,7 +122,7 @@ export class ChatView extends ItemView {
     const api = this.plugin.settings.api;
     return backend.id === "api" ? `api:${api.provider}:${api.baseUrl}` : backend.id;
   }
-  private async openModels(showPicker = true): Promise<void> {
+  private async openModels(showPicker = true, anchor?: { x: number; y: number }): Promise<void> {
     if (this.running() || this.modelLoading) return;
     const generation = ++this.modelGeneration;
     this.modelLoading = true; this.render();
@@ -147,8 +147,11 @@ export class ChatView extends ItemView {
         void this.plugin.saveSettings(); this.render();
       };
       const manual = () => new ModelIdDialog(this.app, configured, selectModel).open();
-      if (!choices.length) { manual(); return; }
-      new ModelPicker(this.app, [...choices, { id: "__manual__", name: "手动输入模型 ID…", efforts: [] }], (model) => model.id === "__manual__" ? manual() : selectModel(model)).open();
+      const menu = new Menu().setUseNativeMenu(false);
+      for (const model of choices) menu.addItem((item) => item.setTitle(model.name).setChecked(model.id === configured).onClick(() => selectModel(model)));
+      if (choices.length) menu.addSeparator();
+      menu.addItem((item) => item.setTitle("输入模型 ID…").setIcon("pencil").onClick(manual));
+      menu.showAtPosition(anchor ?? { x: 0, y: 0 }, this.contentEl.ownerDocument);
     } catch (e) { new Notice(String(e)); }
     finally { if (generation === this.modelGeneration) { this.modelLoading = false; this.render(); } }
   }
@@ -218,7 +221,7 @@ export class ChatView extends ItemView {
       chat: this.chat, app: this.app, parent: this,
       backendLabel: this.modelLoading ? "加载模型…" : model?.name || selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : `${label} 默认模型`), skillLabel: this.selectedSkill?.name || "技能",
       efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
-      onModels: () => void this.openModels(),
+      onModels: (anchor: { x: number; y: number }) => void this.openModels(true, anchor),
       onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
       onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),

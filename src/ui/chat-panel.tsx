@@ -10,6 +10,8 @@ import { type AgentMessage, messageText } from "../services/chat-transport";
 import { Conversation, ConversationContent, ConversationScrollButton } from "../components/ai-elements/conversation";
 import { Message, MessageContent, MessageAction, MessageActions } from "../components/ai-elements/message";
 import { PromptInput, PromptInputFooter, PromptInputHeader, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "../components/ai-elements/prompt-input";
+import { splitMermaid } from "../services/mermaid-content";
+import { MermaidDiagram } from "./mermaid-diagram";
 
 interface Props {
   chat: Chat<AgentMessage>; app: App; parent: Component;
@@ -18,7 +20,7 @@ interface Props {
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onToggleNote: () => void; onPersist: () => Promise<void>;
-  efforts: string[]; effort: string; modelLoading: boolean; onModels: () => void; onEffort: (effort: string) => void;
+  efforts: string[]; effort: string; modelLoading: boolean; onModels: (anchor: { x: number; y: number }) => void; onEffort: (effort: string) => void;
   customPrompts: PromptTemplate[]; onManagePrompts: () => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
   onValidateAttachments: (attachments: ChatAttachment[]) => void;
@@ -26,7 +28,7 @@ interface Props {
 }
 
 /** Keep the Obsidian renderer and each render's resources inside the mounted component. */
-function NoteMarkdown({ text, sourcePath, app, parent }: { text: string; sourcePath: string; app: App; parent: Component }) {
+function HostMarkdown({ text, sourcePath, app, parent }: { text: string; sourcePath: string; app: App; parent: Component }) {
   const target = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const host = target.current;
@@ -42,6 +44,13 @@ function NoteMarkdown({ text, sourcePath, app, parent }: { text: string; sourceP
     return () => { active = false; parent.removeChild(child); };
   }, [text, sourcePath, app, parent]);
   return <div className="qa-markdown-host" ref={target} />;
+}
+
+function NoteMarkdown(props: { text: string; sourcePath: string; app: App; parent: Component }) {
+  let charts = 0;
+  return <>{splitMermaid(props.text).map((part, index) => part.kind === "pending" ? <pre key={index}>{part.text}</pre> : part.kind === "mermaid"
+    ? ++charts <= 6 ? <MermaidDiagram key={index} source={part.text} /> : <pre key={index}>{part.text}</pre>
+    : <HostMarkdown key={index} {...props} text={part.text} />)}</>;
 }
 
 function Activities({ activities, running }: { activities: ChatActivity[]; running: boolean }) {
@@ -192,10 +201,9 @@ export function ChatPanel(props: Props) {
           <button type="button" onClick={() => props.onPickFile(addAttachment)} aria-label="选择库内文件"><AtSign size={16} /></button>
           {!props.note && <button type="button" disabled={running} onClick={props.onToggleNote}><Plus size={16} /><span className="qiaomu-agent__sr-only">附加当前笔记</span></button>}
           <button className="qa-skill" type="button" disabled={running} onClick={(event) => props.onSkill(event.nativeEvent)}>{props.skillLabel}</button>
-          <label className="qa-mode"><span className="qiaomu-agent__sr-only">修改权限</span><select value={props.permission} disabled={running} onChange={(event) => props.onPermission(event.target.value as PermissionMode)}><option value="plan">仅建议</option><option value="edit">允许修改</option></select></label>
         </PromptInputTools>
-        <button className="qa-model" type="button" disabled={running || props.modelLoading} onClick={props.onModels}><span>{props.backendLabel}</span><ChevronDown size={12} /></button>
-        {!!props.efforts.length && <label className="qa-effort"><span className="qiaomu-agent__sr-only">推理强度</span><select value={props.effort} disabled={running} onChange={(e) => props.onEffort(e.target.value)}><option value="">默认</option>{props.efforts.map((effort) => <option key={effort} value={effort}>{({ low: "低", medium: "中", high: "高", xhigh: "极高", minimal: "最小", none: "无", max: "最高" } as Record<string, string>)[effort] || effort}</option>)}</select></label>}
+        <button className="qa-model" type="button" aria-haspopup="menu" disabled={running || props.modelLoading} onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); props.onModels({ x: rect.left, y: rect.bottom }); }}><span>{props.backendLabel}</span><ChevronDown size={12} /></button>
+        {!!props.efforts.length && <label className="qa-effort"><span aria-hidden="true">🧠</span><span className="qiaomu-agent__sr-only">推理强度</span><select value={props.effort} disabled={running} onChange={(e) => props.onEffort(e.target.value)}><option value="">默认</option>{props.efforts.map((effort) => <option key={effort} value={effort}>{({ low: "低", medium: "中", high: "高", xhigh: "极高", minimal: "最小", none: "无", max: "最高" } as Record<string, string>)[effort] || effort}</option>)}</select></label>}
         <PromptInputSubmit status={status} disabled={(!input.trim() && !attachments.length) || reading > 0 || props.modelLoading} onStop={() => { setStopped(true); void stop().then(props.onPersist); }} />
         </PromptInputFooter>
       </PromptInput>

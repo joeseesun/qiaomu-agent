@@ -15,7 +15,9 @@ const context = await esbuild.context({
   minify: production,
   define: { "process.env.NODE_ENV": JSON.stringify(production ? "production" : "development") },
   outfile: "main.js",
-  plugins: [{ name: "host-css", setup(build) {
+  plugins: [{ name: "mermaid-sandbox-source", setup(build) {
+    build.onLoad({ filter: /mermaid\.min\.js$/ }, async (args) => ({ contents: await readFile(args.path, "utf8"), loader: "text" }));
+  } }, { name: "host-css", setup(build) {
     build.onStart(async () => {
       const css = await Promise.all(["src/base.css", "src/chat-ui.css"].map((path) => readFile(path, "utf8")));
       await writeFile("styles.css", css.join("\n"));

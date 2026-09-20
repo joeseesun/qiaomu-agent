@@ -234,3 +234,8 @@
 .is-mobile .qiaomu-agent--react .qa-model { max-width: 60%; }
 .is-mobile .qiaomu-agent--react .qa-composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 .is-mobile .qiaomu-agent--react .qa-command-menu { max-height: min(260px, 35dvh); }
+.qiaomu-agent--react .qa-effort { display: inline-flex; align-items: center; gap: 2px; }
+.qiaomu-agent--react .qa-mermaid { margin-block: 8px; min-width: 0; }
+.qiaomu-agent--react .qa-mermaid iframe { display: block; width: 100%; height: 160px; border: 0; background: transparent; }
+.qiaomu-agent--react .qa-mermaid summary { color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.qiaomu-agent--react .qa-mermaid pre { max-height: 300px; overflow: auto; white-space: pre-wrap; }

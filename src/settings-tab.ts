@@ -149,10 +149,10 @@ export class QiaomuSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "对话" });
     new Setting(containerEl)
       .setName("默认权限")
-      .setDesc("“仅建议”不授权本地 Agent 修改文件；每次对话仍可在输入框上方切换。")
+      .setDesc("控制本地 Agent 是否可以修改文件；手动追加回复仍需确认目标。")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("plan", "仅建议")
+          .addOption("plan", "不允许修改文件")
           .addOption("edit", "允许修改")
           .setValue(this.plugin.settings.permissionMode)
           .onChange(async (value) => {

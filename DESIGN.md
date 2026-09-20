@@ -50,12 +50,12 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 ### Composer
 
 - A single outlined composer contains removable file/image context chips, text input, and a bottom toolbar for attachments, Skill, permission, model, reasoning effort and send/stop.
-- Model selection uses a native searchable host modal, with capability lists from Codex model/list or ACP configOptions. Unsupported backends retain their configured default; never invent available model IDs.
+- Model selection opens a host dropdown anchored to its trigger, not a modal. Manual ID entry remains a separate explicit action. Capability lists come from Codex model/list or ACP configOptions.
 - `/` at the start of a single-line draft opens searchable Prompt choices. Enter inserts rather than sends; Escape keeps the draft; IME composition never submits. Custom templates can be created/edited/copied/deleted through the menu.
 - `@` at a token boundary opens the native vault file picker. Upload, paste and drop share attachment ingestion and limits (6 files, 5 MB each, 10 MB total). Unsupported inputs retain the draft and display an actionable error.
 - Reading older content disables automatic scroll-follow; returning near the bottom resumes it.
 - Enter sends; Shift+Enter inserts a line break.
-- The permission selector uses plain-language Chinese labels.
+- No permanent permission selector in the composer. Permissions remain in settings; removing a label never grants write access. Reasoning effort has the explicitly requested 🧠 emoji; all other actions keep Lucide.
 
 ### Reply actions and persistence
 
@@ -63,7 +63,14 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - File append shows an exact path and Markdown preview before committing. It uses Vault.process and offers conservative undo, refusing to overwrite edits in the affected prefix. Manual user writes are distinct from AI tool permission mode.
 - Daily target resolution and creation use official Obsidian CLI so host folder/date/template settings remain authoritative. Mobile users can append to an explicitly selected Markdown file; daily CLI actions require desktop.
 - New conversations archive the previous transcript instead of discarding it. Persistence retains attachment snapshots (local plugin data); they are not encrypted separately from Obsidian storage.
-- Reused AI Elements composition and Apache notices are recorded in THIRD_PARTY_NOTICES.md. Rendering stays host-native for wiki links/Mermaid; host trust prompts must not be bypassed.
+- Reused AI Elements composition and Apache notices are recorded in THIRD_PARTY_NOTICES.md. Wiki links use the host renderer. Complete Mermaid fences use a local renderer in an opaque-origin iframe (scripts only, no same-origin, network, popup, top navigation, or vault access); vault trust settings stay unchanged. Source is available in a collapsed disclosure.
+
+### September 20 interaction polish
+
+- Functional contract: read diagrams without an execution step; choose a model beside the composer; keep permission out of the everyday toolbar.
+- Dials unchanged: restrained variation 5, minimal motion 3, compact density 6. No new decorative assets.
+- Notion reference DNA: flat reading surface, 1px neutral boundaries, 8px spacing; translate through existing Obsidian theme variables rather than copying brand colors/fonts.
+- Deliberate details: anchored menu, checked current model, theme-aware diagrams, collapsible source, visible focus, Chinese system fonts, bounded mobile controls.
 
 ## Responsive behavior
 
