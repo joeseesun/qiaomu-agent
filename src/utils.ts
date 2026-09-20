@@ -50,6 +50,20 @@ export function extractJsonEventText(value: unknown): string {
     if (typeof content.text === "string") return content.text;
   }
 
+  if (event.part && typeof event.part === "object") {
+    const part = event.part as Record<string, unknown>;
+    if (typeof part.text === "string") return part.text;
+  }
+
+  if (event.error && typeof event.error === "object") {
+    const error = event.error as Record<string, unknown>;
+    if (typeof error.message === "string") return error.message;
+  }
+
+  if (Array.isArray(event.errors)) {
+    return event.errors.filter((item): item is string => typeof item === "string").join("\n");
+  }
+
   return "";
 }
 

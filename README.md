@@ -74,6 +74,8 @@ ChatView
 
 CLI 能力被放在动态加载边界之后，移动端不会静态导入 Node.js / Electron 模块。
 
+当前逐项验证结果见 [Local CLI compatibility](docs/cli-compatibility.md)。
+
 ## 迭代路线
 
 1. 在真实测试库完成 Codex、Claude、Kimi、Qwen、Grok 的端到端冒烟测试。
