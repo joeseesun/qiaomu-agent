@@ -10,6 +10,8 @@
 - 使用 Obsidian `MarkdownRenderer` 增量呈现 Markdown、GFM 与 Mermaid
 - 自动附加当前 Markdown 笔记，支持自定义系统 Prompt 和快捷提问
 - 桌面端探测 Codex、Claude Code、Kimi Code、Qwen Code、Grok、OpenCode、Pi 与 Gemini CLI
+- Codex 使用长连接 App Server；Kimi、Qwen、Gemini 与 OpenCode 优先使用原生 ACP
+- 卡片式“连接 Agent”中心展示检测状态、协议和版本，日常侧边栏只保留当前连接
 - “仅建议 / 允许修改”显式权限切换；本地 Agent 负责实际文件工具与审批
 - 支持 OpenAI、OpenRouter、Anthropic、Google、DeepSeek、xAI 和自定义兼容 API
 - API Key 保存到 Obsidian `SecretStorage`
@@ -22,11 +24,11 @@
 | 能力 | 桌面端 | 移动端 | 当前状态 |
 | --- | --- | --- | --- |
 | 当前笔记读取 | 支持 | 支持 | 已实现 |
-| 本地 Agent CLI | 支持 | 不支持 | 已实现探测与调用适配器 |
+| 本地 Agent CLI | 支持 | 不支持 | Codex App Server、ACP 与兼容 CLI 回退 |
 | 模型 API 对话 | 支持 | 支持，受服务商网络策略影响 | 已实现流式适配器 |
 | Markdown / GFM / Mermaid | 支持 | 支持 | 交给 Obsidian 原生渲染器 |
 | Skills | 库内与外部目录 | 仅库内 | 已实现选择与注入 |
-| MCP | 由本地 CLI 执行 | 尚未内置直连 | 第一阶段透传 |
+| MCP | ACP 会话传入；Codex 使用本机配置；兼容 CLI 透传 | 尚未内置直连 | 已接入原生 Agent 会话 |
 | API 模式直接改库 | 尚未支持 | 尚未支持 | 后续使用受控工具层实现 |
 | Obsidian CLI | 支持自动检测与本地 Agent 引导 | 不可用 | 已接入，需在 Obsidian 中启用 |
 
@@ -65,7 +67,10 @@ npm run check
 ChatView
   ├─ Obsidian MarkdownRenderer
   ├─ BackendService
-  │    ├─ CliBackend（桌面端）
+  │    ├─ NativeAgentBackend
+  │    │    ├─ Codex App Server
+  │    │    └─ ACP（Kimi / Qwen / Gemini / OpenCode）
+  │    ├─ CliBackend（不支持原生协议时回退）
   │    └─ ApiBackend（桌面 / 移动）
   └─ SkillService
        ├─ Vault Skills
@@ -78,11 +83,11 @@ CLI 能力被放在动态加载边界之后，移动端不会静态导入 Node.j
 
 ## 迭代路线
 
-1. 在真实测试库完成 Codex、Claude、Kimi、Qwen、Grok 的端到端冒烟测试。
-2. 增加会话持久化、来源引用、文件 diff 与逐次写入确认。
-3. 引入独立的 MCP client 层，展示“已连接 / 已调用 / 调用结果”状态。
-4. 增加 ACP 适配器，并把 Obsidian CLI 扩展为 API 模式的受控工具调用。
-5. 完成移动端 API 兼容测试、可访问性检查和社区插件发布材料。
+1. 完成 Kimi、Qwen、Gemini 与 OpenCode 的 ACP 端到端兼容矩阵。
+2. 增加来源引用、文件 diff 与逐次写入确认。
+3. 引入独立的 MCP client 层，并完善权限请求 UI。
+4. 把 Obsidian CLI 扩展为 API 模式的受控工具调用。
+5. 完成移动端 API 兼容测试和社区插件发布材料。
 
 ## 隐私与安全
 

@@ -1,7 +1,8 @@
 import { Component, ItemView, MarkdownRenderer, Menu, Notice, setIcon, WorkspaceLeaf } from "obsidian";
 import type QiaomuAgentPlugin from "./main";
-import type { AgentSkill, ChatMessage } from "./types";
+import type { AgentSkill, ChatActivity, ChatMessage } from "./types";
 import { createId } from "./utils";
+import { AgentConnectionModal } from "./agent-connection-modal";
 
 export const VIEW_TYPE_QIAOMU_AGENT = "qiaomu-agent-view";
 
@@ -9,7 +10,7 @@ export class ChatView extends ItemView {
   private messages: ChatMessage[] = [];
   private messagesEl!: HTMLElement;
   private emptyEl!: HTMLElement;
-  private backendSelect!: HTMLSelectElement;
+  private backendButton!: HTMLButtonElement;
   private textarea!: HTMLTextAreaElement;
   private sendButton!: HTMLButtonElement;
   private statusEl!: HTMLElement;
@@ -38,23 +39,26 @@ export class ChatView extends ItemView {
 
   override async onOpen(): Promise<void> {
     this.messages = [...this.plugin.settings.lastConversation];
+    this.selectedBackend = this.plugin.settings.backendKind === "cli" && this.plugin.settings.preferredCli
+      ? `cli:${this.plugin.settings.preferredCli}`
+      : this.plugin.settings.backendKind;
     const root = this.contentEl;
     root.empty();
     root.addClass("qiaomu-agent");
 
     const header = root.createDiv({ cls: "qiaomu-agent__header" });
-    const identity = header.createDiv({ cls: "qiaomu-agent__identity" });
-    identity.createDiv({ cls: "qiaomu-agent__mark", text: "乔" });
-    const heading = identity.createDiv();
-    heading.createEl("h2", { text: "乔木 Agent" });
-    heading.createDiv({ cls: "qiaomu-agent__subtitle", text: "与知识库一起思考" });
-
-    const actions = header.createDiv({ cls: "qiaomu-agent__header-actions" });
-    this.backendSelect = actions.createEl("select", { cls: "qiaomu-agent__backend" });
-    this.backendSelect.addEventListener("change", () => {
-      this.selectedBackend = this.backendSelect.value;
+    const session = header.createDiv({ cls: "qiaomu-agent__session" });
+    session.createSpan({ cls: "qiaomu-agent__connection-dot" });
+    this.backendButton = session.createEl("button", { cls: "qiaomu-agent__backend" });
+    this.backendButton.addEventListener("click", () => {
+      new AgentConnectionModal(this.app, this.plugin, this.selectedBackend, (value) => {
+        void this.selectBackend(value);
+      }).open();
     });
-    const newButton = actions.createEl("button", { cls: "qiaomu-agent__new", text: "新对话" });
+    this.statusEl = session.createSpan({ cls: "qiaomu-agent__status", text: "准备就绪" });
+    const newButton = header.createEl("button", { cls: "qiaomu-agent__new" });
+    setIcon(newButton, "square-pen");
+    newButton.createSpan({ cls: "qiaomu-agent__sr-only", text: "新对话" });
     newButton.addEventListener("click", () => this.newConversation());
 
     this.messagesEl = root.createDiv({ cls: "qiaomu-agent__messages" });
@@ -81,32 +85,42 @@ export class ChatView extends ItemView {
   newConversation(): void {
     if (this.abortController) this.abortController.abort();
     this.messages = [];
+    this.plugin.backendService.resetSessions();
     this.plugin.settings.lastConversation = [];
     this.releaseRenderers();
     this.messagesEl.querySelectorAll(".qiaomu-agent__message").forEach((element) => element.remove());
     this.updateEmptyState();
-    this.setStatus("新对话已开始");
+    this.setStatus("准备就绪");
     void this.plugin.saveSettings();
   }
 
   refreshControls(): void {
-    if (!this.backendSelect) return;
+    if (!this.backendButton) return;
     const current = this.selectedBackend;
-    this.backendSelect.empty();
-    for (const option of this.plugin.backendService.getBackendOptions()) {
-      const element = this.backendSelect.createEl("option", {
-        value: option.value,
-        text: option.ready ? option.label : `${option.label}（未配置）`,
-      });
-      element.disabled = !option.ready && option.value !== "auto";
-    }
+    const options = this.plugin.backendService.getBackendOptions();
     const fallback = this.plugin.settings.backendKind === "cli" && this.plugin.settings.preferredCli
       ? `cli:${this.plugin.settings.preferredCli}`
       : this.plugin.settings.backendKind;
-    const values = Array.from(this.backendSelect.options).map((option) => option.value);
-    this.selectedBackend = values.includes(current) ? current : values.includes(fallback) ? fallback : "auto";
-    this.backendSelect.value = this.selectedBackend;
+    const values = options.map((option) => option.value);
+    this.selectedBackend = values.includes(fallback) ? fallback : values.includes(current) ? current : "auto";
+    const selected = options.find((option) => option.value === this.selectedBackend);
+    this.backendButton.empty();
+    this.backendButton.createSpan({ text: selected?.label || "连接 Agent" });
+    const chevron = this.backendButton.createSpan({ cls: "qiaomu-agent__backend-chevron" });
+    setIcon(chevron, "chevron-down");
     this.updateContext();
+  }
+
+  private async selectBackend(value: string): Promise<void> {
+    this.selectedBackend = value;
+    if (value.startsWith("cli:")) {
+      this.plugin.settings.backendKind = "cli";
+      this.plugin.settings.preferredCli = value.slice(4);
+    } else {
+      this.plugin.settings.backendKind = value === "api" ? "api" : "auto";
+    }
+    await this.plugin.saveSettings();
+    this.refreshControls();
   }
 
   private buildComposer(root: HTMLElement): void {
@@ -147,14 +161,14 @@ export class ChatView extends ItemView {
       else void this.submit();
     });
 
-    this.statusEl = composer.createDiv({ cls: "qiaomu-agent__status", text: "准备就绪" });
   }
 
   private renderEmptyState(): void {
     this.emptyEl.empty();
-    this.emptyEl.createDiv({ cls: "qiaomu-agent__empty-mark", text: "乔" });
+    const emptyIcon = this.emptyEl.createDiv({ cls: "qiaomu-agent__empty-icon" });
+    setIcon(emptyIcon, "messages-square");
     this.emptyEl.createEl("h3", { text: "从当前笔记开始" });
-    this.emptyEl.createEl("p", { text: "我可以阅读、整理和协助修改库内内容。" });
+    this.emptyEl.createEl("p", { text: "提问、整理内容，或在允许后修改 Vault。" });
     const prompts = this.emptyEl.createDiv({ cls: "qiaomu-agent__quick-prompts" });
     for (const prompt of this.plugin.settings.quickPrompts.slice(0, 4)) {
       const button = prompts.createEl("button", { text: prompt });
@@ -179,12 +193,20 @@ export class ChatView extends ItemView {
     }
 
     const history = [...this.messages];
+    let backend;
+    try {
+      backend = this.plugin.backendService.resolve(this.selectedBackend);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+      return;
+    }
     const userMessage: ChatMessage = { id: createId(), role: "user", content: prompt, createdAt: Date.now() };
     const assistantMessage: ChatMessage = {
       id: createId(),
       role: "assistant",
       content: "",
       createdAt: Date.now(),
+      backend: backend.label,
     };
     this.messages.push(userMessage, assistantMessage);
     this.textarea.value = "";
@@ -195,8 +217,6 @@ export class ChatView extends ItemView {
     this.setRunning(true);
 
     try {
-      const backend = this.plugin.backendService.resolve(this.selectedBackend);
-      assistantMessage.backend = backend.label;
       const activeFile = this.plugin.settings.autoAttachActiveNote ? this.plugin.getActiveMarkdownFile() : null;
       const activeFileContent = activeFile ? await this.app.vault.cachedRead(activeFile) : undefined;
       this.abortController = new AbortController();
@@ -230,20 +250,24 @@ export class ChatView extends ItemView {
             scheduleRender();
           },
           onStatus: (status) => this.setStatus(status),
+          onActivity: (activity) => {
+            assistantMessage.activities = mergeActivity(assistantMessage.activities, activity);
+            scheduleRender();
+          },
         },
         this.abortController.signal
       );
       if (renderTimer !== null) window.clearTimeout(renderTimer);
       if (!assistantMessage.content) assistantMessage.content = "已完成，但模型没有返回可显示的文本。";
       await this.renderMessageContent(assistantMessage, assistantEl);
-      this.setStatus(`完成 · ${backend.label}`);
+      this.setStatus("已连接");
     } catch (error) {
       const aborted = this.abortController?.signal.aborted;
       assistantMessage.content = aborted
         ? `${assistantMessage.content}\n\n_已停止_`.trim()
         : `运行失败：${error instanceof Error ? error.message : String(error)}`;
       await this.renderMessageContent(assistantMessage, assistantEl);
-      this.setStatus(aborted ? "已停止" : "运行失败");
+      this.setStatus(aborted ? "已停止" : "连接异常");
     } finally {
       this.abortController = null;
       this.setRunning(false);
@@ -271,16 +295,34 @@ export class ChatView extends ItemView {
       this.renderComponents.delete(message.id);
     }
     element.empty();
+    if (message.activities?.length) this.renderActivities(message.activities, element);
     if (!message.content) {
       element.createDiv({ cls: "qiaomu-agent__thinking", text: "正在思考…" });
       return;
     }
+    const body = element.createDiv({ cls: "qiaomu-agent__markdown" });
     const component = new Component();
     this.addChild(component);
     this.renderComponents.set(message.id, component);
     const sourcePath = this.plugin.getActiveMarkdownFile()?.path ?? "";
-    await MarkdownRenderer.render(this.app, message.content, element, sourcePath, component);
+    await MarkdownRenderer.render(this.app, message.content, body, sourcePath, component);
     this.scrollToBottom();
+  }
+
+  private renderActivities(activities: ChatActivity[], element: HTMLElement): void {
+    const visible = activities.filter((item) => item.label !== "userMessage");
+    if (visible.length === 0) return;
+    const group = element.createDiv({ cls: "qiaomu-agent__activities" });
+    for (const activity of visible) {
+      const details = group.createEl("details", { cls: `qiaomu-agent__activity is-${activity.status}` });
+      if (activity.status === "running" || activity.status === "failed") details.open = true;
+      const summary = details.createEl("summary");
+      const icon = summary.createSpan({ cls: "qiaomu-agent__activity-icon" });
+      setIcon(icon, activity.status === "completed" ? "check" : activity.status === "failed" ? "circle-alert" : activity.status === "running" ? "loader-circle" : "circle");
+      summary.createSpan({ text: activity.label });
+      summary.createSpan({ cls: "qiaomu-agent__activity-state", text: activityLabel(activity.status) });
+      if (activity.detail) details.createEl("pre", { text: activity.detail });
+    }
   }
 
   private openSkillMenu(event: MouseEvent): void {
@@ -309,7 +351,7 @@ export class ChatView extends ItemView {
     if (!this.contextEl) return;
     const file = this.plugin.getActiveMarkdownFile();
     this.contextEl.setText(
-      this.plugin.settings.autoAttachActiveNote && file ? `上下文：${file.basename}` : "未附加当前笔记"
+      this.plugin.settings.autoAttachActiveNote && file ? file.basename : "无当前笔记"
     );
   }
 
@@ -321,7 +363,7 @@ export class ChatView extends ItemView {
     this.sendButton.empty();
     setIcon(this.sendButton, running ? "square" : "arrow-up");
     this.sendButton.createSpan({ cls: "qiaomu-agent__sr-only", text: running ? "停止" : "发送" });
-    this.backendSelect.disabled = running;
+    this.backendButton.disabled = running;
   }
 
   private setStatus(status: string): void {
@@ -343,4 +385,29 @@ export class ChatView extends ItemView {
     }
     this.renderComponents.clear();
   }
+}
+
+function mergeActivity(current: ChatActivity[] | undefined, next: ChatActivity): ChatActivity[] {
+  const activities = [...(current ?? [])];
+  const index = activities.findIndex((item) => item.id === next.id);
+  if (index < 0) activities.push(next);
+  else {
+    const previous = activities[index];
+    if (!previous) return activities;
+    activities[index] = {
+    ...previous,
+    ...next,
+    label: next.label === "工具调用" ? previous.label : next.label,
+    detail: next.detail ?? previous.detail,
+  };
+  }
+  return activities;
+}
+
+function activityLabel(status: ChatActivity["status"]): string {
+  if (status === "running") return "进行中";
+  if (status === "completed") return "完成";
+  if (status === "failed") return "失败";
+  if (status === "cancelled") return "已取消";
+  return "等待";
 }

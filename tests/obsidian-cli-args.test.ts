@@ -9,7 +9,7 @@ describe("buildObsidianCliArgs", () => {
     ]);
     expect(
       buildObsidianCliArgs({ type: "property-set", path: "项目.md", name: "status", value: "done" })
-    ).toEqual(["property:set", "path=项目.md", "name=status", "value=done"]);
+    ).toEqual(["property:set", "name=status", "value=done", "path=项目.md"]);
   });
 
   it("clamps search limits", () => {
@@ -21,4 +21,3 @@ describe("buildObsidianCliArgs", () => {
     expect(() => buildObsidianCliArgs({ type: "read", path: "/tmp/file.md" })).toThrow(/Vault/);
   });
 });
-

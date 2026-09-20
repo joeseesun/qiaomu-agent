@@ -1,6 +1,6 @@
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, CliProfile } from "../types";
 import { stripAnsi } from "../utils";
-import { getRuntimeRequire } from "./cli-discovery";
+import { getRuntimeRequire } from "./runtime-require";
 import { getCliProfile } from "./cli-profiles";
 import { parseCliOutputLine } from "./cli-output";
 

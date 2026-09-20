@@ -1,6 +1,6 @@
 import { FileSystemAdapter, normalizePath, type App, type TFile } from "obsidian";
 import type { AgentSkill } from "../types";
-import { getRuntimeRequire } from "./cli-discovery";
+import { getRuntimeRequire } from "./runtime-require";
 import { parseSkillFrontmatter } from "../utils";
 
 const VAULT_SKILL_PREFIXES = [".agents/skills/", ".claude/skills/", ".codex/skills/", ".gemini/skills/"];

@@ -1,11 +1,7 @@
 import { Platform } from "obsidian";
 import type { CliDetection, CliProfile } from "../types";
 import { CLI_PROFILES } from "./cli-profiles";
-
-interface RuntimeRequireContainer {
-  require?: (id: string) => unknown;
-  process?: { env?: Record<string, string | undefined> };
-}
+import { getRuntimeRequire } from "./runtime-require";
 
 interface ChildProcessModule {
   execFile: (
@@ -26,11 +22,6 @@ interface OsModule {
 
 interface PathModule {
   join(...parts: string[]): string;
-}
-
-function runtimeRequire(): ((id: string) => unknown) | null {
-  const container = window as unknown as RuntimeRequireContainer;
-  return typeof container.require === "function" ? container.require : null;
 }
 
 function knownPaths(profile: CliProfile, home: string, join: PathModule["join"]): string[] {
@@ -72,7 +63,7 @@ async function probe(
 
 export async function discoverLocalClis(): Promise<CliDetection[]> {
   if (!Platform.isDesktopApp) return [];
-  const require = runtimeRequire();
+  const require = getRuntimeRequire();
   if (!require) return [];
 
   const childProcess = require("child_process") as ChildProcessModule;
@@ -127,8 +118,4 @@ export async function discoverLocalClis(): Promise<CliDetection[]> {
   }
 
   return detections;
-}
-
-export function getRuntimeRequire(): ((id: string) => unknown) | null {
-  return runtimeRequire();
 }

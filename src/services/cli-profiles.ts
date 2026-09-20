@@ -1,6 +1,6 @@
 import type { ChatRequest, CliProfile } from "../types";
 
-function promptWithContext(request: ChatRequest): string {
+export function promptWithContext(request: ChatRequest): string {
   const sections: string[] = [];
   if (request.obsidianCli?.state === "ready") {
     const executable = JSON.stringify(request.obsidianCli.path);

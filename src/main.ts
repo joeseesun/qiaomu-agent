@@ -13,12 +13,14 @@ export default class QiaomuAgentPlugin extends Plugin {
   backendService!: BackendService;
   skillService!: SkillService;
   obsidianCliService!: ObsidianCliService;
+  private lastMarkdownFile: TFile | null = null;
 
   override async onload(): Promise<void> {
     this.settings = normalizeSettings(await this.loadData());
     this.backendService = new BackendService(this.app, () => this.settings);
     this.skillService = new SkillService(this.app);
     this.obsidianCliService = new ObsidianCliService();
+    this.rememberActiveMarkdownFile();
 
     this.registerView(VIEW_TYPE_QIAOMU_AGENT, (leaf) => new ChatView(leaf, this));
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
@@ -44,11 +46,25 @@ export default class QiaomuAgentPlugin extends Plugin {
     });
 
     this.app.workspace.onLayoutReady(() => {
+      this.rememberActiveMarkdownFile();
       void this.refreshIntegrations();
     });
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => this.eachView((view) => view.refreshControls()))
+      this.app.workspace.on("active-leaf-change", () => {
+        this.rememberActiveMarkdownFile();
+        this.eachView((view) => view.refreshControls());
+      })
     );
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (file?.extension === "md") this.lastMarkdownFile = file;
+        this.eachView((view) => view.refreshControls());
+      })
+    );
+  }
+
+  override onunload(): void {
+    void this.backendService?.shutdown();
   }
 
   async saveSettings(): Promise<void> {
@@ -68,6 +84,7 @@ export default class QiaomuAgentPlugin extends Plugin {
   }
 
   async activateView(prefill?: string): Promise<void> {
+    this.rememberActiveMarkdownFile();
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_QIAOMU_AGENT)[0];
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false) ?? undefined;
@@ -84,7 +101,24 @@ export default class QiaomuAgentPlugin extends Plugin {
 
   getActiveMarkdownFile(): TFile | null {
     const file = this.app.workspace.getActiveFile();
-    return file?.extension === "md" ? file : null;
+    if (file?.extension === "md") this.lastMarkdownFile = file;
+    return this.lastMarkdownFile;
+  }
+
+  private rememberActiveMarkdownFile(): void {
+    const file = this.app.workspace.getActiveFile();
+    if (file?.extension === "md") {
+      this.lastMarkdownFile = file;
+      return;
+    }
+    if (this.lastMarkdownFile) return;
+    for (const path of this.app.workspace.getLastOpenFiles()) {
+      const recent = this.app.vault.getAbstractFileByPath(path);
+      if (recent instanceof TFile && recent.extension === "md") {
+        this.lastMarkdownFile = recent;
+        return;
+      }
+    }
   }
 
   private eachView(callback: (view: ChatView) => void): void {

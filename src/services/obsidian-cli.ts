@@ -1,6 +1,6 @@
 import { Platform } from "obsidian";
 import type { ObsidianCliConnection } from "../types";
-import { getRuntimeRequire } from "./cli-discovery";
+import { getRuntimeRequire } from "./runtime-require";
 import { buildObsidianCliArgs, type ObsidianCliOperation } from "./obsidian-cli-args";
 
 interface ChildProcessModule {

@@ -33,11 +33,10 @@ export function buildObsidianCliArgs(operation: ObsidianCliOperation): string[] 
     case "property-set":
       return [
         "property:set",
-        `path=${safeVaultPath(operation.path)}`,
         `name=${operation.name}`,
         `value=${operation.value}`,
         ...(operation.propertyType ? [`type=${operation.propertyType}`] : []),
+        `path=${safeVaultPath(operation.path)}`,
       ];
   }
 }
-

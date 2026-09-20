@@ -32,6 +32,16 @@ export interface ChatMessage {
   content: string;
   createdAt: number;
   backend?: string;
+  activities?: ChatActivity[];
+}
+
+export type ChatActivityStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface ChatActivity {
+  id: string;
+  label: string;
+  status: ChatActivityStatus;
+  detail?: string;
 }
 
 export interface ChatRequest {
@@ -60,12 +70,15 @@ export interface ObsidianCliConnection {
 export interface ChatCallbacks {
   onText: (text: string) => void;
   onStatus: (status: string) => void;
+  onActivity?: (activity: ChatActivity) => void;
 }
 
 export interface ChatBackend {
   readonly id: string;
   readonly label: string;
   send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void>;
+  resetSession?(): void;
+  shutdown?(): Promise<void>;
 }
 
 export interface CliDetection {
