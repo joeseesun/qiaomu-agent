@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
@@ -12,6 +12,7 @@ import { Message, MessageContent, MessageAction, MessageActions } from "../compo
 import { PromptInput, PromptInputFooter, PromptInputHeader, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "../components/ai-elements/prompt-input";
 import { splitMermaid } from "../services/mermaid-content";
 import { MermaidDiagram } from "./mermaid-diagram";
+import { ComposerPopover, effortLabel } from "./composer-popover";
 
 interface Props {
   chat: Chat<AgentMessage>; app: App; parent: Component;
@@ -197,13 +198,28 @@ export function ChatPanel(props: Props) {
           onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { if (!e.clipboardData.getData("text/plain")) e.preventDefault(); void addFiles(files); } }}
           placeholder="输入消息，/ 选择 Prompt，@ 引用文件…" />
         <PromptInputFooter><PromptInputTools>
-          <button type="button" onClick={() => upload.current?.click()} aria-label="上传附件"><Paperclip size={16} /></button>
-          <button type="button" onClick={() => props.onPickFile(addAttachment)} aria-label="选择库内文件"><AtSign size={16} /></button>
-          {!props.note && <button type="button" disabled={running} onClick={props.onToggleNote}><Plus size={16} /><span className="qiaomu-agent__sr-only">附加当前笔记</span></button>}
-          <button className="qa-skill" type="button" disabled={running} onClick={(event) => props.onSkill(event.nativeEvent)}>{props.skillLabel}</button>
+          <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} disabled={running}>
+            {(close) => <>
+              <button type="button" onClick={() => { close(); upload.current?.click(); }}><Paperclip size={16} />上传附件</button>
+              <button type="button" onClick={() => { close(); props.onPickFile(addAttachment); }}><AtSign size={16} />选择库内文件</button>
+              {!props.note && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加当前笔记</button>}
+              <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
+            </>}
+          </ComposerPopover>
         </PromptInputTools>
-        <button className="qa-model" type="button" aria-haspopup="menu" disabled={running || props.modelLoading} onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); props.onModels({ x: rect.left, y: rect.bottom }); }}><span>{props.backendLabel}</span><ChevronDown size={12} /></button>
-        {!!props.efforts.length && <label className="qa-effort"><span aria-hidden="true">🧠</span><span className="qiaomu-agent__sr-only">推理强度</span><select value={props.effort} disabled={running} onChange={(e) => props.onEffort(e.target.value)}><option value="">默认</option>{props.efforts.map((effort) => <option key={effort} value={effort}>{({ low: "低", medium: "中", high: "高", xhigh: "极高", minimal: "最小", none: "无", max: "最高" } as Record<string, string>)[effort] || effort}</option>)}</select></label>}
+        <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running || props.modelLoading}
+          trigger={<><span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <><Brain size={14} aria-hidden="true" /><span>{effortLabel(props.effort)}</span></>}<ChevronDown size={12} /></>}>
+          {(close) => <>
+            <button className="qa-model" type="button" aria-haspopup="menu" onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); close(); props.onModels({ x: rect.left, y: rect.top }); }}><span>{props.backendLabel}</span><ChevronRight size={14} /></button>
+            {!!props.efforts.length && <div className="qa-reasoning">
+              <label htmlFor={`${inputId}-effort`}><Brain size={16} aria-hidden="true" /><span>推理强度</span><span className="qa-reasoning-value">{effortLabel(props.effort)}</span></label>
+              <input id={`${inputId}-effort`} type="range" min={0} max={props.efforts.length} step={1}
+                value={Math.max(0, props.efforts.indexOf(props.effort) + 1)} aria-valuetext={effortLabel(props.effort)}
+                onChange={(e) => props.onEffort(props.efforts[Number(e.target.value) - 1] ?? "")} />
+              <div className="qa-reasoning-ends" aria-hidden="true"><span>默认</span><span>{effortLabel(props.efforts.at(-1)!)}</span></div>
+            </div>}
+          </>}
+        </ComposerPopover>
         <PromptInputSubmit status={status} disabled={(!input.trim() && !attachments.length) || reading > 0 || props.modelLoading} onStop={() => { setStopped(true); void stop().then(props.onPersist); }} />
         </PromptInputFooter>
       </PromptInput>

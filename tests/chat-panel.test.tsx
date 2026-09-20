@@ -63,12 +63,40 @@ it("unsupported file upload is explicit and does not erase text", async () => {
   await screen.findByRole("alert"); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
 });
 it("model/effort actions and icon-only reply actions invoke the right callbacks", async () => {
-  const { input, container, props } = setup(); fireEvent.click(screen.getByRole("button", { name: "Mock" })); expect(props.onModels).toHaveBeenCalledOnce();
+  const { input, container, props } = setup();
+  fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
+  expect(container.querySelector(".lucide-brain")).toBeTruthy();
+  fireEvent.change(screen.getByRole("slider", { name: /推理强度/ }), { target: { value: "2" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
+  fireEvent.click(screen.getByRole("button", { name: "Mock" })); expect(props.onModels).toHaveBeenCalledOnce();
   expect(props.onModels).toHaveBeenCalledWith({ x: expect.any(Number), y: expect.any(Number) });
-  expect(screen.getByRole("button", { name: "Mock" }).getAttribute("aria-haspopup")).toBe("menu");
+  expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.queryByText("仅建议")).toBeNull();
-  expect(screen.getByText("🧠")).toBeTruthy();
-  fireEvent.change(screen.getByRole("combobox", { name: "推理强度" }), { target: { value: "high" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
+  expect(screen.queryByText("🧠")).toBeNull();
   fireEvent.change(input, { target: { value: "hello" } }); fireEvent.submit(container.querySelector("form")!);
   fireEvent.click(await screen.findByRole("button", { name: "追加到指定文件" })); expect(props.onAppend).toHaveBeenCalledWith("测试回复", false);
+});
+
+it("composer popovers close with Escape, outside click and focus departure without losing draft", () => {
+  const { input, props } = setup();
+  fireEvent.change(input, { target: { value: "保留草稿" } });
+  const trigger = screen.getByRole("button", { name: "添加附件与工具" });
+  fireEvent.click(trigger);
+  expect(screen.getByRole("button", { name: "上传附件" })).toBe(document.activeElement);
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull(); expect(document.activeElement).toBe(trigger);
+  fireEvent.click(trigger); fireEvent.pointerDown(input); expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "选择库内文件" }));
+  expect(props.onPickFile).toHaveBeenCalledOnce(); expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(trigger); fireEvent.blur(screen.getByRole("button", { name: "上传附件" }), { relatedTarget: input });
+  expect(screen.queryByRole("dialog")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
+});
+
+it("does not invent reasoning capabilities and dismisses controls while loading", () => {
+  const { props, rerender } = setup();
+  rerender(<ChatPanel {...props} efforts={[]} />);
+  fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
+  expect(screen.queryByRole("slider")).toBeNull();
+  rerender(<ChatPanel {...props} modelLoading />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect((screen.getByRole("button", { name: "模型与推理" }) as HTMLButtonElement).disabled).toBe(true);
 });

@@ -55,7 +55,10 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - `@` at a token boundary opens the native vault file picker. Upload, paste and drop share attachment ingestion and limits (6 files, 5 MB each, 10 MB total). Unsupported inputs retain the draft and display an actionable error.
 - Reading older content disables automatic scroll-follow; returning near the bottom resumes it.
 - Enter sends; Shift+Enter inserts a line break.
-- No permanent permission selector in the composer. Permissions remain in settings; removing a label never grants write access. Reasoning effort has the explicitly requested 🧠 emoji; all other actions keep Lucide.
+- No permanent permission selector in the composer. Permissions remain in settings; removing a label never grants write access. The latest feedback replaces the brain emoji with Lucide Brain, consistent with all action icons.
+- Quiet input: a stable neutral 1px border, 20px radius, no hover background/ring or focus-within border jump. Keyboard-visible textarea focus has a restrained outline.
+- The left plus opens attachment/note/Skill actions; the right model chip opens a compact non-modal popover containing model selection and supported discrete effort levels. Escape restores focus; outside click and Tab departure dismiss. No hover-only controls.
+- User messages have a restrained neutral 18px bubble capped at 90% width; assistant Markdown remains flat with 28px inter-message spacing. Preserve Chinese system fonts and host theme variables.
 
 ### Reply actions and persistence
 
