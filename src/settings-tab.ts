@@ -79,6 +79,27 @@ export class QiaomuSettingTab extends PluginSettingTab {
       );
     detectionSetting.settingEl.addClass("qiaomu-agent-settings__detection");
 
+    const obsidianCli = this.plugin.obsidianCliService.getConnection();
+    new Setting(containerEl)
+      .setName("Obsidian CLI")
+      .setDesc(obsidianCli.detail)
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.useObsidianCli)
+          .setDisabled(obsidianCli.state !== "ready")
+          .onChange(async (value) => {
+            this.plugin.settings.useObsidianCli = value;
+            await this.plugin.saveSettings();
+          })
+      )
+      .addButton((button) =>
+        button.setButtonText("检测").onClick(async () => {
+          button.setDisabled(true).setButtonText("检测中…");
+          await this.plugin.obsidianCliService.detect();
+          this.display();
+        })
+      );
+
     new Setting(containerEl).setName("API 服务商").addDropdown((dropdown) => {
       for (const [value, provider] of Object.entries(PROVIDERS)) dropdown.addOption(value, provider.label);
       dropdown.setValue(this.plugin.settings.api.provider);
@@ -239,4 +260,3 @@ export class QiaomuSettingTab extends PluginSettingTab {
       .join(" · ") || "未发现支持的本地 Agent";
   }
 }
-

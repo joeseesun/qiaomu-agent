@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS: QiaomuSettings = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   quickPrompts: ["总结当前笔记", "找出相关笔记", "把这段内容整理得更清楚"],
   autoAttachActiveNote: true,
+  useObsidianCli: true,
   skillDirectories: [],
   mcpConfig: "{\n  \"mcpServers\": {}\n}",
   lastConversation: [],
