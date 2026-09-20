@@ -34,11 +34,13 @@
 
 “检测到”只代表版本探测成功；“可调用”代表已有参数适配器；“实际执行了 Skill/MCP 工具”必须以运行事件为准。ZCode 目前只检测桌面应用，不把它显示为可调用 CLI。
 
-## 为什么不直接使用 AI Elements
+## 界面与移动端边界
 
-AI Elements 面向 React 19、Tailwind CSS 4 与 shadcn 生态。Obsidian 已提供成熟的主题变量、组件生命周期和 Markdown 渲染管线。首版使用原生 DOM 与 Obsidian API，可以减少包体、样式冲突和移动端风险。
+当前使用 React、AI SDK 与经宿主适配的 AI Elements 组件，来源与许可证见 `THIRD_PARTY_NOTICES.md`。Markdown 继续交给 Obsidian 渲染；模型和文件选择沿用宿主弹窗，避免引入第二套主题及焦点管理。
 
-Vercel AI SDK 的流式协议与统一模型抽象仍值得借鉴。项目后续可在不替换界面的情况下，把 API 适配层迁移到 AI SDK Core，或实现兼容的 UI message stream。
+手机打开同步仓库时，即使桌面选择了 CLI，也会在本设备使用 API，不自动改写桌面的连接偏好。API Key 需要在当前设备检查配置。手机以普通标签页打开对话，回车换行、按钮发送；触摸操作区至少 44px。
+
+移动端兼容声明不是实机验收：当前覆盖平台分支模拟和桌面构建，iOS/Android 的网络、软键盘、文件选择和流式回复仍需真机测试。部分 API 的跨域策略可能阻止直连。手机可确认后追加回复到指定笔记；“今日日记”目前仍依赖桌面 CLI，移动端日记适配尚未完成。API 模式尚不执行 MCP 或文件修改工具；Skill 正文注入不等同于支持其脚本执行。
 
 ## 开发
 

@@ -1,4 +1,4 @@
-import { FileSystemAdapter, normalizePath, type App, type TFile } from "obsidian";
+import { FileSystemAdapter, Platform, normalizePath, type App, type TFile } from "obsidian";
 import type { AgentSkill } from "../types";
 import { getRuntimeRequire } from "./runtime-require";
 import { parseSkillFrontmatter } from "../utils";
@@ -93,6 +93,7 @@ export class SkillService {
   }
 
   getVaultRoot(): string | null {
+    if (!Platform.isDesktopApp) return null;
     const adapter = this.app.vault.adapter;
     return adapter instanceof FileSystemAdapter ? normalizePath(adapter.getBasePath()) : null;
   }

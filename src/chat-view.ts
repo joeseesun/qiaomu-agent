@@ -26,6 +26,7 @@ export class ChatView extends ItemView {
   private modelGeneration = 0;
   private capabilitiesKey = "";
   private persistQueue: Promise<void> = Promise.resolve();
+  private readonly backendOwner = crypto.randomUUID();
 
   constructor(leaf: WorkspaceLeaf, readonly plugin: QiaomuAgentPlugin) { super(leaf); }
   getViewType(): string { return VIEW_TYPE_QIAOMU_AGENT; }
@@ -43,11 +44,11 @@ export class ChatView extends ItemView {
       transport: new AgentTransport(async (messages, signal) => {
         // Capture every input before the first await: navigation cannot change this turn.
         const settings = this.plugin.settings;
-        const backend = this.plugin.backendService.resolve(this.selectedBackend);
+        const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
         const file = this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
         const last = messages.at(-1);
         if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
-        const parsed: unknown = JSON.parse(settings.mcpConfig || "{}");
+        const parsed: unknown = backend.id === "api" ? {} : JSON.parse(settings.mcpConfig || "{}");
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
         const request = {
           prompt: messageText(last), systemPrompt: settings.systemPrompt,
@@ -80,6 +81,7 @@ export class ChatView extends ItemView {
     this.modelGeneration++;
     if (!this.chat) return;
     await this.chat.stop();
+    await this.plugin.backendService.release(this.backendOwner);
     await this.persist();
     this.root?.unmount();
     this.root = null;
@@ -98,14 +100,14 @@ export class ChatView extends ItemView {
     }
     this.chat.messages = [];
     this.chat.clearError();
-    this.plugin.backendService.resetSessions();
+    this.plugin.backendService.resetSessions(this.backendOwner);
     this.statusText = "";
     void this.persist();
     this.render();
   }
   refreshControls(): void {
     const settings = this.plugin.settings;
-    const selected = settings.backendKind === "cli" && settings.preferredCli ? `cli:${settings.preferredCli}` : settings.backendKind;
+    const selected = this.plugin.backendService.effectiveSelection(settings.backendKind === "cli" && settings.preferredCli ? `cli:${settings.preferredCli}` : settings.backendKind);
     if (selected !== this.selectedBackend) { this.models = []; this.capabilitiesKey = ""; this.modelGeneration++; this.modelLoading = false; }
     this.selectedBackend = selected;
     this.render();
@@ -116,7 +118,7 @@ export class ChatView extends ItemView {
     }
   }
   private selectionKey(): string {
-    const backend = this.plugin.backendService.resolve(this.selectedBackend);
+    const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
     const api = this.plugin.settings.api;
     return backend.id === "api" ? `api:${api.provider}:${api.baseUrl}` : backend.id;
   }
@@ -125,10 +127,10 @@ export class ChatView extends ItemView {
     const generation = ++this.modelGeneration;
     this.modelLoading = true; this.render();
     try {
-      const backend = this.plugin.backendService.resolve(this.selectedBackend);
+      const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
       const settings = this.plugin.settings;
       const key = this.selectionKey();
-      const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
+      const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: backend.id === "api" ? {} : JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
       let choices: ModelChoice[] = [];
       try { choices = await backend.listModels?.(request) ?? []; }
       catch (e) { new Notice(String(e)); }
@@ -141,7 +143,7 @@ export class ChatView extends ItemView {
         if (this.running() || generation !== this.modelGeneration) return;
         settings.modelSelections ??= {};
         settings.modelSelections[key] = { model: model.id, effort: "" };
-        this.plugin.backendService.resetSessions();
+        this.plugin.backendService.resetSessions(this.backendOwner);
         void this.plugin.saveSettings(); this.render();
       };
       const manual = () => new ModelIdDialog(this.app, configured, selectModel).open();
@@ -217,11 +219,11 @@ export class ChatView extends ItemView {
       backendLabel: this.modelLoading ? "加载模型…" : model?.name || selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : `${label} 默认模型`), skillLabel: this.selectedSkill?.name || "技能",
       efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
       onModels: () => void this.openModels(),
-      onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(); void this.plugin.saveSettings(); },
+      onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
       onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
-      onValidateAttachments: (attachments: ChatAttachment[]) => validateAttachments(attachments, this.plugin.backendService.resolve(this.selectedBackend).id),
+      onValidateAttachments: (attachments: ChatAttachment[]) => validateAttachments(attachments, this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner).id),
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
       permission: this.plugin.settings.permissionMode, note: this.attachNote ? file : null,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,

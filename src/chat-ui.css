@@ -69,3 +69,18 @@
 .qiaomu-agent--react .qa-markdown-host p:first-child { margin-top: 0; }
 .qiaomu-agent--react .qa-markdown-host p:last-child { margin-bottom: 0; }
 @media (prefers-reduced-motion: reduce) { .qiaomu-agent--react * { scroll-behavior: auto; animation: none; transition: none; } }
+
+/* Touch controls must not depend on hover or inherit desktop-sized hit targets. */
+.is-mobile .qiaomu-agent--react .qa-header button,
+.is-mobile .qiaomu-agent--react .qa-message-actions button,
+.is-mobile .qiaomu-agent--react .qa-attachment button,
+.is-mobile .qiaomu-agent--react .qa-note button,
+.is-mobile .qiaomu-agent--react .qa-prompt-footer button,
+.is-mobile .qiaomu-agent--react .qa-prompt-footer select { min-width: 44px; min-height: 44px; }
+.is-mobile .qiaomu-agent--react .qa-header button,
+.is-mobile .qiaomu-agent--react .qa-submit { flex-basis: 44px; }
+.is-mobile .qiaomu-agent--react .qa-prompt-textarea { font-size: 16px; }
+.is-mobile .qiaomu-agent--react .qa-prompt-tools { width: 100%; }
+.is-mobile .qiaomu-agent--react .qa-model { max-width: 60%; }
+.is-mobile .qiaomu-agent--react .qa-composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.is-mobile .qiaomu-agent--react .qa-command-menu { max-height: min(260px, 35dvh); }

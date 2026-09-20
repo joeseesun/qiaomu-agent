@@ -11,13 +11,13 @@ export const PromptInputHeader = (props: ComponentProps<"div">) => <div classNam
 export const PromptInputFooter = (props: ComponentProps<"div">) => <div className="qa-prompt-footer" {...props} />;
 export const PromptInputTools = (props: ComponentProps<"div">) => <div className="qa-prompt-tools" {...props} />;
 
-export function PromptInputTextarea({ onKeyDown, ...props }: ComponentProps<"textarea">) {
+export function PromptInputTextarea({ onKeyDown, submitOnEnter = true, ...props }: ComponentProps<"textarea"> & { submitOnEnter?: boolean }) {
   const [composing, setComposing] = useState(false);
   return <textarea name="message" className="qa-prompt-textarea" rows={2}
     onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
     onKeyDown={(event) => {
       onKeyDown?.(event);
-      if (event.defaultPrevented || event.key !== "Enter" || event.shiftKey || composing || event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (!submitOnEnter || event.defaultPrevented || event.key !== "Enter" || event.shiftKey || composing || event.nativeEvent.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       const submit = event.currentTarget.form?.querySelector<HTMLButtonElement>('button[type="submit"]');
       if (submit && !submit.disabled) event.currentTarget.form?.requestSubmit();

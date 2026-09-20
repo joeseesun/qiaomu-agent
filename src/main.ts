@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { Notice, Platform, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { ChatView, VIEW_TYPE_QIAOMU_AGENT } from "./chat-view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./defaults";
 import { BackendService } from "./services/backend-service";
@@ -93,7 +93,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     this.rememberActiveMarkdownFile();
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_QIAOMU_AGENT)[0];
     if (!leaf) {
-      leaf = this.app.workspace.getRightLeaf(false) ?? undefined;
+      leaf = Platform.isDesktopApp ? this.app.workspace.getRightLeaf(false) ?? undefined : this.app.workspace.getLeaf("tab");
       await leaf?.setViewState({ type: VIEW_TYPE_QIAOMU_AGENT, active: true });
     }
     if (!leaf) {

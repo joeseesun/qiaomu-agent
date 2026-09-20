@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+import { Platform, type App } from "obsidian";
 import type { ChatBackend, CliDetection, QiaomuSettings } from "../types";
 import { ApiBackend } from "./api-backend";
 import { CliBackend } from "./cli-backend";
@@ -23,7 +23,7 @@ export class BackendService {
   ) {}
 
   setDetections(detections: CliDetection[]): void {
-    this.detections = detections;
+    this.detections = Platform.isDesktopApp ? detections : [];
   }
 
   getDetections(): CliDetection[] {
@@ -66,7 +66,7 @@ export class BackendService {
       {
         value: "auto",
         label: "自动选择",
-        description: "优先使用首选的本地 Agent；不可用时回退到模型 API。",
+        description: Platform.isDesktopApp ? "优先使用首选的本地 Agent；不可用时回退到模型 API。" : "此设备使用模型 API；本地 CLI 仅限桌面端。",
         ready: detected.some((option) => option.ready) || this.hasApiKey(),
         transport: "智能路由",
       },
@@ -83,13 +83,19 @@ export class BackendService {
     ];
   }
 
-  resolve(selected: string): ChatBackend {
+  effectiveSelection(selected: string): string {
+    // Do not rewrite synced desktop preferences when opening the same vault on a phone.
+    return !Platform.isDesktopApp ? "api" : selected;
+  }
+
+  resolve(selected: string, owner = "default"): ChatBackend {
+    selected = this.effectiveSelection(selected);
     const settings = this.getSettings();
     if (selected.startsWith("cli:")) {
       const id = selected.slice(4);
       const detection = this.detections.find((item) => item.id === id && item.callable);
       if (!detection) throw new Error("所选本地 Agent 当前不可用，请重新检测");
-      return this.localBackend(detection);
+      return this.localBackend(detection, owner);
     }
     if (selected === "api") return this.apiBackend();
 
@@ -97,12 +103,20 @@ export class BackendService {
       ? this.detections.find((item) => item.id === settings.preferredCli && item.callable)
       : undefined;
     const first = preferred ?? this.detections.find((item) => item.callable);
-    if (first) return this.localBackend(first);
+    if (first) return this.localBackend(first, owner);
     return this.apiBackend();
   }
 
-  resetSessions(): void {
-    for (const backend of this.nativeBackends.values()) backend.resetSession();
+  resetSessions(owner = "default"): void {
+    for (const [key, backend] of this.nativeBackends) {
+      if (JSON.parse(key)[0] === owner) backend.resetSession();
+    }
+  }
+
+  async release(owner: string): Promise<void> {
+    const owned = [...this.nativeBackends].filter(([key]) => JSON.parse(key)[0] === owner);
+    for (const [key] of owned) this.nativeBackends.delete(key);
+    await Promise.all(owned.map(([, backend]) => backend.shutdown()));
   }
 
   async shutdown(): Promise<void> {
@@ -110,12 +124,13 @@ export class BackendService {
     this.nativeBackends.clear();
   }
 
-  private localBackend(detection: CliDetection): ChatBackend {
+  private localBackend(detection: CliDetection, owner: string): ChatBackend {
     if (!nativeTransportFor(detection.id)) return new CliBackend(detection);
-    let backend = this.nativeBackends.get(detection.id);
+    const key = JSON.stringify([owner, detection.id]);
+    let backend = this.nativeBackends.get(key);
     if (!backend) {
       backend = new NativeAgentBackend(detection);
-      this.nativeBackends.set(detection.id, backend);
+      this.nativeBackends.set(key, backend);
     }
     return backend;
   }

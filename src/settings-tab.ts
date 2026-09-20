@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type QiaomuAgentPlugin from "./main";
 import type { ApiConnection } from "./types";
 
@@ -43,14 +43,16 @@ export class QiaomuSettingTab extends PluginSettingTab {
       .setName("默认连接")
       .setDesc("自动模式优先选择本地 CLI，其次使用已配置的 API。")
       .addDropdown((dropdown) => {
-        dropdown.addOption("auto", "自动选择").addOption("cli", "本地 CLI").addOption("api", "模型 API");
-        dropdown.setValue(this.plugin.settings.backendKind);
+        dropdown.addOption("auto", "自动选择").addOption("api", "模型 API");
+        if (Platform.isDesktopApp) dropdown.addOption("cli", "本地 CLI");
+        dropdown.setValue(Platform.isDesktopApp ? this.plugin.settings.backendKind : "api");
         dropdown.onChange(async (value) => {
           this.plugin.settings.backendKind = value === "cli" ? "cli" : value === "api" ? "api" : "auto";
           await this.plugin.saveSettings();
         });
       });
 
+    if (Platform.isDesktopApp) {
     new Setting(containerEl)
       .setName("首选本地 Agent")
       .setDesc("只列出已经实际执行版本探测成功的命令。")
@@ -99,6 +101,8 @@ export class QiaomuSettingTab extends PluginSettingTab {
           this.display();
         })
       );
+
+    }
 
     new Setting(containerEl).setName("API 服务商").addDropdown((dropdown) => {
       for (const [value, provider] of Object.entries(PROVIDERS)) dropdown.addOption(value, provider.label);
@@ -197,7 +201,7 @@ export class QiaomuSettingTab extends PluginSettingTab {
 
   private renderSkillsSection(containerEl: HTMLElement): void {
     containerEl.createEl("h3", { text: "Skills" });
-    new Setting(containerEl)
+    if (Platform.isDesktopApp) new Setting(containerEl)
       .setName("外部 Skills 目录")
       .setDesc("桌面端可填写多个绝对路径，每行一个；库内 .agents/skills 等标准目录会自动扫描。")
       .addTextArea((text) => {
@@ -227,6 +231,7 @@ export class QiaomuSettingTab extends PluginSettingTab {
   }
 
   private renderAdvancedSection(containerEl: HTMLElement): void {
+    if (!Platform.isDesktopApp) return;
     const details = containerEl.createEl("details", { cls: "qiaomu-agent-settings__advanced" });
     details.createEl("summary", { text: "高级：MCP" });
     details.createEl("p", {

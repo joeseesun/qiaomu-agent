@@ -4,17 +4,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { Chat } from "@ai-sdk/react";
 import { ChatPanel } from "../src/ui/chat-panel";
 import { AgentTransport, type AgentMessage } from "../src/services/chat-transport";
-import type { App, Component } from "obsidian";
+import { Platform, type App, type Component } from "obsidian";
 import type { ComponentProps, ReactNode } from "react";
 vi.mock("obsidian", () => ({
   Component: class {}, Notice: class {},
+  Platform: { isDesktopApp: true },
   MarkdownRenderer: { render: async (_: unknown, text: string, target: HTMLElement) => { target.textContent = text; } },
 }));
 vi.mock("../src/components/ai-elements/conversation", () => ({
   Conversation: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   ConversationContent: ({ children }: { children: ReactNode }) => <div>{children}</div>, ConversationScrollButton: () => null,
 }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); Platform.isDesktopApp = true; });
 function setup() {
   const send = vi.fn(async (_request, callbacks) => { callbacks.onText("测试回复"); });
   const chat = new Chat<AgentMessage>({ transport: new AgentTransport(async (messages) => ({ backend: { id: "mock", label: "Mock", send }, request: { prompt: "test", systemPrompt: "", cwd: null, permissionMode: "plan", history: [], attachments: messages.at(-1)?.metadata?.attachments } })) });
@@ -27,6 +28,15 @@ function setup() {
   const result = render(<ChatPanel {...props} />);
   return { ...result, props, send, chat, input: screen.getByLabelText("给 Agent 的消息") };
 }
+it("mobile Enter does not submit; the send button still works", async () => {
+  Platform.isDesktopApp = false;
+  const { input, send } = setup();
+  fireEvent.change(input, { target: { value: "手机中文输入" } });
+  expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(true);
+  expect(send).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  await waitFor(() => expect(send).toHaveBeenCalledOnce());
+});
 it("slash Enter inserts a template, Escape preserves draft, and IME Enter does not send", async () => {
   const { input, send } = setup();
   fireEvent.change(input, { target: { value: "/测试" } });

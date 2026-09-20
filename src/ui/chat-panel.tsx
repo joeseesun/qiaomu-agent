@@ -1,5 +1,5 @@
 import { useChat, type Chat } from "@ai-sdk/react";
-import { Component, MarkdownRenderer, Notice, type App, type TFile } from "obsidian";
+import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
 import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
@@ -173,7 +173,7 @@ export function ChatPanel(props: Props) {
         {props.note && <PromptInputHeader><span className="qa-note"><FileText size={13} /><span>{props.note.basename}</span>
           <button type="button" disabled={running} onClick={props.onToggleNote}><X size={12} /><span className="qiaomu-agent__sr-only">不附加当前笔记</span></button></span></PromptInputHeader>}
         <label htmlFor={inputId} className="qiaomu-agent__sr-only">给 Agent 的消息</label>
-        <PromptInputTextarea id={inputId} ref={textarea} value={input} aria-controls={menuOpen ? `${inputId}-menu` : undefined} aria-activedescendant={menuOpen ? `${inputId}-option-${menuIndex}` : undefined}
+        <PromptInputTextarea submitOnEnter={Platform.isDesktopApp} id={inputId} ref={textarea} value={input} aria-controls={menuOpen ? `${inputId}-menu` : undefined} aria-activedescendant={menuOpen ? `${inputId}-option-${menuIndex}` : undefined}
           onKeyDown={(e) => {
             if (!menuOpen || e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setMenuIndex((n) => (n + (e.key === "ArrowDown" ? 1 : promptChoices.length)) % (promptChoices.length + 1)); }

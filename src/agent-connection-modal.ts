@@ -1,4 +1,4 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { App, Modal, Notice, Platform, setIcon } from "obsidian";
 import type QiaomuAgentPlugin from "./main";
 import type { AgentConnectionOption } from "./services/backend-service";
 
@@ -33,7 +33,7 @@ export class AgentConnectionModal extends Modal {
     content.createEl("h2", { text: "连接 Agent" });
     content.createEl("p", {
       cls: "qiaomu-agent-connect__subtitle",
-      text: "选择一个本地 Agent 或模型服务，立即开始对话。",
+      text: Platform.isDesktopApp ? "选择一个本地 Agent 或模型服务，立即开始对话。" : "手机使用模型 API；请在本设备配置 API Key。",
     });
 
     const grid = content.createDiv({ cls: "qiaomu-agent-connect__grid" });
@@ -69,6 +69,7 @@ export class AgentConnectionModal extends Modal {
 
     const footer = content.createDiv({ cls: "qiaomu-agent-connect__footer" });
     const refresh = footer.createEl("button", { text: "重新检测" });
+    refresh.hidden = !Platform.isDesktopApp;
     refresh.addEventListener("click", async () => {
       refresh.disabled = true;
       refresh.setText("检测中…");
