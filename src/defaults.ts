@@ -37,6 +37,9 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
     ...DEFAULT_SETTINGS,
     ...data,
     schemaVersion: 1,
+    customPrompts: Array.isArray(data.customPrompts) ? data.customPrompts.filter((p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.body === "string") : [],
+    conversations: Array.isArray(data.conversations) ? data.conversations.filter((c) => c && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.messages)).slice(0, 30) : [],
+    modelSelections: data.modelSelections && typeof data.modelSelections === "object" && !Array.isArray(data.modelSelections) ? Object.fromEntries(Object.entries(data.modelSelections).filter(([, v]) => v && typeof v.model === "string" && typeof v.effort === "string")) : {},
     api: { ...DEFAULT_SETTINGS.api, ...api },
     quickPrompts: Array.isArray(data.quickPrompts)
       ? data.quickPrompts.filter((item): item is string => typeof item === "string").slice(0, 8)

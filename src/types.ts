@@ -22,7 +22,12 @@ export interface QiaomuSettings {
   skillDirectories: string[];
   mcpConfig: string;
   lastConversation: ChatMessage[];
+  conversations?: Array<{ id: string; title: string; messages: ChatMessage[] }>;
+  modelSelections?: Record<string, { model: string; effort: string }>;
+  customPrompts?: PromptTemplate[];
 }
+
+export interface PromptTemplate { id: string; name: string; body: string; }
 
 export type ChatRole = "user" | "assistant" | "status";
 
@@ -32,6 +37,8 @@ export interface ChatMessage {
   content: string;
   createdAt: number;
   backend?: string;
+  sourcePath?: string;
+  attachments?: ChatAttachment[];
   activities?: ChatActivity[];
 }
 
@@ -49,6 +56,8 @@ export interface ChatRequest {
   systemPrompt: string;
   cwd: string | null;
   model?: string;
+  reasoningEffort?: string;
+  attachments?: ChatAttachment[];
   permissionMode: PermissionMode;
   activeFilePath?: string;
   activeFileContent?: string;
@@ -79,6 +88,24 @@ export interface ChatBackend {
   send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void>;
   resetSession?(): void;
   shutdown?(): Promise<void>;
+  listModels?(request: ChatRequest): Promise<ModelChoice[]>;
+}
+
+export interface ModelChoice {
+  id: string;
+  name: string;
+  efforts: string[];
+  isDefault?: boolean;
+}
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  text?: string;
+  url?: string;
+  vaultPath?: string;
 }
 
 export interface CliDetection {

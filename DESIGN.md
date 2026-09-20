@@ -11,7 +11,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 ## Functional contract
 
 - The sidebar shows a conversation title, conversation, attached-note context, Skill selector, permission mode, Agent selector, composer, and new-conversation action. Status appears only when actionable or running.
-- Clicking the active Agent opens the connection center. Provider cards expose availability, native transport, and version without permanently occupying sidebar space.
+- The composer selects a model and its supported reasoning effort, not a transport. A separate header settings icon opens connection setup (CLI/API).
 - Desktop-native transports are preferred: Codex App Server and ACP where supported. Model APIs remain the mobile fallback.
 - Markdown is rendered through Obsidian's renderer so GFM-like tables, code, internal links, and Mermaid follow the host application.
 - Tool activity is grouped into one expandable execution summary per response. Failures initially expand; user expansion choices survive streaming updates.
@@ -32,7 +32,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 
 - The first prompt supplies the conversation title; long titles truncate.
 - No permanent provider, protocol, or unverified green connection indicator.
-- The only persistent secondary action is new conversation.
+- Secondary icons are connection setup, history and new conversation.
 
 ### Connection center
 
@@ -49,11 +49,21 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 
 ### Composer
 
-- A single outlined composer contains context chips, text input, and a bottom toolbar for Skill, permission, Agent and send/stop.
-- Agent selection opens the existing connection center. Context only appears when an actual note is attached.
+- A single outlined composer contains removable file/image context chips, text input, and a bottom toolbar for attachments, Skill, permission, model, reasoning effort and send/stop.
+- Model selection uses a native searchable host modal, with capability lists from Codex model/list or ACP configOptions. Unsupported backends retain their configured default; never invent available model IDs.
+- `/` at the start of a single-line draft opens searchable Prompt choices. Enter inserts rather than sends; Escape keeps the draft; IME composition never submits. Custom templates can be created/edited/copied/deleted through the menu.
+- `@` at a token boundary opens the native vault file picker. Upload, paste and drop share attachment ingestion and limits (6 files, 5 MB each, 10 MB total). Unsupported inputs retain the draft and display an actionable error.
 - Reading older content disables automatic scroll-follow; returning near the bottom resumes it.
 - Enter sends; Shift+Enter inserts a line break.
 - The permission selector uses plain-language Chinese labels.
+
+### Reply actions and persistence
+
+- Reply action buttons are Lucide icons only: Copy, CalendarPlus, FilePlus2. Accessible names and targeted tooltips are retained per the user's explicit icon requirement.
+- File append shows an exact path and Markdown preview before committing. It uses Vault.process and offers conservative undo, refusing to overwrite edits in the affected prefix. Manual user writes are distinct from AI tool permission mode.
+- Daily target resolution and creation use official Obsidian CLI so host folder/date/template settings remain authoritative. Mobile users can append to an explicitly selected Markdown file; daily CLI actions require desktop.
+- New conversations archive the previous transcript instead of discarding it. Persistence retains attachment snapshots (local plugin data); they are not encrypted separately from Obsidian storage.
+- Reused AI Elements composition and Apache notices are recorded in THIRD_PARTY_NOTICES.md. Rendering stays host-native for wiki links/Mermaid; host trust prompts must not be bypassed.
 
 ## Responsive behavior
 

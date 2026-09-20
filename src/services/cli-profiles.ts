@@ -1,4 +1,5 @@
 import type { ChatRequest, CliProfile } from "../types";
+import { attachmentContext } from "./attachments";
 
 export function promptWithContext(request: ChatRequest): string {
   const sections: string[] = [];
@@ -24,6 +25,8 @@ export function promptWithContext(request: ChatRequest): string {
     );
   }
   sections.push(request.prompt);
+  const attached = attachmentContext(request);
+  if (attached) sections.push(attached);
   return sections.join("\n\n");
 }
 

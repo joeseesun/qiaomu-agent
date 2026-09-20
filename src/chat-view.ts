@@ -1,464 +1,237 @@
-import { Component, ItemView, MarkdownRenderer, Menu, Notice, setIcon, WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, WorkspaceLeaf } from "obsidian";
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { Chat } from "@ai-sdk/react";
 import type QiaomuAgentPlugin from "./main";
-import type { AgentSkill, ChatActivity, ChatMessage } from "./types";
-import { createId } from "./utils";
+import type { AgentSkill, PermissionMode, ChatAttachment, ChatRequest, ModelChoice } from "./types";
+import { FilePicker, ModelPicker, ModelIdDialog, PromptManager, AppendDialog } from "./ui/host-dialogs";
+import { readAttachment, validateAttachments, MAX_ATTACHMENT_BYTES } from "./services/attachments";
 import { AgentConnectionModal } from "./agent-connection-modal";
+import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage } from "./services/chat-transport";
+import { ChatPanel } from "./ui/chat-panel";
 
 export const VIEW_TYPE_QIAOMU_AGENT = "qiaomu-agent-view";
 
 export class ChatView extends ItemView {
-  private messages: ChatMessage[] = [];
-  private messagesEl!: HTMLElement;
-  private emptyEl!: HTMLElement;
-  private backendButton!: HTMLButtonElement;
-  private textarea!: HTMLTextAreaElement;
-  private sendButton!: HTMLButtonElement;
-  private statusEl!: HTMLElement;
-  private contextEl!: HTMLElement;
-  private skillButton!: HTMLButtonElement;
+  chat!: Chat<AgentMessage>;
+  private root: Root | null = null;
   private selectedSkill: AgentSkill | null = null;
   private selectedBackend = "auto";
-  private abortController: AbortController | null = null;
-  private renderComponents = new Map<string, Component>();
-  private titleEl!: HTMLElement;
-  private newButton!: HTMLButtonElement;
-  private modeSelect!: HTMLSelectElement;
-  private followOutput = true;
-  private activityExpanded = new Map<string, boolean>();
-  private opening: Promise<void> | null = null;
+  private attachNote = true;
+  private prefill = "";
+  private prefillVersion = 0;
+  private statusText = "";
+  private models: ModelChoice[] = [];
+  private modelLoading = false;
+  private modelGeneration = 0;
+  private capabilitiesKey = "";
+  private persistQueue: Promise<void> = Promise.resolve();
 
-  constructor(leaf: WorkspaceLeaf, private readonly plugin: QiaomuAgentPlugin) {
-    super(leaf);
-  }
-
-  getViewType(): string {
-    return VIEW_TYPE_QIAOMU_AGENT;
-  }
-
-  getDisplayText(): string {
-    return "乔木 Agent";
-  }
-
-  override getIcon(): string {
-    return "sparkles";
-  }
-
-  override async onOpen(): Promise<void> {
-    return this.ensureReady();
-  }
+  constructor(leaf: WorkspaceLeaf, readonly plugin: QiaomuAgentPlugin) { super(leaf); }
+  getViewType(): string { return VIEW_TYPE_QIAOMU_AGENT; }
+  getDisplayText(): string { return "乔木 Agent"; }
+  override getIcon(): string { return "sparkles"; }
+  override async onOpen(): Promise<void> { await this.ensureReady(); }
 
   async ensureReady(): Promise<void> {
-    if (this.opening) return this.opening;
-    if (this.contentEl.querySelector(".qiaomu-agent__composer")) return;
-    this.opening = this.buildView();
-    try { await this.opening; } finally { this.opening = null; }
-  }
-
-  private async buildView(): Promise<void> {
-    this.messages = [...this.plugin.settings.lastConversation];
-    this.selectedBackend = this.plugin.settings.backendKind === "cli" && this.plugin.settings.preferredCli
-      ? `cli:${this.plugin.settings.preferredCli}`
-      : this.plugin.settings.backendKind;
-    const root = this.contentEl;
-    root.empty();
-    root.addClass("qiaomu-agent");
-
-    const header = root.createDiv({ cls: "qiaomu-agent__header" });
-    this.titleEl = header.createDiv({ cls: "qiaomu-agent__title" });
-    const newButton = header.createEl("button", { cls: "qiaomu-agent__new" });
-    this.newButton = newButton;
-    setIcon(newButton, "square-pen");
-    newButton.createSpan({ cls: "qiaomu-agent__sr-only", text: "新对话" });
-    newButton.addEventListener("click", () => this.newConversation());
-
-    this.messagesEl = root.createDiv({ cls: "qiaomu-agent__messages" });
-    this.messagesEl.addEventListener("scroll", () => {
-      this.followOutput = this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight < 64;
+    if (this.root) return;
+    this.attachNote = this.plugin.settings.autoAttachActiveNote;
+    this.contentEl.empty();
+    this.contentEl.addClass("qiaomu-agent", "qiaomu-agent--react");
+    this.chat = new Chat<AgentMessage>({
+      messages: this.plugin.settings.lastConversation.map(fromStoredMessage),
+      transport: new AgentTransport(async (messages, signal) => {
+        // Capture every input before the first await: navigation cannot change this turn.
+        const settings = this.plugin.settings;
+        const backend = this.plugin.backendService.resolve(this.selectedBackend);
+        const file = this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
+        const last = messages.at(-1);
+        if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
+        const parsed: unknown = JSON.parse(settings.mcpConfig || "{}");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
+        const request = {
+          prompt: messageText(last), systemPrompt: settings.systemPrompt,
+          cwd: this.plugin.skillService.getVaultRoot(),
+          model: settings.modelSelections?.[this.selectionKey()]?.model || (backend.id === "api" ? settings.api.model : undefined),
+          reasoningEffort: settings.modelSelections?.[this.selectionKey()]?.effort || undefined,
+          attachments: last.metadata?.attachments,
+          permissionMode: settings.permissionMode, skill: this.selectedSkill ?? undefined,
+          activeFilePath: file?.path,
+          mcpConfig: parsed as Record<string, unknown>,
+          obsidianCli: settings.useObsidianCli ? this.plugin.obsidianCliService.getConnection() : undefined,
+          history: messages.slice(0, -1).map(toStoredMessage),
+        };
+        validateAttachments(request.attachments ?? [], backend.id);
+        const activeFileContent = file ? await this.app.vault.cachedRead(file) : undefined;
+        signal.throwIfAborted();
+        return { backend, request: { ...request, activeFileContent } };
+      }),
+      onData: (part) => {
+        if (part.type === "data-status") { this.statusText = part.data; this.render(); }
+      },
+      onFinish: () => { this.statusText = ""; void this.persist(); this.render(); },
+      onError: () => { this.statusText = ""; void this.persist(); this.render(); },
     });
-    this.emptyEl = this.messagesEl.createDiv({ cls: "qiaomu-agent__empty" });
-    this.renderEmptyState();
-    for (const message of this.messages) await this.renderMessage(message);
-
-    this.buildComposer(root);
+    this.root = createRoot(this.contentEl);
     this.refreshControls();
-    this.updateEmptyState();
   }
 
   override async onClose(): Promise<void> {
-    this.abortController?.abort();
-    this.releaseRenderers();
+    this.modelGeneration++;
+    if (!this.chat) return;
+    await this.chat.stop();
+    await this.persist();
+    this.root?.unmount();
+    this.root = null;
   }
 
-  setComposer(text: string): void {
-    this.textarea.value = text;
-    this.resizeComposer();
-    this.textarea.focus();
-  }
-
+  setComposer(text: string): void { this.prefill = text; this.prefillVersion++; this.render(); }
   newConversation(): void {
-    if (this.abortController) return;
-    this.messages = [];
+    if (this.running()) return;
+    // Existing conversation is archived before clearing, never silently discarded.
+    const stored = this.chat.messages.map(toStoredMessage);
+    if (stored.length) {
+      this.plugin.settings.conversations = [
+        { id: crypto.randomUUID(), title: stored.find((m) => m.role === "user")?.content.slice(0, 60) || "对话", messages: stored.slice(-80) },
+        ...(this.plugin.settings.conversations ?? []),
+      ].slice(0, 30);
+    }
+    this.chat.messages = [];
+    this.chat.clearError();
     this.plugin.backendService.resetSessions();
-    this.plugin.settings.lastConversation = [];
-    this.releaseRenderers();
-    this.activityExpanded.clear();
-    this.messagesEl.querySelectorAll(".qiaomu-agent__message").forEach((element) => element.remove());
-    this.updateEmptyState();
-    this.setStatus("准备就绪");
-    void this.plugin.saveSettings();
+    this.statusText = "";
+    void this.persist();
+    this.render();
   }
-
   refreshControls(): void {
-    if (!this.backendButton) return;
-    const current = this.selectedBackend;
-    const options = this.plugin.backendService.getBackendOptions();
-    const fallback = this.plugin.settings.backendKind === "cli" && this.plugin.settings.preferredCli
-      ? `cli:${this.plugin.settings.preferredCli}`
-      : this.plugin.settings.backendKind;
-    const values = options.map((option) => option.value);
-    this.selectedBackend = values.includes(fallback) ? fallback : values.includes(current) ? current : "auto";
-    const selected = options.find((option) => option.value === this.selectedBackend);
-    this.backendButton.empty();
-    this.backendButton.createSpan({ text: selected?.label.replace(/\s*·.*$/, "") || "连接 Agent" });
-    const chevron = this.backendButton.createSpan({ cls: "qiaomu-agent__backend-chevron" });
-    setIcon(chevron, "chevron-down");
-    this.updateContext();
-  }
-
-  private async selectBackend(value: string): Promise<void> {
-    this.selectedBackend = value;
-    if (value.startsWith("cli:")) {
-      this.plugin.settings.backendKind = "cli";
-      this.plugin.settings.preferredCli = value.slice(4);
-    } else {
-      this.plugin.settings.backendKind = value === "api" ? "api" : "auto";
-    }
-    await this.plugin.saveSettings();
-    this.refreshControls();
-  }
-
-  private buildComposer(root: HTMLElement): void {
-    const composer = root.createDiv({ cls: "qiaomu-agent__composer" });
-    this.statusEl = composer.createDiv({ cls: "qiaomu-agent__status", attr: { role: "status", "aria-live": "polite" } });
-    const box = composer.createDiv({ cls: "qiaomu-agent__composer-box" });
-    const contextRow = box.createDiv({ cls: "qiaomu-agent__context-row" });
-    this.contextEl = contextRow.createDiv({ cls: "qiaomu-agent__context" });
-    const inputRow = box.createDiv({ cls: "qiaomu-agent__input-row" });
-    const toolbar = box.createDiv({ cls: "qiaomu-agent__toolbar" });
-    this.skillButton = toolbar.createEl("button", { cls: "qiaomu-agent__chip", text: "技能" });
-    this.skillButton.addEventListener("click", (event) => this.openSkillMenu(event));
-
-    const modeLabel = toolbar.createEl("label", { cls: "qiaomu-agent__mode-label" });
-    modeLabel.createSpan({ cls: "qiaomu-agent__sr-only", text: "修改权限" });
-    const mode = modeLabel.createEl("select", { cls: "qiaomu-agent__mode" });
-    this.modeSelect = mode;
-    mode.createEl("option", { value: "plan", text: "仅建议" });
-    mode.createEl("option", { value: "edit", text: "允许修改" });
-    mode.value = this.plugin.settings.permissionMode;
-    mode.addEventListener("change", () => {
-      this.plugin.settings.permissionMode = mode.value === "edit" ? "edit" : "plan";
-      void this.plugin.saveSettings();
-    });
-
-    const inputLabel = inputRow.createEl("label", { cls: "qiaomu-agent__input-label" });
-    inputLabel.createSpan({ cls: "qiaomu-agent__sr-only", text: "给 Agent 的消息" });
-    this.textarea = inputLabel.createEl("textarea", {
-      cls: "qiaomu-agent__input",
-      attr: { placeholder: "询问或修改你的笔记…", rows: "2" },
-    });
-    this.textarea.addEventListener("input", () => this.resizeComposer());
-    this.textarea.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-        event.preventDefault();
-        void this.submit();
-      }
-    });
-
-    this.backendButton = toolbar.createEl("button", { cls: "qiaomu-agent__backend" });
-    this.backendButton.addEventListener("click", () => {
-      new AgentConnectionModal(this.app, this.plugin, this.selectedBackend, (value) => {
-        void this.selectBackend(value);
-      }).open();
-    });
-    this.sendButton = toolbar.createEl("button", { cls: "qiaomu-agent__send" });
-    setIcon(this.sendButton, "arrow-up");
-    this.sendButton.createSpan({ cls: "qiaomu-agent__sr-only", text: "发送" });
-    this.sendButton.addEventListener("click", () => {
-      if (this.abortController) this.abortController.abort();
-      else void this.submit();
-    });
-
-  }
-
-  private renderEmptyState(): void {
-    this.emptyEl.empty();
-    const emptyIcon = this.emptyEl.createDiv({ cls: "qiaomu-agent__empty-icon" });
-    setIcon(emptyIcon, "messages-square");
-    this.emptyEl.createEl("h3", { text: "从当前笔记开始" });
-    this.emptyEl.createEl("p", { text: "提问、整理内容，或在允许后修改 Vault。" });
-    const prompts = this.emptyEl.createDiv({ cls: "qiaomu-agent__quick-prompts" });
-    for (const prompt of this.plugin.settings.quickPrompts.slice(0, 4)) {
-      const button = prompts.createEl("button", { text: prompt });
-      button.addEventListener("click", () => {
-        this.setComposer(prompt);
-        void this.submit();
-      });
+    const settings = this.plugin.settings;
+    const selected = settings.backendKind === "cli" && settings.preferredCli ? `cli:${settings.preferredCli}` : settings.backendKind;
+    if (selected !== this.selectedBackend) { this.models = []; this.capabilitiesKey = ""; this.modelGeneration++; this.modelLoading = false; }
+    this.selectedBackend = selected;
+    this.render();
+    const ready = this.plugin.backendService.getBackendOptions().find((option) => option.value === selected)?.ready;
+    if (this.root && ready && !this.running() && !this.modelLoading) {
+      const key = this.selectionKey();
+      if (this.capabilitiesKey !== key && this.plugin.settings.modelSelections?.[key]) { this.capabilitiesKey = key; void this.openModels(false); }
     }
   }
-
-  private async submit(): Promise<void> {
-    const prompt = this.textarea.value.trim();
-    if (!prompt || this.abortController) return;
-
-    let mcpConfig: Record<string, unknown> | undefined;
+  private selectionKey(): string {
+    const backend = this.plugin.backendService.resolve(this.selectedBackend);
+    const api = this.plugin.settings.api;
+    return backend.id === "api" ? `api:${api.provider}:${api.baseUrl}` : backend.id;
+  }
+  private async openModels(showPicker = true): Promise<void> {
+    if (this.running() || this.modelLoading) return;
+    const generation = ++this.modelGeneration;
+    this.modelLoading = true; this.render();
     try {
-      const parsed: unknown = JSON.parse(this.plugin.settings.mcpConfig || "{}");
-      if (parsed && typeof parsed === "object") mcpConfig = parsed as Record<string, unknown>;
-    } catch {
-      new Notice("MCP 配置不是有效 JSON，请在设置中修正");
-      return;
-    }
-
-    const history = [...this.messages];
-    let backend;
-    try {
-      backend = this.plugin.backendService.resolve(this.selectedBackend);
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : String(error));
-      return;
-    }
-    const userMessage: ChatMessage = { id: createId(), role: "user", content: prompt, createdAt: Date.now() };
-    const assistantMessage: ChatMessage = {
-      id: createId(),
-      role: "assistant",
-      content: "",
-      createdAt: Date.now(),
-      backend: backend.label,
-    };
-    this.messages.push(userMessage, assistantMessage);
-    this.abortController = new AbortController();
-    this.followOutput = true;
-    this.setRunning(true);
-    this.textarea.value = "";
-    this.resizeComposer();
-    this.updateEmptyState();
-    let assistantEl: HTMLElement | undefined;
-    let renderTimer: number | null = null;
-    try {
-      await this.renderMessage(userMessage);
-      assistantEl = await this.renderMessage(assistantMessage);
-      const activeFile = this.plugin.settings.autoAttachActiveNote ? this.plugin.getActiveMarkdownFile() : null;
-      const activeFileContent = activeFile ? await this.app.vault.cachedRead(activeFile) : undefined;
-      this.abortController.signal.throwIfAborted();
-      const scheduleRender = (): void => {
-        if (renderTimer !== null) return;
-        renderTimer = window.setTimeout(() => {
-          renderTimer = null;
-          if (assistantEl?.isConnected) void this.renderMessageContent(assistantMessage, assistantEl);
-        }, 90);
+      const backend = this.plugin.backendService.resolve(this.selectedBackend);
+      const settings = this.plugin.settings;
+      const key = this.selectionKey();
+      const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
+      let choices: ModelChoice[] = [];
+      try { choices = await backend.listModels?.(request) ?? []; }
+      catch (e) { new Notice(String(e)); }
+      if (generation !== this.modelGeneration || !this.root) return;
+      const configured = settings.modelSelections?.[key]?.model || (backend.id === "api" ? settings.api.model : "");
+      if (configured && !choices.some((m) => m.id === configured)) choices.unshift({ id: configured, name: configured, efforts: [] });
+      this.models = choices;
+      if (!showPicker) return;
+      const selectModel = (model: ModelChoice) => {
+        if (this.running() || generation !== this.modelGeneration) return;
+        settings.modelSelections ??= {};
+        settings.modelSelections[key] = { model: model.id, effort: "" };
+        this.plugin.backendService.resetSessions();
+        void this.plugin.saveSettings(); this.render();
       };
-      await backend.send(
-        {
-          prompt,
-          systemPrompt: this.plugin.settings.systemPrompt,
-          cwd: this.plugin.skillService.getVaultRoot(),
-          model: backend.id === "api" ? this.plugin.settings.api.model : undefined,
-          permissionMode: this.plugin.settings.permissionMode,
-          activeFilePath: activeFile?.path,
-          activeFileContent,
-          skill: this.selectedSkill ?? undefined,
-          mcpConfig,
-          obsidianCli: this.plugin.settings.useObsidianCli
-            ? this.plugin.obsidianCliService.getConnection()
-            : undefined,
-          history,
-        },
-        {
-          onText: (text) => {
-            assistantMessage.content += text;
-            scheduleRender();
-          },
-          onStatus: (status) => this.setStatus(status),
-          onActivity: (activity) => {
-            assistantMessage.activities = mergeActivity(assistantMessage.activities, activity);
-            scheduleRender();
-          },
-        },
-        this.abortController.signal
-      );
-      if (renderTimer !== null) window.clearTimeout(renderTimer);
-      if (!assistantMessage.content) assistantMessage.content = "已完成，但模型没有返回可显示的文本。";
-      if (assistantEl?.isConnected) await this.renderMessageContent(assistantMessage, assistantEl);
-      this.setStatus("已连接");
-    } catch (error) {
-      const aborted = this.abortController?.signal.aborted;
-      assistantMessage.content = aborted
-        ? `${assistantMessage.content}\n\n已停止。`.trim()
-        : `${assistantMessage.content}\n\n运行失败：${error instanceof Error ? error.message : String(error)}`.trim();
-      if (assistantEl?.isConnected) await this.renderMessageContent(assistantMessage, assistantEl);
-      this.setStatus(aborted ? "已停止" : "连接异常");
-    } finally {
-      if (renderTimer !== null) window.clearTimeout(renderTimer);
-      this.abortController = null;
-      this.setRunning(false);
-      this.plugin.settings.lastConversation = this.messages.slice(-80);
+      const manual = () => new ModelIdDialog(this.app, configured, selectModel).open();
+      if (!choices.length) { manual(); return; }
+      new ModelPicker(this.app, [...choices, { id: "__manual__", name: "手动输入模型 ID…", efforts: [] }], (model) => model.id === "__manual__" ? manual() : selectModel(model)).open();
+    } catch (e) { new Notice(String(e)); }
+    finally { if (generation === this.modelGeneration) { this.modelLoading = false; this.render(); } }
+  }
+  private chooseFile(choose: (attachment: ChatAttachment) => void): void {
+    new FilePicker(this.app, (file) => {
+      if (file.stat.size > MAX_ATTACHMENT_BYTES) { new Notice("附件超过 5 MB 限制"); return; }
+      void this.app.vault.readBinary(file).then((data) => readAttachment(new File([data], file.name), file.path)).then(choose).catch((e) => new Notice(String(e)));
+    }).open();
+  }
+  private async append(text: string, daily: boolean): Promise<void> {
+    if (!daily) { new FilePicker(this.app, (file) => new AppendDialog(this.app, file.path, text).open(), true).open(); return; }
+    try {
+      const cwd = this.plugin.skillService.getVaultRoot();
+      if (!cwd) throw new Error("今日日记需要桌面 Obsidian CLI；此设备请使用指定文件追加");
+      const path = (await this.plugin.obsidianCliService.run({ type: "daily-path" }, cwd)).trim();
+      if (!path || path.includes("\n") || !path.endsWith(".md") || path.startsWith("/") || path.split("/").includes("..")) throw new Error("无法解析日记路径，请先启用日记插件");
+      new AppendDialog(this.app, path, text, async () => {
+        if (!this.app.vault.getAbstractFileByPath(path)) await this.plugin.obsidianCliService.run({ type: "daily-open" }, cwd);
+      }).open();
+    } catch (e) { new Notice(String(e)); }
+  }
+  private running(): boolean { return this.chat?.status === "submitted" || this.chat?.status === "streaming"; }
+
+  private persist(): Promise<void> {
+    const snapshot = this.chat.messages.slice(-80).map(toStoredMessage);
+    this.persistQueue = this.persistQueue.catch(() => {}).then(async () => {
+      this.plugin.settings.lastConversation = snapshot;
       await this.plugin.saveSettings();
-    }
-  }
-
-  private async renderMessage(message: ChatMessage): Promise<HTMLElement> {
-    const article = this.messagesEl.createEl("article", {
-      cls: `qiaomu-agent__message qiaomu-agent__message--${message.role}`,
     });
-    const content = article.createDiv({ cls: "qiaomu-agent__message-content" });
-    await this.renderMessageContent(message, content);
-    this.scrollToBottom();
-    return content;
+    return this.persistQueue.catch(() => { new Notice("对话保存失败，请勿关闭窗口"); });
   }
-
-  private async renderMessageContent(message: ChatMessage, element: HTMLElement): Promise<void> {
-    const previous = this.renderComponents.get(message.id);
-    if (previous) {
-      this.removeChild(previous);
-      this.renderComponents.delete(message.id);
-    }
-    element.empty();
-    if (message.activities?.length) this.renderActivities(message.id, message.activities, element);
-    if (!message.content) {
-      element.createDiv({ cls: "qiaomu-agent__thinking", text: "正在思考…" });
-      return;
-    }
-    const body = element.createDiv({ cls: "qiaomu-agent__markdown" });
-    const component = new Component();
-    this.addChild(component);
-    this.renderComponents.set(message.id, component);
-    const sourcePath = this.plugin.getActiveMarkdownFile()?.path ?? "";
-    await MarkdownRenderer.render(this.app, message.content, body, sourcePath, component);
-    this.scrollToBottom();
+  private openConnection(): void {
+    new AgentConnectionModal(this.app, this.plugin, this.selectedBackend, (value) => {
+      if (this.running()) return;
+      this.plugin.settings.backendKind = value.startsWith("cli:") ? "cli" : value === "api" ? "api" : "auto";
+      if (value.startsWith("cli:")) this.plugin.settings.preferredCli = value.slice(4);
+      void this.plugin.saveSettings();
+    }).open();
   }
-
-  private renderActivities(messageId: string, activities: ChatActivity[], element: HTMLElement): void {
-    const visible = activities.filter((item) => item.label !== "userMessage");
-    if (visible.length === 0) return;
-    const group = element.createEl("details", { cls: "qiaomu-agent__activities" });
-    const failed = visible.filter((item) => item.status === "failed").length;
-    const running = visible.find((item) => item.status === "running");
-    group.open = this.activityExpanded.get(messageId) ?? failed > 0;
-    group.addEventListener("toggle", () => {
-      if (group.isConnected) this.activityExpanded.set(messageId, group.open);
-    });
-    const heading = group.createEl("summary", { cls: "qiaomu-agent__activity-heading" });
-    const indicator = heading.createSpan();
-    setIcon(indicator, running ? "loader-circle" : failed ? "circle-alert" : "check");
-    heading.createSpan({ text: running ? running.label : failed ? `${failed} 个步骤失败 · 查看过程` : `${visible.length} 个执行步骤` });
-    const chevron = heading.createSpan({ cls: "qiaomu-agent__activity-chevron" });
-    setIcon(chevron, "chevron-right");
-    for (const activity of visible) {
-      const details = group.createEl("details", { cls: `qiaomu-agent__activity is-${activity.status}` });
-      if (activity.status === "running" || activity.status === "failed") details.open = true;
-      const summary = details.createEl("summary");
-      const icon = summary.createSpan({ cls: "qiaomu-agent__activity-icon" });
-      setIcon(icon, activity.status === "completed" ? "check" : activity.status === "failed" ? "circle-alert" : activity.status === "running" ? "loader-circle" : "circle");
-      summary.createSpan({ text: activity.label });
-      summary.createSpan({ cls: "qiaomu-agent__activity-state", text: activityLabel(activity.status) });
-      if (activity.detail) details.createEl("pre", { text: activity.detail });
-    }
-  }
-
   private openSkillMenu(event: MouseEvent): void {
     const menu = new Menu();
-    menu.addItem((item) =>
-      item.setTitle("不使用技能").setChecked(!this.selectedSkill).onClick(() => this.selectSkill(null))
-    );
-    for (const skill of this.plugin.skillService.list()) {
-      menu.addItem((item) =>
-        item.setTitle(skill.name).setChecked(this.selectedSkill?.path === skill.path).onClick(() => this.selectSkill(skill))
-      );
-    }
-    if (this.plugin.skillService.list().length === 0) {
-      menu.addSeparator();
-      menu.addItem((item) => item.setTitle("未发现技能").setDisabled(true));
-    }
+    const choose = (skill: AgentSkill | null) => { if (!this.running()) { this.selectedSkill = skill; this.render(); } };
+    menu.addItem((item) => item.setTitle("不使用技能").setChecked(!this.selectedSkill).onClick(() => choose(null)));
+    for (const skill of this.plugin.skillService.list()) menu.addItem((item) => item.setTitle(skill.name).setChecked(skill.path === this.selectedSkill?.path).onClick(() => choose(skill)));
     menu.showAtMouseEvent(event);
   }
-
-  private selectSkill(skill: AgentSkill | null): void {
-    this.selectedSkill = skill;
-    this.skillButton.setText(skill ? `技能：${skill.name}` : "技能");
+  private openHistory(event: MouseEvent): void {
+    const menu = new Menu();
+    const history = this.plugin.settings.conversations ?? [];
+    if (!history.length) menu.addItem((item) => item.setTitle("暂无历史对话").setDisabled(true));
+    for (const entry of history) menu.addItem((item) => item.setTitle(entry.title).onClick(() => {
+      if (this.running()) return;
+      this.newConversation();
+      this.chat.messages = entry.messages.map(fromStoredMessage);
+      void this.persist(); this.render();
+    }));
+    menu.showAtMouseEvent(event);
   }
-
-  private updateContext(): void {
-    if (!this.contextEl) return;
+  private render(): void {
+    if (!this.root) return;
     const file = this.plugin.getActiveMarkdownFile();
-    this.contextEl.empty();
-    const attached = this.plugin.settings.autoAttachActiveNote && file;
-    this.contextEl.parentElement?.toggle(!!attached);
-    if (attached) {
-      setIcon(this.contextEl.createSpan(), "file-text");
-      this.contextEl.createSpan({ text: file.basename });
-    }
+    const label = this.plugin.backendService.getBackendOptions().find((o) => o.value === this.selectedBackend)?.label.replace(/\s*·.*$/, "") || "连接 Agent";
+    let key = ""; try { key = this.selectionKey(); } catch { /* connection can be unavailable */ }
+    const selection = this.plugin.settings.modelSelections?.[key];
+    const model = this.models.find((m) => m.id === selection?.model);
+    this.root.render(createElement(ChatPanel, {
+      chat: this.chat, app: this.app, parent: this,
+      backendLabel: this.modelLoading ? "加载模型…" : model?.name || selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : `${label} 默认模型`), skillLabel: this.selectedSkill?.name || "技能",
+      efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
+      onModels: () => void this.openModels(),
+      onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(); void this.plugin.saveSettings(); },
+      customPrompts: this.plugin.settings.customPrompts ?? [],
+      onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
+      onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
+      onValidateAttachments: (attachments: ChatAttachment[]) => validateAttachments(attachments, this.plugin.backendService.resolve(this.selectedBackend).id),
+      onAppend: (text: string, daily: boolean) => void this.append(text, daily),
+      permission: this.plugin.settings.permissionMode, note: this.attachNote ? file : null,
+      statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
+      prefill: this.prefill, prefillVersion: this.prefillVersion,
+      onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
+      onHistory: (event: MouseEvent) => this.openHistory(event),
+      onSkill: (event: MouseEvent) => this.openSkillMenu(event),
+      onPermission: (mode: PermissionMode) => { this.plugin.settings.permissionMode = mode; void this.plugin.saveSettings(); },
+      onToggleNote: () => { this.attachNote = !this.attachNote; this.render(); },
+      onPersist: () => this.persist(),
+    }));
   }
-
-  private updateEmptyState(): void {
-    this.emptyEl.toggle(this.messages.length === 0);
-    this.titleEl.setText(this.messages.find((message) => message.role === "user")?.content.split("\n")[0]?.slice(0, 60) || "新对话");
-  }
-
-  private setRunning(running: boolean): void {
-    this.sendButton.empty();
-    setIcon(this.sendButton, running ? "square" : "arrow-up");
-    this.sendButton.createSpan({ cls: "qiaomu-agent__sr-only", text: running ? "停止" : "发送" });
-    this.backendButton.disabled = running;
-    this.newButton.disabled = running;
-    this.modeSelect.disabled = running;
-    this.skillButton.disabled = running;
-  }
-
-  private setStatus(status: string): void {
-    this.statusEl.setText(["准备就绪", "已连接"].includes(status) ? "" : status);
-  }
-
-  private resizeComposer(): void {
-    this.textarea.style.height = "auto";
-    this.textarea.style.height = `${Math.min(this.textarea.scrollHeight, 180)}px`;
-  }
-
-  private scrollToBottom(): void {
-    if (!this.followOutput) return;
-    window.requestAnimationFrame(() => {
-      if (this.followOutput) this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight });
-    });
-  }
-
-  private releaseRenderers(): void {
-    for (const component of this.renderComponents.values()) {
-      this.removeChild(component);
-    }
-    this.renderComponents.clear();
-  }
-}
-
-function mergeActivity(current: ChatActivity[] | undefined, next: ChatActivity): ChatActivity[] {
-  const activities = [...(current ?? [])];
-  const index = activities.findIndex((item) => item.id === next.id);
-  if (index < 0) activities.push(next);
-  else {
-    const previous = activities[index];
-    if (!previous) return activities;
-    activities[index] = {
-    ...previous,
-    ...next,
-    label: next.label === "工具调用" ? previous.label : next.label,
-    detail: next.detail ?? previous.detail,
-  };
-  }
-  return activities;
-}
-
-function activityLabel(status: ChatActivity["status"]): string {
-  if (status === "running") return "进行中";
-  if (status === "completed") return "完成";
-  if (status === "failed") return "失败";
-  if (status === "cancelled") return "已取消";
-  return "等待";
 }
