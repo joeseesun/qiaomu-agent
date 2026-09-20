@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Platform, normalizePath, type App, type TFile } from "obsidian";
+import { FileSystemAdapter, Platform, type App, type TFile } from "obsidian";
 import type { AgentSkill } from "../types";
 import { getRuntimeRequire } from "./runtime-require";
 import { parseSkillFrontmatter } from "../utils";
@@ -95,6 +95,8 @@ export class SkillService {
   getVaultRoot(): string | null {
     if (!Platform.isDesktopApp) return null;
     const adapter = this.app.vault.adapter;
-    return adapter instanceof FileSystemAdapter ? normalizePath(adapter.getBasePath()) : null;
+    // normalizePath is for vault-relative paths and strips the leading slash from macOS paths.
+    // Native agents need the adapter's absolute filesystem path as their cwd/sandbox root.
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
   }
 }

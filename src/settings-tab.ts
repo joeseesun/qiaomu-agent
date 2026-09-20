@@ -193,10 +193,11 @@ export class QiaomuSettingTab extends PluginSettingTab {
       .addDropdown((dropdown) =>
         dropdown
           .addOption("plan", "不允许修改文件")
-          .addOption("edit", "允许修改")
+          .addOption("edit", "允许修改当前 Obsidian 库")
+          .addOption("full", "完全访问本机文件（Codex 桌面端）")
           .setValue(this.plugin.settings.permissionMode)
           .onChange(async (value) => {
-            this.plugin.settings.permissionMode = value === "edit" ? "edit" : "plan";
+            this.plugin.settings.permissionMode = value === "full" ? "full" : value === "edit" ? "edit" : "plan";
             await this.plugin.saveSettings();
           })
       );

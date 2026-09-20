@@ -1,4 +1,4 @@
-export type PermissionMode = "plan" | "edit";
+export type PermissionMode = "plan" | "edit" | "full";
 
 export type BackendKind = "auto" | "cli" | "api";
 

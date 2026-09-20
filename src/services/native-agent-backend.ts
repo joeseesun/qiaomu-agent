@@ -60,8 +60,8 @@ function effectivePrompt(request: ChatRequest, includeSystemPrompt: boolean): st
 export function acpLaunch(agentId: string, permissionMode: PermissionMode): string[] {
   if (agentId === "kimi") return ["acp"];
   if (agentId === "opencode") return ["acp"];
-  if (agentId === "qwen") return ["--acp", "--approval-mode", permissionMode === "edit" ? "auto-edit" : "plan"];
-  return ["--acp", "--approval-mode", permissionMode === "edit" ? "auto_edit" : "plan"];
+  if (agentId === "qwen") return ["--acp", "--approval-mode", permissionMode !== "plan" ? "auto-edit" : "plan"];
+  return ["--acp", "--approval-mode", permissionMode !== "plan" ? "auto_edit" : "plan"];
 }
 
 export function acpMcpServers(config: Record<string, unknown> | undefined): unknown[] {
@@ -242,7 +242,7 @@ export class NativeAgentBackend implements ChatBackend {
       const result = await this.process.request("thread/start", {
         cwd: request.cwd,
         approvalPolicy: "never",
-        sandbox: request.permissionMode === "edit" ? "workspace-write" : "read-only",
+        sandbox: request.permissionMode === "full" ? "danger-full-access" : request.permissionMode === "edit" ? "workspace-write" : "read-only",
         developerInstructions: request.systemPrompt,
         serviceName: "qiaomu_agent_obsidian",
       }, 30_000);
@@ -257,9 +257,11 @@ export class NativeAgentBackend implements ChatBackend {
       ...(request.reasoningEffort ? { effort: request.reasoningEffort } : {}),
       cwd: request.cwd,
       approvalPolicy: "never",
-      sandboxPolicy: request.permissionMode === "edit"
-        ? { type: "workspaceWrite", writableRoots: request.cwd ? [request.cwd] : [], networkAccess: false }
-        : { type: "readOnly" },
+      sandboxPolicy: request.permissionMode === "full"
+        ? { type: "dangerFullAccess" }
+        : request.permissionMode === "edit"
+          ? { type: "workspaceWrite", writableRoots: request.cwd ? [request.cwd] : [], networkAccess: false }
+          : { type: "readOnly" },
     };
     const completion = this.waitForTurn();
     try {
@@ -377,7 +379,7 @@ export class NativeAgentBackend implements ChatBackend {
     if (!this.process) return;
     if (method === "session/request_permission") {
       const options = arrayAt(params, "options").map(record).filter((item): item is Record<string, unknown> => Boolean(item));
-      const desired = this.activePermissionMode === "edit" ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
+      const desired = this.activePermissionMode !== "plan" ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
       const selected = options.find((option) => desired.includes(String(option.kind)));
       if (selected && typeof selected.optionId === "string") {
         this.process.respond(id, { outcome: { outcome: "selected", optionId: selected.optionId } });

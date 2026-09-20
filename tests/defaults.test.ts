@@ -14,5 +14,9 @@ describe("normalizeSettings", () => {
     expect(result.lastConversation).toHaveLength(1);
     expect(result.api.baseUrl).toBe(DEFAULT_SETTINGS.api.baseUrl);
   });
-});
 
+  it("preserves supported permissions and rejects unknown persisted values", () => {
+    expect(normalizeSettings({ permissionMode: "full" }).permissionMode).toBe("full");
+    expect(normalizeSettings({ permissionMode: "unrestricted" }).permissionMode).toBe("plan");
+  });
+});

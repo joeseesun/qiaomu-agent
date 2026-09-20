@@ -95,6 +95,9 @@
 .qiaomu-agent--react .qa-control-popover { position: absolute; bottom: 64px; left: 24px; width: min(280px, calc(100% - 48px)); padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: 14px; background: var(--background-primary); box-shadow: var(--shadow-s); z-index: 6; max-height: min(320px, 45dvh); overflow: auto; overscroll-behavior: contain; }
 .qiaomu-agent--react .qa-model-control .qa-control-popover { left: auto; right: 24px; }
 .qiaomu-agent--react .qa-control-popover button { width: 100%; padding: 8px; min-height: 36px; gap: 10px; text-align: left; justify-content: flex-start; color: var(--text-normal); font-size: 13px; border-radius: 7px; }
+.qiaomu-agent--react .qa-control-popover button > span { flex: 1; }
+.qiaomu-agent--react .qa-popover-section { margin: 6px 8px 2px; padding-top: 8px; border-top: 1px solid var(--background-modifier-border); color: var(--text-muted); font-size: 11px; }
+.qiaomu-agent--react .qa-control-popover .qa-full-access { color: var(--text-warning); }
 .qiaomu-agent--react .qa-control-popover .qa-model { justify-content: space-between; }
 .qiaomu-agent--react .qa-reasoning { padding: 12px 8px 6px; }
 .qiaomu-agent--react .qa-reasoning label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }

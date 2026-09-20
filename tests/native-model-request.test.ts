@@ -22,3 +22,14 @@ it("forwards actual selected model, effort and image to Codex App Server", async
   await backend.send(request, { onText() {}, onStatus() {} }, new AbortController().signal);
   expect(state.calls.find((c) => c.method === "turn/start")?.params).toMatchObject({ model: "test-model", effort: "high", input: [{ type: "text" }, { type: "image", url: "data:image/png;base64,AA==" }] });
 });
+
+it.each([
+  ["plan", { type: "readOnly" }],
+  ["edit", { type: "workspaceWrite", writableRoots: ["/test"], networkAccess: false }],
+  ["full", { type: "dangerFullAccess" }],
+] as const)("maps %s to the matching Codex App Server sandbox", async (permissionMode, sandboxPolicy) => {
+  vi.stubGlobal("window", {});
+  const backend = new NativeAgentBackend({ id: "codex", label: "Codex", command: "codex", path: "/test/codex", version: "test", available: true, callable: true });
+  await backend.send({ prompt: "hello", systemPrompt: "system", cwd: "/test", permissionMode, history: [] }, { onText() {}, onStatus() {} }, new AbortController().signal);
+  expect(state.calls.find((c) => c.method === "turn/start")?.params).toMatchObject({ cwd: "/test", sandboxPolicy });
+});

@@ -49,4 +49,6 @@ Kimi Code、GLM Coding、MiMo Token Plan、Step Plan 与普通按量 API 不混�
 - 原生 Obsidian rockfish：插件重载、Codex 目录返回 5 个模型、同层浮层与搜索聚焦、模型管理入口已验证。
 - 360px 侧栏：clientWidth 与 scrollWidth 均为 360，浮层 278px；截图检查后恢复原宽度。属于桌面窄屏测试，不是手机真机测试。
 - 连接身份变化会废弃旧目录请求，避免切换 API 后继续显示旧连接模型。
+- 本地 Agent 的加号菜单提供只读、可写当前库；Codex 桌面连接另提供完全访问。普通模型 API 不显示本机文件权限。Codex 映射分别为 `readOnly`、`workspaceWrite`、`dangerFullAccess`。
+- 修正 Vault 文件系统根目录被 `normalizePath` 去掉前导 `/` 的问题；原生 Agent 现在收到绝对 `cwd` 与 writable root。
 - 未进行真实付费 API 生成；四协议认证测试不等于四协议完整流式验收。特殊推理参数与手机真机仍待验证。

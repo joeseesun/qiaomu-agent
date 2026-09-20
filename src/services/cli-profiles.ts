@@ -8,8 +8,10 @@ export function promptWithContext(request: ChatRequest): string {
     sections.push(
       `<obsidian_cli executable=${executable}>\n` +
         `The official Obsidian CLI is connected to the running app. Prefer it for vault-aware reads, search, properties, links, tasks, and link-safe moves. ` +
-        (request.permissionMode === "edit"
-          ? "Writes are allowed for this turn, but inspect the target first and do not use permanent deletion."
+        (request.permissionMode !== "plan"
+          ? request.permissionMode === "full"
+            ? "Full filesystem access is explicitly enabled for this turn. Inspect targets first and do not use permanent deletion."
+            : "Writes inside the current workspace are allowed for this turn, but inspect the target first and do not use permanent deletion."
           : "This turn is read-only: use only read, search, listing, and inspection commands; do not modify files or properties.") +
         `\nRun the executable from the vault working directory. CLI parameters use key=value syntax.\n</obsidian_cli>`
     );
@@ -46,7 +48,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "--json",
       "--skip-git-repo-check",
       "--sandbox",
-      request.permissionMode === "edit" ? "workspace-write" : "read-only",
+      request.permissionMode === "full" ? "danger-full-access" : request.permissionMode === "edit" ? "workspace-write" : "read-only",
       ...modelArgs(request, "--model"),
       `${request.systemPrompt}\n\n${promptWithContext(request)}`,
     ],
@@ -64,7 +66,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "--output-format",
       "stream-json",
       "--permission-mode",
-      request.permissionMode === "edit" ? "acceptEdits" : "plan",
+      request.permissionMode !== "plan" ? "acceptEdits" : "plan",
       "--append-system-prompt",
       request.systemPrompt,
       ...modelArgs(request),
@@ -102,7 +104,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "--output-format",
       "stream-json",
       "--approval-mode",
-      request.permissionMode === "edit" ? "auto-edit" : "plan",
+      request.permissionMode !== "plan" ? "auto-edit" : "plan",
       "--system-prompt",
       request.systemPrompt,
       ...modelArgs(request),
@@ -123,7 +125,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "streaming-messages-json",
       "--include-partial-messages",
       "--permission-mode",
-      request.permissionMode === "edit" ? "acceptEdits" : "plan",
+      request.permissionMode !== "plan" ? "acceptEdits" : "plan",
       "--system-prompt",
       request.systemPrompt,
       ...modelArgs(request),
@@ -139,7 +141,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "run",
       "--format",
       "json",
-      ...(request.permissionMode === "edit" ? ["--auto"] : []),
+      ...(request.permissionMode !== "plan" ? ["--auto"] : []),
       ...modelArgs(request),
       `${request.systemPrompt}\n\n${promptWithContext(request)}`,
     ],
@@ -176,7 +178,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "stream-json",
       "--skip-trust",
       "--approval-mode",
-      request.permissionMode === "edit" ? "auto_edit" : "plan",
+      request.permissionMode !== "plan" ? "auto_edit" : "plan",
       ...modelArgs(request),
     ],
   },

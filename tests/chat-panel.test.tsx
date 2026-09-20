@@ -22,7 +22,7 @@ function setup() {
   const chat = new Chat<AgentMessage>({ transport: new AgentTransport(async (messages) => ({ backend: { id: "mock", label: "Mock", send }, request: { prompt: "test", systemPrompt: "", cwd: null, permissionMode: "plan", history: [], attachments: messages.at(-1)?.metadata?.attachments } })) });
   const props: ComponentProps<typeof ChatPanel> = {
     chat, app: {} as App, parent: { addChild() {}, removeChild() {} } as unknown as Component,
-    backendLabel: "Mock", skillLabel: "技能", permission: "plan", note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
+    backendLabel: "Mock", skillLabel: "技能", permission: "plan", fileAccessAvailable: true, fullAccessAvailable: true, note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
     models: [{ id: "mock", name: "Mock model", efforts: [] }], selectedModel: "mock", modelError: "", onSelectModel: vi.fn(), onManualModel: vi.fn(), onManageModels: vi.fn(),
     onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {},
     efforts: ["low", "high"], effort: "", modelLoading: false, onModels: vi.fn(), onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
@@ -93,6 +93,31 @@ it("composer popovers close with Escape, outside click and focus departure witho
   expect(props.onPickFile).toHaveBeenCalledOnce(); expect(screen.queryByRole("dialog")).toBeNull();
   fireEvent.click(trigger); fireEvent.blur(screen.getByRole("button", { name: "上传附件" }), { relatedTarget: input });
   expect(screen.queryByRole("dialog")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
+});
+
+it("offers explicit scoped and full-access modes without a permanent permission label", () => {
+  const { props } = setup();
+  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  expect(screen.getByRole("button", { name: "只读" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "可写当前库" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "完全访问" }));
+  expect(props.onPermission).toHaveBeenCalledWith("full");
+  expect(screen.queryByText("仅建议")).toBeNull();
+});
+
+it("does not offer desktop full-filesystem access on mobile", () => {
+  Platform.isDesktopApp = false;
+  setup();
+  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  expect(screen.queryByRole("button", { name: "完全访问" })).toBeNull();
+});
+
+it("does not imply that a plain model API has local file tools", () => {
+  const { props, rerender } = setup();
+  rerender(<ChatPanel {...props} fileAccessAvailable={false} />);
+  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  expect(screen.queryByText("访问权限")).toBeNull();
+  expect(screen.queryByRole("button", { name: "可写当前库" })).toBeNull();
 });
 
 it("does not invent reasoning capabilities and keeps controls available while loading", () => {

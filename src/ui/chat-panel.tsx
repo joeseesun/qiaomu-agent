@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles, Shield, FolderPen, ShieldAlert } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate, ModelChoice } from "../types";
 import { ModelList } from "./model-list";
@@ -17,7 +17,7 @@ import { ComposerPopover, effortLabel } from "./composer-popover";
 
 interface Props {
   chat: Chat<AgentMessage>; app: App; parent: Component;
-  backendLabel: string; skillLabel: string; permission: PermissionMode; note: TFile | null;
+  backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null;
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
@@ -208,6 +208,11 @@ export function ChatPanel(props: Props) {
               <button type="button" onClick={() => { close(); props.onPickFile(addAttachment); }}><AtSign size={16} />选择库内文件</button>
               {!props.note && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加当前笔记</button>}
               <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
+              {props.fileAccessAvailable && <><div className="qa-popover-section">访问权限</div>
+                <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
+                <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
+                {Platform.isDesktopApp && props.fullAccessAvailable && <button type="button" className="qa-full-access" aria-pressed={props.permission === "full"} onClick={() => { close(); props.onPermission("full"); }}><ShieldAlert size={16} /><span>完全访问</span>{props.permission === "full" && <Check size={14} />}</button>}
+              </>}
             </>}
           </ComposerPopover>
         </PromptInputTools>

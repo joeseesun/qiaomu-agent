@@ -20,6 +20,7 @@ describe("native agent transports", () => {
     expect(acpLaunch("opencode", "edit")).toEqual(["acp"]);
     expect(acpLaunch("qwen", "plan")).toEqual(["--acp", "--approval-mode", "plan"]);
     expect(acpLaunch("gemini", "edit")).toEqual(["--acp", "--approval-mode", "auto_edit"]);
+    expect(acpLaunch("gemini", "full")).toEqual(["--acp", "--approval-mode", "auto_edit"]);
   });
 
   it("converts stdio and HTTP MCP servers into ACP descriptors", () => {

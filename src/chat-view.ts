@@ -48,6 +48,7 @@ export class ChatView extends ItemView {
         // Capture every input before the first await: navigation cannot change this turn.
         const settings = this.plugin.settings;
         const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
+        const permissionMode = settings.permissionMode === "full" && backend.id !== "cli:codex" ? "edit" : settings.permissionMode;
         const file = this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
         const last = messages.at(-1);
         if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
@@ -59,7 +60,7 @@ export class ChatView extends ItemView {
           model: settings.modelSelections?.[this.selectionKey()]?.model || (backend.id === "api" ? settings.api.model : undefined),
           reasoningEffort: settings.modelSelections?.[this.selectionKey()]?.effort || undefined,
           attachments: last.metadata?.attachments,
-          permissionMode: settings.permissionMode, skill: this.selectedSkill ?? undefined,
+          permissionMode, skill: this.selectedSkill ?? undefined,
           activeFilePath: file?.path,
           mcpConfig: parsed as Record<string, unknown>,
           obsidianCli: settings.useObsidianCli ? this.plugin.obsidianCliService.getConnection() : undefined,
@@ -216,6 +217,8 @@ export class ChatView extends ItemView {
     let key = ""; try { key = this.selectionKey(); } catch { /* connection can be unavailable */ }
     const selection = this.plugin.settings.modelSelections?.[key];
     const model = this.models.find((m) => m.id === selection?.model);
+    const fullAccessAvailable = key === "cli:codex";
+    const permission = this.plugin.settings.permissionMode === "full" && !fullAccessAvailable ? "edit" : this.plugin.settings.permissionMode;
     this.root.render(createElement(ChatPanel, {
       chat: this.chat, app: this.app, parent: this,
       backendLabel: this.modelLoading ? "加载模型…" : model?.name || selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : `${label} 默认模型`), skillLabel: this.selectedSkill?.name || "技能",
@@ -231,13 +234,19 @@ export class ChatView extends ItemView {
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
       onValidateAttachments: (attachments: ChatAttachment[]) => validateAttachments(attachments, this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner).id),
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
-      permission: this.plugin.settings.permissionMode, note: this.attachNote ? file : null,
+      permission, fileAccessAvailable: !key.startsWith("api:"), fullAccessAvailable, note: this.attachNote ? file : null,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
       prefill: this.prefill, prefillVersion: this.prefillVersion,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
       onHistory: (event: MouseEvent) => this.openHistory(event),
       onSkill: (event: MouseEvent) => this.openSkillMenu(event),
-      onPermission: (mode: PermissionMode) => { this.plugin.settings.permissionMode = mode; void this.plugin.saveSettings(); },
+      onPermission: (mode: PermissionMode) => {
+        if (this.running() || this.plugin.settings.permissionMode === mode) return;
+        this.plugin.settings.permissionMode = mode;
+        this.plugin.backendService.resetSessions(this.backendOwner);
+        void this.plugin.saveSettings(); this.render();
+        if (mode === "full") new Notice("已为后续对话开启完全访问，请确认路径后再写入");
+      },
       onToggleNote: () => { this.attachNote = !this.attachNote; this.render(); },
       onPersist: () => this.persist(),
     }));
