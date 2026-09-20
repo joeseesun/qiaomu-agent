@@ -107,3 +107,9 @@
 .qiaomu-agent--react .qa-mermaid summary { color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .qiaomu-agent--react .qa-mermaid pre { max-height: 300px; overflow: auto; white-space: pre-wrap; }
 .qiaomu-agent--react .qa-effort-label { color: var(--text-muted); font-size: var(--font-ui-small); }
+.qiaomu-agent--react .qa-model-picker input { width: 100%; min-height: 36px; margin-block: 6px; padding: 6px 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); font: inherit; }
+.qiaomu-agent--react .qa-model-results { max-height: min(220px, 30dvh); overflow-y: auto; overscroll-behavior: contain; }
+.qiaomu-agent--react .qa-model-results button { justify-content: space-between; }
+.qiaomu-agent--react .qa-model-results button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qiaomu-agent--react .qa-model-results p { color: var(--text-muted); font-size: var(--font-ui-small); padding: 8px; }
+.qiaomu-agent--react .qa-model-picker-footer { border-top: 1px solid var(--background-modifier-border); margin-top: 6px; padding-top: 6px; }

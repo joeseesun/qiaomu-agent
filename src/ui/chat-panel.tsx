@@ -2,7 +2,8 @@ import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
 import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
+import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate, ModelChoice } from "../types";
+import { ModelList } from "./model-list";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
 import { slashQuery, startsFileMention } from "../services/composer";
 import { Attachments } from "../components/ai-elements/attachments";
@@ -21,7 +22,9 @@ interface Props {
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onToggleNote: () => void; onPersist: () => Promise<void>;
-  efforts: string[]; effort: string; modelLoading: boolean; onModels: (anchor: { x: number; y: number }) => void; onEffort: (effort: string) => void;
+  efforts: string[]; effort: string; modelLoading: boolean; onModels: () => void; onEffort: (effort: string) => void;
+  models: ModelChoice[]; selectedModel: string; modelError: string; onSelectModel: (model: ModelChoice) => void;
+  onManualModel: () => void; onManageModels: () => void;
   customPrompts: PromptTemplate[]; onManagePrompts: () => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
   onValidateAttachments: (attachments: ChatAttachment[]) => void;
@@ -73,6 +76,7 @@ function Activities({ activities, running }: { activities: ChatActivity[]; runni
 }
 
 export function ChatPanel(props: Props) {
+  const [showModelList, setShowModelList] = useState(false);
   const { messages, status, error, sendMessage, stop, clearError } = useChat({ chat: props.chat, experimental_throttle: 75 });
   const [input, setInput] = useState("");
   const [stopped, setStopped] = useState(false);
@@ -207,10 +211,12 @@ export function ChatPanel(props: Props) {
             </>}
           </ComposerPopover>
         </PromptInputTools>
-        <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running || props.modelLoading}
+        <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running}
           trigger={<><span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
-          {(close) => <>
-            <button className="qa-model" type="button" aria-haspopup="menu" onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); close(); props.onModels({ x: rect.left, y: rect.top }); }}><span>{props.backendLabel}</span><ChevronRight size={14} /></button>
+          {(close) => showModelList ? <ModelList models={props.models} selected={props.selectedModel} loading={props.modelLoading} error={props.modelError}
+            onSelect={(model) => { props.onSelectModel(model); setShowModelList(false); close(); }} onRetry={props.onModels}
+            onBack={() => setShowModelList(false)} onManual={() => { close(); props.onManualModel(); }} onManage={() => { close(); props.onManageModels(); }} /> : <>
+            <button className="qa-model" type="button" onClick={() => { setShowModelList(true); props.onModels(); }}><span>{props.backendLabel}</span><ChevronRight size={14} /></button>
             {!!props.efforts.length && <div className="qa-reasoning">
               <label htmlFor={`${inputId}-effort`}><span>推理强度</span><span className="qa-reasoning-value">{effortLabel(props.effort)}</span></label>
               <input id={`${inputId}-effort`} type="range" min={0} max={props.efforts.length} step={1}

@@ -9,6 +9,7 @@ import { readAttachment, validateAttachments, MAX_ATTACHMENT_BYTES } from "./ser
 import { AgentConnectionModal } from "./agent-connection-modal";
 import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage } from "./services/chat-transport";
 import { ChatPanel } from "./ui/chat-panel";
+import { ModelManagerModal } from "./settings-tab";
 
 export const VIEW_TYPE_QIAOMU_AGENT = "qiaomu-agent-view";
 
@@ -23,8 +24,10 @@ export class ChatView extends ItemView {
   private statusText = "";
   private models: ModelChoice[] = [];
   private modelLoading = false;
+  private modelError = "";
   private modelGeneration = 0;
   private capabilitiesKey = "";
+  private connectionIdentity = "";
   private persistQueue: Promise<void> = Promise.resolve();
   private readonly backendOwner = crypto.randomUUID();
 
@@ -108,13 +111,15 @@ export class ChatView extends ItemView {
   refreshControls(): void {
     const settings = this.plugin.settings;
     const selected = this.plugin.backendService.effectiveSelection(settings.backendKind === "cli" && settings.preferredCli ? `cli:${settings.preferredCli}` : settings.backendKind);
-    if (selected !== this.selectedBackend) { this.models = []; this.capabilitiesKey = ""; this.modelGeneration++; this.modelLoading = false; }
+    const identity = `${selected}:${settings.api.provider}:${settings.api.baseUrl}:${settings.api.protocol}:${settings.api.secretId}`;
+    if (identity !== this.connectionIdentity) { this.models = []; this.modelError = ""; this.capabilitiesKey = ""; this.modelGeneration++; this.modelLoading = false; }
+    this.connectionIdentity = identity;
     this.selectedBackend = selected;
     this.render();
     const ready = this.plugin.backendService.getBackendOptions().find((option) => option.value === selected)?.ready;
     if (this.root && ready && !this.running() && !this.modelLoading) {
       const key = this.selectionKey();
-      if (this.capabilitiesKey !== key && this.plugin.settings.modelSelections?.[key]) { this.capabilitiesKey = key; void this.openModels(false); }
+      if (this.capabilitiesKey !== key && this.plugin.settings.modelSelections?.[key]) { this.capabilitiesKey = key; void this.openModels(); }
     }
   }
   private selectionKey(): string {
@@ -122,7 +127,7 @@ export class ChatView extends ItemView {
     const api = this.plugin.settings.api;
     return backend.id === "api" ? `api:${api.provider}:${api.baseUrl}` : backend.id;
   }
-  private async openModels(showPicker = true, anchor?: { x: number; y: number }): Promise<void> {
+  private async openModels(): Promise<void> {
     if (this.running() || this.modelLoading) return;
     const generation = ++this.modelGeneration;
     this.modelLoading = true; this.render();
@@ -133,25 +138,11 @@ export class ChatView extends ItemView {
       const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: backend.id === "api" ? {} : JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
       let choices: ModelChoice[] = [];
       try { choices = await backend.listModels?.(request) ?? []; }
-      catch (e) { new Notice(String(e)); }
+      catch { if (generation === this.modelGeneration) this.modelError = "无法获取模型，请重试或手动输入 ID"; }
       if (generation !== this.modelGeneration || !this.root) return;
       const configured = settings.modelSelections?.[key]?.model || (backend.id === "api" ? settings.api.model : "");
       if (configured && !choices.some((m) => m.id === configured)) choices.unshift({ id: configured, name: configured, efforts: [] });
       this.models = choices;
-      if (!showPicker) return;
-      const selectModel = (model: ModelChoice) => {
-        if (this.running() || generation !== this.modelGeneration) return;
-        settings.modelSelections ??= {};
-        settings.modelSelections[key] = { model: model.id, effort: "" };
-        this.plugin.backendService.resetSessions(this.backendOwner);
-        void this.plugin.saveSettings(); this.render();
-      };
-      const manual = () => new ModelIdDialog(this.app, configured, selectModel).open();
-      const menu = new Menu().setUseNativeMenu(false);
-      for (const model of choices) menu.addItem((item) => item.setTitle(model.name).setChecked(model.id === configured).onClick(() => selectModel(model)));
-      if (choices.length) menu.addSeparator();
-      menu.addItem((item) => item.setTitle("输入模型 ID…").setIcon("pencil").onClick(manual));
-      menu.showAtPosition(anchor ?? { x: 0, y: 0 }, this.contentEl.ownerDocument);
     } catch (e) { new Notice(String(e)); }
     finally { if (generation === this.modelGeneration) { this.modelLoading = false; this.render(); } }
   }
@@ -210,6 +201,14 @@ export class ChatView extends ItemView {
     }));
     menu.showAtMouseEvent(event);
   }
+  private selectModel(model: ModelChoice): void {
+    if (this.running()) return;
+    const settings = this.plugin.settings;
+    settings.modelSelections ??= {};
+    settings.modelSelections[this.selectionKey()] = { model: model.id, effort: "" };
+    this.plugin.backendService.resetSessions(this.backendOwner);
+    void this.plugin.saveSettings(); this.render();
+  }
   private render(): void {
     if (!this.root) return;
     const file = this.plugin.getActiveMarkdownFile();
@@ -221,7 +220,11 @@ export class ChatView extends ItemView {
       chat: this.chat, app: this.app, parent: this,
       backendLabel: this.modelLoading ? "加载模型…" : model?.name || selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : `${label} 默认模型`), skillLabel: this.selectedSkill?.name || "技能",
       efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
-      onModels: (anchor: { x: number; y: number }) => void this.openModels(true, anchor),
+      onModels: () => { this.modelError = ""; void this.openModels(); },
+      models: this.models, selectedModel: selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : ""), modelError: this.modelError,
+      onSelectModel: (choice: ModelChoice) => this.selectModel(choice),
+      onManualModel: () => new ModelIdDialog(this.app, selection?.model || "", (choice) => this.selectModel(choice)).open(),
+      onManageModels: () => new ModelManagerModal(this.app, this.plugin).open(),
       onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
       onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),

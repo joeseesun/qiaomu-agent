@@ -23,6 +23,7 @@ function setup() {
   const props: ComponentProps<typeof ChatPanel> = {
     chat, app: {} as App, parent: { addChild() {}, removeChild() {} } as unknown as Component,
     backendLabel: "Mock", skillLabel: "技能", permission: "plan", note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
+    models: [{ id: "mock", name: "Mock model", efforts: [] }], selectedModel: "mock", modelError: "", onSelectModel: vi.fn(), onManualModel: vi.fn(), onManageModels: vi.fn(),
     onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {},
     efforts: ["low", "high"], effort: "", modelLoading: false, onModels: vi.fn(), onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
   };
@@ -69,7 +70,9 @@ it("model/effort actions and icon-only reply actions invoke the right callbacks"
   expect(container.querySelector(".qa-effort-label")).toBeTruthy();
   fireEvent.change(screen.getByRole("slider", { name: /推理强度/ }), { target: { value: "2" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
   fireEvent.click(screen.getByRole("button", { name: "Mock" })); expect(props.onModels).toHaveBeenCalledOnce();
-  expect(props.onModels).toHaveBeenCalledWith({ x: expect.any(Number), y: expect.any(Number) });
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Mock model" }));
+  expect(props.onSelectModel).toHaveBeenCalledWith(props.models[0]);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.queryByText("仅建议")).toBeNull();
   expect(screen.queryByText("🧠")).toBeNull();
@@ -92,12 +95,12 @@ it("composer popovers close with Escape, outside click and focus departure witho
   expect(screen.queryByRole("dialog")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
 });
 
-it("does not invent reasoning capabilities and dismisses controls while loading", () => {
+it("does not invent reasoning capabilities and keeps controls available while loading", () => {
   const { props, rerender } = setup();
   rerender(<ChatPanel {...props} efforts={[]} />);
   fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
   expect(screen.queryByRole("slider")).toBeNull();
   rerender(<ChatPanel {...props} modelLoading />);
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect((screen.getByRole("button", { name: "模型与推理" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole("dialog")).not.toBeNull();
+  expect((screen.getByRole("button", { name: "模型与推理" }) as HTMLButtonElement).disabled).toBe(false);
 });

@@ -15,7 +15,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - Desktop-native transports are preferred: Codex App Server and ACP where supported. Model APIs remain the mobile fallback.
 - Markdown is rendered through Obsidian's renderer so GFM-like tables, code, internal links, and Mermaid follow the host application.
 - Tool activity is grouped into one expandable execution summary per response. Failures initially expand; user expansion choices survive streaming updates.
-- File changes require the explicit `允许修改` mode. `仅建议` remains the default-safe posture.
+- File changes require the explicit `允许修改` mode. Write permission stays in settings; no `仅建议` label in the composer.
 
 ## Visual language
 
@@ -55,7 +55,8 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - `@` at a token boundary opens the native vault file picker. Upload, paste and drop share attachment ingestion and limits (6 files, 5 MB each, 10 MB total). Unsupported inputs retain the draft and display an actionable error.
 - Reading older content disables automatic scroll-follow; returning near the bottom resumes it.
 - Enter sends; Shift+Enter inserts a line break.
-- No permanent permission selector in the composer. Permissions remain in settings; removing a label never grants write access. The latest feedback replaces the brain emoji with Lucide Brain, consistent with all action icons.
+- No permanent permission selector in the composer. Permissions remain in settings; removing a label never grants write access. Reasoning effort is muted text without a brain icon.
+- Model navigation stays in one anchored popover: search, keyboard navigation, checked selection, loading/error/retry, manual ID, and a fixed model-management footer. Management reuses host settings; no second native model menu.
 - Quiet input: a stable neutral 1px border, 20px radius, no hover background/ring or focus-within border jump. Keyboard-visible textarea focus has a restrained outline.
 - The left plus opens attachment/note/Skill actions; the right model chip opens a compact non-modal popover containing model selection and supported discrete effort levels. Escape restores focus; outside click and Tab departure dismiss. No hover-only controls.
 - User messages have a restrained neutral 18px bubble capped at 90% width; assistant Markdown remains flat with 28px inter-message spacing. Preserve Chinese system fonts and host theme variables.

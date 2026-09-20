@@ -1,6 +1,40 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiBackend } from "../src/services/api-backend";
 import { DEFAULT_SETTINGS } from "../src/defaults";
+import type { ChatRequest } from "../src/types";
+
+const request: ChatRequest = { prompt: "你好", systemPrompt: "测试", cwd: null, permissionMode: "plan", history: [] };
+const callbacks = () => ({ onText: vi.fn(), onStatus: vi.fn() });
+
+describe("API streaming transport", () => {
+  it("sends the configured model and streams Chinese text through the real SDK parser", async () => {
+    const chunks = [
+      { id: "c1", object: "chat.completion.chunk", created: 1, model: "test", choices: [{ index: 0, delta: { role: "assistant", content: "中文" }, finish_reason: null }] },
+      { id: "c1", object: "chat.completion.chunk", created: 1, model: "test", choices: [{ index: 0, delta: { content: "回复" }, finish_reason: "stop" }] },
+    ];
+    const fetcher = vi.fn().mockResolvedValue(new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const cb = callbacks();
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "siliconflow", model: "test" }, "fake").send(request, cb, new AbortController().signal);
+    expect(cb.onText.mock.calls.flat().join("")).toBe("中文回复");
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/chat\/completions$/);
+    expect(JSON.parse(init.body).model).toBe("test");
+    expect(JSON.parse(init.body).stream).toBe(true);
+  });
+  it("does not retry authentication failures", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Invalid key", type: "authentication_error" } }), { status: 401 }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(new ApiBackend(DEFAULT_SETTINGS.api, "fake").send(request, callbacks(), new AbortController().signal)).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it("never starts a request that was already cancelled", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const controller = new AbortController(); controller.abort();
+    await expect(new ApiBackend(DEFAULT_SETTINGS.api, "fake").send(request, callbacks(), controller.signal)).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
 
 afterEach(() => vi.unstubAllGlobals());
 describe("API discovery transport", () => {

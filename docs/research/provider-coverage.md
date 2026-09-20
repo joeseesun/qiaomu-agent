@@ -39,5 +39,14 @@ Kimi Code、GLM Coding、MiMo Token Plan、Step Plan 与普通按量 API 不混�
 
 继续 quiet-native 方向；连接配置与聊天模型选择分离；高级协议和地址折叠。
 已调查 [AI Elements Model Selector](https://elements.ai-sdk.dev/components/model-selector)：官方为 Dialog + cmdk；用户明确要求输入框锚定菜单，因此本轮未复制其 Dialog 源码，也没有引入新的 UI 运行时。
-去掉大脑图标，推理强度显示灰字。完整同层模型搜索/管理弹出菜单尚待实现。
+去掉大脑图标，推理强度显示灰字。已实现同层模型搜索、选择、错误重试、手动 ID 和模型管理入口。
 开源调查与许可证边界见同目录 2026-09-20-chatbot-model-management.md；未复制 AGPL 项目源码。
+
+## 本轮回归记录
+
+- `npm run check`：18 个测试文件，63 项测试通过；类型检查、生产构建通过。
+- SDK Chat Completions 流式解析：模拟 SSE 中文分片完整拼接；401 不重试；已取消请求不发网络。
+- 原生 Obsidian rockfish：插件重载、Codex 目录返回 5 个模型、同层浮层与搜索聚焦、模型管理入口已验证。
+- 360px 侧栏：clientWidth 与 scrollWidth 均为 360，浮层 278px；截图检查后恢复原宽度。属于桌面窄屏测试，不是手机真机测试。
+- 连接身份变化会废弃旧目录请求，避免切换 API 后继续显示旧连接模型。
+- 未进行真实付费 API 生成；四协议认证测试不等于四协议完整流式验收。特殊推理参数与手机真机仍待验证。

@@ -1,11 +1,21 @@
-import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type QiaomuAgentPlugin from "./main";
 import type { ApiConnection } from "./types";
 import { API_PROVIDERS, apiProtocol, selectApiProvider, validateApiUrl } from "./services/api-providers";
 import { ApiBackend } from "./services/api-backend";
 
+export class ModelManagerModal extends Modal {
+  constructor(app: App, private readonly plugin: QiaomuAgentPlugin) { super(app); }
+  override onOpen(): void {
+    const tab = new QiaomuSettingTab(this.app, this.plugin, true);
+    tab.containerEl = this.contentEl;
+    tab.display();
+  }
+  override onClose(): void { this.contentEl.empty(); }
+}
+
 export class QiaomuSettingTab extends PluginSettingTab {
-  constructor(app: App, private readonly plugin: QiaomuAgentPlugin) {
+  constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly connectionsOnly = false) {
     super(app, plugin);
   }
 
@@ -13,13 +23,14 @@ export class QiaomuSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("qiaomu-agent-settings");
-    containerEl.createEl("h2", { text: "乔木 Agent" });
+    containerEl.createEl("h2", { text: this.connectionsOnly ? "模型管理" : "乔木 Agent" });
     containerEl.createEl("p", {
       cls: "setting-item-description",
       text: "默认优先使用已验证可调用的本地 Agent；移动端自动回退到模型 API。",
     });
 
     this.renderConnectionSection(containerEl);
+    if (this.connectionsOnly) return;
     this.renderBehaviorSection(containerEl);
     this.renderSkillsSection(containerEl);
     this.renderAdvancedSection(containerEl);
