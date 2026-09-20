@@ -96,6 +96,8 @@ export function ChatPanel(props: Props) {
   const promptChoices = [...props.prompts.map((body, i) => ({ id: `quick-${i}`, name: body, body })), ...props.customPrompts]
     .filter((p) => !query || `${p.name} ${p.body}`.toLocaleLowerCase().includes(query));
   const menuOpen = query !== null && !menuDismissed;
+  const permissionLabel = props.permission === "full" ? "完全访问" : props.permission === "edit" ? "可写当前库" : "只读";
+  const PermissionIcon = props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
   const choosePrompt = (index: number) => {
     const prompt = promptChoices[index];
     if (prompt) setInput(prompt.body); else { props.onManagePrompts(); setInput(""); }
@@ -208,13 +210,15 @@ export function ChatPanel(props: Props) {
               <button type="button" onClick={() => { close(); props.onPickFile(addAttachment); }}><AtSign size={16} />选择库内文件</button>
               {!props.note && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加当前笔记</button>}
               <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
-              {props.fileAccessAvailable && <><div className="qa-popover-section">访问权限</div>
-                <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
-                <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
-                {Platform.isDesktopApp && props.fullAccessAvailable && <button type="button" className="qa-full-access" aria-pressed={props.permission === "full"} onClick={() => { close(); props.onPermission("full"); }}><ShieldAlert size={16} /><span>完全访问</span>{props.permission === "full" && <Check size={14} />}</button>}
-              </>}
             </>}
           </ComposerPopover>
+          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running}>
+            {(close) => <>
+              <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
+              <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
+              {Platform.isDesktopApp && props.fullAccessAvailable && <button type="button" className="qa-full-access" aria-pressed={props.permission === "full"} onClick={() => { close(); props.onPermission("full"); }}><ShieldAlert size={16} /><span>完全访问</span>{props.permission === "full" && <Check size={14} />}</button>}
+            </>}
+          </ComposerPopover>}
         </PromptInputTools>
         <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running}
           trigger={<><span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>

@@ -27,7 +27,7 @@ export function ComposerPopover({ label, trigger, disabled, className = "", chil
   }} onKeyDown={(event) => {
     if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
   }}>
-    <button ref={button} type="button" className="qa-control-trigger" aria-label={label} aria-expanded={open}
+    <button ref={button} type="button" className="qa-control-trigger" aria-label={label} title={label} aria-expanded={open}
       aria-haspopup="dialog" aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{trigger}</button>
     {open && <div ref={panel} id={id} role="dialog" aria-label={label} className="qa-control-popover">{children(close)}</div>}
   </div>;

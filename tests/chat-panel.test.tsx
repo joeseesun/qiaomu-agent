@@ -95,20 +95,23 @@ it("composer popovers close with Escape, outside click and focus departure witho
   expect(screen.queryByRole("dialog")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
 });
 
-it("offers explicit scoped and full-access modes without a permanent permission label", () => {
-  const { props } = setup();
-  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+it("offers scoped and full access from a dedicated icon control", () => {
+  const { props, rerender, container } = setup();
+  fireEvent.click(screen.getByRole("button", { name: "访问权限：只读" }));
   expect(screen.getByRole("button", { name: "只读" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: "可写当前库" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "完全访问" }));
   expect(props.onPermission).toHaveBeenCalledWith("full");
+  rerender(<ChatPanel {...props} permission="full" />);
+  expect(screen.getByRole("button", { name: "访问权限：完全访问" })).toBeTruthy();
+  expect(container.querySelector(".qa-permission-control .lucide-shield-alert")).toBeTruthy();
   expect(screen.queryByText("仅建议")).toBeNull();
 });
 
 it("does not offer desktop full-filesystem access on mobile", () => {
   Platform.isDesktopApp = false;
   setup();
-  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  fireEvent.click(screen.getByRole("button", { name: "访问权限：只读" }));
   expect(screen.queryByRole("button", { name: "完全访问" })).toBeNull();
 });
 
@@ -118,6 +121,7 @@ it("does not imply that a plain model API has local file tools", () => {
   fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
   expect(screen.queryByText("访问权限")).toBeNull();
   expect(screen.queryByRole("button", { name: "可写当前库" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /访问权限：/ })).toBeNull();
 });
 
 it("does not invent reasoning capabilities and keeps controls available while loading", () => {

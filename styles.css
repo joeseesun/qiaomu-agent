@@ -238,12 +238,13 @@
 .is-mobile .qiaomu-agent--react .qa-composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 .is-mobile .qiaomu-agent--react .qa-command-menu { max-height: min(260px, 35dvh); }
 .qiaomu-agent--react .qa-control { min-width: 0; }
-.qiaomu-agent--react .qa-model-control { margin-left: auto; max-width: calc(100% - 88px); }
+.qiaomu-agent--react .qa-model-control { margin-left: auto; max-width: calc(100% - 124px); }
 .qiaomu-agent--react .qa-control-trigger { max-width: 100%; border-radius: 8px; }
 .qiaomu-agent--react .qa-control-trigger svg { flex-shrink: 0; stroke-width: 1.75; }
 .qiaomu-agent--react .qa-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qiaomu-agent--react .qa-control-popover { position: absolute; bottom: 64px; left: 24px; width: min(280px, calc(100% - 48px)); padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: 14px; background: var(--background-primary); box-shadow: var(--shadow-s); z-index: 6; max-height: min(320px, 45dvh); overflow: auto; overscroll-behavior: contain; }
 .qiaomu-agent--react .qa-model-control .qa-control-popover { left: auto; right: 24px; }
+.qiaomu-agent--react .qa-permission-control .qa-control-popover { left: 56px; }
 .qiaomu-agent--react .qa-control-popover button { width: 100%; padding: 8px; min-height: 36px; gap: 10px; text-align: left; justify-content: flex-start; color: var(--text-normal); font-size: 13px; border-radius: 7px; }
 .qiaomu-agent--react .qa-control-popover button > span { flex: 1; }
 .qiaomu-agent--react .qa-popover-section { margin: 6px 8px 2px; padding-top: 8px; border-top: 1px solid var(--background-modifier-border); color: var(--text-muted); font-size: 11px; }
