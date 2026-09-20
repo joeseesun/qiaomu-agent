@@ -1,7 +1,8 @@
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, CliProfile } from "../types";
-import { extractJsonEventText, stripAnsi } from "../utils";
+import { stripAnsi } from "../utils";
 import { getRuntimeRequire } from "./cli-discovery";
 import { getCliProfile } from "./cli-profiles";
+import { parseCliOutputLine } from "./cli-output";
 
 interface ChildProcessModule {
   spawn: (
@@ -64,6 +65,9 @@ export class CliBackend implements ChatBackend {
         let stdoutBuffer = "";
         let stderr = "";
         let emitted = false;
+        let terminalReceived = false;
+        let reportedError: string | null = null;
+        let lastText = "";
 
         const abort = (): void => {
           processHandle.kill("SIGTERM");
@@ -75,10 +79,16 @@ export class CliBackend implements ChatBackend {
           const lines = stdoutBuffer.split(/\r?\n/);
           stdoutBuffer = lines.pop() ?? "";
           for (const line of lines) {
-            const text = this.parseLine(line);
-            if (text) {
+            const event = parseCliOutputLine(line);
+            if (event.error) reportedError = event.error;
+            if (event.text && event.text !== lastText) {
               emitted = true;
-              callbacks.onText(text);
+              lastText = event.text;
+              callbacks.onText(event.text);
+            }
+            if (event.terminal) {
+              terminalReceived = true;
+              processHandle.kill("SIGTERM");
             }
           }
         });
@@ -90,15 +100,18 @@ export class CliBackend implements ChatBackend {
         processHandle.on("close", (code, closeSignal) => {
           signal.removeEventListener("abort", abort);
           if (stdoutBuffer.trim()) {
-            const text = this.parseLine(stdoutBuffer);
-            if (text) {
+            const event = parseCliOutputLine(stdoutBuffer);
+            if (event.error) reportedError = event.error;
+            if (event.text && event.text !== lastText) {
               emitted = true;
-              callbacks.onText(text);
+              callbacks.onText(event.text);
             }
           }
           if (signal.aborted) {
             resolve();
-          } else if (code === 0) {
+          } else if (reportedError) {
+            reject(new Error(reportedError));
+          } else if (code === 0 || terminalReceived) {
             if (!emitted) callbacks.onText("已完成，但该 CLI 没有返回可显示的文本。");
             resolve();
           } else {
@@ -113,17 +126,6 @@ export class CliBackend implements ChatBackend {
       });
     } finally {
       if (temporaryMcpFile) this.removeTemporaryFile(require, temporaryMcpFile);
-    }
-  }
-
-  private parseLine(line: string): string {
-    const cleaned = stripAnsi(line).trimEnd();
-    if (!cleaned) return "";
-    try {
-      const parsed: unknown = JSON.parse(cleaned);
-      return extractJsonEventText(parsed);
-    } catch {
-      return `${cleaned}\n`;
     }
   }
 
