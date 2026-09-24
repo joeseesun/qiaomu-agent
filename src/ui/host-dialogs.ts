@@ -1,5 +1,5 @@
 import { App, FuzzySuggestModal, Modal, Setting, Notice, TFile } from "obsidian";
-import type { ModelChoice, PromptTemplate } from "../types";
+import type { PromptTemplate } from "../types";
 import { appendReply, undoReply } from "../services/note-actions";
 
 export class FilePicker extends FuzzySuggestModal<TFile> {
@@ -7,24 +7,6 @@ export class FilePicker extends FuzzySuggestModal<TFile> {
   getItems(): TFile[] { return this.markdownOnly ? this.app.vault.getMarkdownFiles() : this.app.vault.getFiles(); }
   getItemText(file: TFile): string { return file.path; }
   onChooseItem(file: TFile): void { this.choose(file); }
-}
-export class ModelPicker extends FuzzySuggestModal<ModelChoice> {
-  constructor(app: App, private readonly choices: ModelChoice[], private readonly choose: (model: ModelChoice) => void) { super(app); this.setPlaceholder("搜索模型…"); }
-  getItems(): ModelChoice[] { return this.choices; }
-  getItemText(model: ModelChoice): string { return `${model.name}${model.name !== model.id ? ` · ${model.id}` : ""}`; }
-  onChooseItem(model: ModelChoice): void { this.choose(model); }
-}
-export class ModelIdDialog extends Modal {
-  constructor(app: App, private readonly current: string, private readonly choose: (model: ModelChoice) => void) { super(app); }
-  override onOpen(): void {
-    this.titleEl.setText("指定模型"); let value = this.current;
-    new Setting(this.contentEl).setName("模型 ID").setDesc("使用当前连接支持的模型名称；可用性由服务端验证。").addText((t) => t.setValue(value).onChange((v) => value = v));
-    new Setting(this.contentEl).addButton((b) => b.setButtonText("取消").onClick(() => this.close())).addButton((b) => b.setButtonText("使用模型").setCta().onClick(() => {
-      if (!value.trim()) { new Notice("请输入模型 ID"); return; }
-      this.choose({ id: value.trim(), name: value.trim(), efforts: [] }); this.close();
-    }));
-  }
-  override onClose(): void { this.contentEl.empty(); }
 }
 export class PromptManager extends Modal {
   constructor(app: App, private readonly prompts: PromptTemplate[], private readonly save: (prompts: PromptTemplate[]) => Promise<void>) { super(app); }

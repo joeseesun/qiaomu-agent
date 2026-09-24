@@ -69,7 +69,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - File append shows an exact path and Markdown preview before committing. It uses Vault.process and offers conservative undo, refusing to overwrite edits in the affected prefix. Manual user writes are distinct from AI tool permission mode.
 - Daily target resolution and creation use official Obsidian CLI so host folder/date/template settings remain authoritative. Mobile users can append to an explicitly selected Markdown file; daily CLI actions require desktop.
 - New conversations archive the previous transcript instead of discarding it. Persistence retains attachment snapshots (local plugin data); they are not encrypted separately from Obsidian storage.
-- Reused AI Elements composition and Apache notices are recorded in THIRD_PARTY_NOTICES.md. Wiki links use the host renderer. Complete Mermaid fences use a local renderer in an opaque-origin iframe (scripts only, no same-origin, network, popup, top navigation, or vault access); vault trust settings stay unchanged. Source is available in a collapsed disclosure.
+- Reused AI Elements composition and Apache notices are recorded in THIRD_PARTY_NOTICES.md. Wiki links use the host renderer. Complete Mermaid fences are rendered by Obsidian's own Mermaid (`loadMermaid()`, themed per diagram) and shown as an inert SVG image: no scripts, links or vault access; vault trust settings stay unchanged. Nothing Mermaid-related is bundled. Source is available in a collapsed disclosure.
 
 ### September 20 interaction polish
 
@@ -97,3 +97,33 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - Do not display provider setup controls in the permanent sidebar.
 - Do not silently auto-approve unexpected permission requests.
 - Do not copy AGPL implementation code into this MIT project; protocol behavior may be independently implemented from public specifications.
+
+### WeChat draft publishing
+
+- Entry: command palette and file menu (Lucide `send`). The reply action bar keeps its three icons.
+- A host Modal is the confirmation step: account, theme, title, author, digest, cover source, preflight checks (Lucide `circle-x` / `triangle-alert` / `info`), and a shadow-DOM preview isolated from Obsidian CSS. Publishing is disabled while any check is an error.
+- Only drafts are created (`publish_now: false`). Progress is announced in a polite live region; closing the modal cancels remaining uploads.
+
+### Models (September 24, after magpie)
+
+- One picker for everything. The composer's model chip opens a non-modal popover: search (“筛选，或输入任意模型 ID”) on top, a vertical source rail (all, recent, each agent and provider by brand mark), and a list grouped by source with small uppercase headers. Choosing a model also chooses its source, so there is no separate connection step.
+- Typing an unknown id offers “使用「id」” for the focused source. Enter picks the first match; arrows move through items.
+- Local agents show “默认模型” until their list is fetched; fetching starts the agent, so it only happens when that agent is focused in the rail. Lists are cached.
+- Reasoning effort is a pill row under the list, only when the chosen model reports levels.
+- Settings → 模型 is two cards: local agents (installed only; missing ones collapsed into one line) and providers (brand mark, name, host · model count, masked key with a status dot, chevron). A row expands into an inline editor: key with a “获取密钥” link, model chips that choose what the picker shows, “添加模型 ID”, refresh, and the URL behind a disclosure. A failed fetch (401/403) turns the dot red with “验证失败”.
+- “添加服务商” opens a searchable tile grid grouped into 国内厂商 / 海外厂商 / 聚合平台 / 本机运行, plus 自定义 (name, OpenAI or Anthropic compatible, URL). Adding asks for one field, the key, then fetches the vendor's model list.
+
+### Safe writes (September 24)
+
+- Every local-agent turn is tracked. Before-content comes from, in order: what the agent reports (ACP diff `oldText`), a read when the agent announces the write (Codex `item/started` fileChange, ACP edit `locations`/`rawInput`), what the agent read earlier in the turn, and snapshots taken before the turn (active note, files named in the prompt). Codex patches are reversed if our read raced the write. Vault events catch everything else, listed as untracked.
+- ACP agents get `fs.readTextFile/writeTextFile`; reads and writes go through the vault (inside the vault only; writes refused in read-only mode).
+- After the turn, one "修改了 N 个文件 +a −b" card: kind badge (新建/修改/删除/库外), path, per-file diff with collapsed context, open file.
+- Undo is pre-checked: files still as the agent left them are restored; files edited since are listed separately and need a checkbox; untracked ones are only listed; files already back to their before-state are skipped. Created files go to the trash. Undo state is per file ("部分已恢复" → "撤销其余修改…").
+- Stopped turns still get their change card (attached after the stream closes).
+- Approvals: ACP `session/request_permission` and Codex approval requests become an inline card in the reply (command/paths, 允许一次 / 本次会话都允许 / 拒绝). Read-only turns reject without asking. Codex runs with `on-request` only in writable mode, so escalations (network, outside the vault) reach the user.
+
+### Obsidian awareness (September 24)
+
+- Every backend gets a fixed conventions block before the user's own system prompt (stable prefix): wikilink references, moves/renames through Obsidian so links update, deletes to the trash, `property:set` for frontmatter, keep Markdown/YAML/Chinese typography, and "change only the selected lines" semantics. API mode also receives the vault-root `AGENTS.md` (local agents read it themselves).
+- Context blocks share one format with escaped attributes: `<active_note path>`, `<editor_selection path lines>` (1-based, inclusive).
+- The editor selection in the most recent note becomes a removable composer chip ("选中 N 行 · 笔记"), refreshed when the composer gains focus; dismissing it lasts until the selection changes. While focus is in the sidebar, the selection stays visible in the note through the CSS Custom Highlight API (no document changes), cleared when the editor regains focus.

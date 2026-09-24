@@ -11,7 +11,6 @@ vi.mock("obsidian", () => ({
   Platform: { isDesktopApp: true },
   MarkdownRenderer: { render: async (_: unknown, text: string, target: HTMLElement) => { target.textContent = text; } },
 }));
-vi.mock("mermaid/dist/mermaid.min.js", () => ({ default: "" }));
 vi.mock("../src/components/ai-elements/conversation", () => ({
   Conversation: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   ConversationContent: ({ children }: { children: ReactNode }) => <div>{children}</div>, ConversationScrollButton: () => null,
@@ -23,9 +22,10 @@ function setup() {
   const props: ComponentProps<typeof ChatPanel> = {
     chat, app: {} as App, parent: { addChild() {}, removeChild() {} } as unknown as Component,
     backendLabel: "Mock", skillLabel: "技能", permission: "plan", fileAccessAvailable: true, fullAccessAvailable: true, note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
-    models: [{ id: "mock", name: "Mock model", efforts: [] }], selectedModel: "mock", modelError: "", onSelectModel: vi.fn(), onManualModel: vi.fn(), onManageModels: vi.fn(),
-    onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {},
-    efforts: ["low", "high"], effort: "", modelLoading: false, onModels: vi.fn(), onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
+    sources: [{ key: "api:mock", kind: "api", label: "Mock 服务商", models: [{ id: "mock", name: "Mock model", efforts: ["low", "high"] }, { id: "other", name: "Other model", efforts: [] }], loaded: true }],
+    selection: { source: "api:mock", model: "mock" }, recentModels: [], onPickModel: vi.fn(), onLoadModels: vi.fn(), onManageModels: vi.fn(),
+    onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {}, onApprove: vi.fn(), onRevertChanges: vi.fn(), onOpenFile: vi.fn(), editorSelection: null, onDismissSelection: vi.fn(), onComposerFocus: vi.fn(),
+    efforts: ["low", "high"], effort: "high", modelLoading: false, onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
   };
   const result = render(<ChatPanel {...props} />);
   return { ...result, props, send, chat, input: screen.getByLabelText("给 Agent 的消息") };
@@ -68,11 +68,10 @@ it("model/effort actions and icon-only reply actions invoke the right callbacks"
   fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
   expect(container.querySelector(".lucide-brain")).toBeNull();
   expect(container.querySelector(".qa-effort-label")).toBeTruthy();
-  fireEvent.change(screen.getByRole("slider", { name: /推理强度/ }), { target: { value: "2" } }); expect(props.onEffort).toHaveBeenCalledWith("high");
-  fireEvent.click(screen.getByRole("button", { name: "Mock" })); expect(props.onModels).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("radio", { name: "低" })); expect(props.onEffort).toHaveBeenCalledWith("low");
   expect(screen.getAllByRole("dialog")).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Mock model" }));
-  expect(props.onSelectModel).toHaveBeenCalledWith(props.models[0]);
+  fireEvent.click(screen.getByRole("button", { name: "Other model" }));
+  expect(props.onPickModel).toHaveBeenCalledWith("api:mock", "other");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.queryByText("仅建议")).toBeNull();
   expect(screen.queryByText("🧠")).toBeNull();
@@ -146,8 +145,48 @@ it("does not invent reasoning capabilities and keeps controls available while lo
   const { props, rerender } = setup();
   rerender(<ChatPanel {...props} efforts={[]} />);
   fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
-  expect(screen.queryByRole("slider")).toBeNull();
+  expect(screen.queryByRole("radiogroup", { name: "推理强度" })).toBeNull();
   rerender(<ChatPanel {...props} modelLoading />);
   expect(screen.queryByRole("dialog")).not.toBeNull();
   expect((screen.getByRole("button", { name: "模型与推理" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("shows an approval card that resolves the agent's request, and a reviewable change summary", async () => {
+  const { props, chat, rerender } = setup();
+  chat.messages = [
+    { id: "u", role: "user", metadata: { createdAt: 1 }, parts: [{ type: "text", text: "改一下" }] },
+    { id: "a", role: "assistant", metadata: { createdAt: 2 }, parts: [
+      { type: "text", text: "已修改" },
+      { type: "data-approval", id: "p1", data: { id: "p1", title: "Codex 请求执行命令", detail: "npm test", status: "pending", options: [
+        { id: "reject_once", label: "拒绝", kind: "reject_once" }, { id: "allow_once", label: "允许一次", kind: "allow_once" }] } },
+      { type: "data-changes", id: "changes", data: { files: [
+        { path: "notes/a.md", before: "one\ntwo\n", after: "one\n2\n", tracked: true },
+        { path: "shell.md", before: null, after: "x", tracked: false },
+      ] } },
+    ] },
+  ];
+  rerender(<ChatPanel {...props} />);
+  const card = await screen.findByRole("group", { name: "审批：Codex 请求执行命令" });
+  expect(card.textContent).toContain("npm test");
+  const buttons = Array.from(card.querySelectorAll("button")).map((b) => b.textContent);
+  expect(buttons).toEqual(["允许一次", "拒绝"]);
+  fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
+  expect(props.onApprove).toHaveBeenCalledWith("p1", "allow_once");
+  expect(screen.getByText("修改了 2 个文件")).toBeTruthy();
+  expect(screen.getByText("没有记录到修改前的内容，无法显示差异或自动恢复。")).toBeTruthy();
+  expect(screen.getByLabelText("notes/a.md 的差异").textContent).toContain("− two");
+  fireEvent.click(screen.getByRole("button", { name: /撤销这些修改/ }));
+  expect(props.onRevertChanges).toHaveBeenCalledWith("a");
+  fireEvent.click(screen.getAllByRole("button", { name: "打开文件" })[0]!);
+  expect(props.onOpenFile).toHaveBeenCalledWith("notes/a.md");
+});
+
+it("shows the editor selection as removable context and refreshes it on focus", () => {
+  const { props, rerender, input } = setup();
+  rerender(<ChatPanel {...props} editorSelection={{ label: "选中 3 行 · 草稿", detail: "第一行" }} />);
+  expect(screen.getByText("选中 3 行 · 草稿")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "不附加选中的文字" }));
+  expect(props.onDismissSelection).toHaveBeenCalledOnce();
+  fireEvent.focus(input);
+  expect(props.onComposerFocus).toHaveBeenCalled();
 });

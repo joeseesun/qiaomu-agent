@@ -1,4 +1,6 @@
-import type { QiaomuSettings } from "./types";
+import type { ModelChoice, QiaomuSettings } from "./types";
+import { migrateProviders } from "./services/model-sources";
+import { recommendedModels } from "./services/key-detection";
 
 export const DEFAULT_SYSTEM_PROMPT = `你是用户 Obsidian 知识库中的协作助手。
 
@@ -27,6 +29,18 @@ export const DEFAULT_SETTINGS: QiaomuSettings = {
   skillDirectories: [],
   mcpConfig: "{\n  \"mcpServers\": {}\n}",
   lastConversation: [],
+  providers: [],
+  recentModels: [],
+  agentModelCache: {},
+  wechat: {
+    bridgeUrl: "",
+    secretId: "qiaomu-agent-wechat-bridge-token",
+    defaultAccountId: "",
+    themeId: "qiaomu-podcast",
+    author: "",
+    openComment: true,
+    recordInNote: true,
+  },
 };
 
 export function normalizeSettings(raw: unknown): QiaomuSettings {
@@ -42,6 +56,14 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
     conversations: Array.isArray(data.conversations) ? data.conversations.filter((c) => c && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.messages)).slice(0, 30) : [],
     modelSelections: data.modelSelections && typeof data.modelSelections === "object" && !Array.isArray(data.modelSelections) ? Object.fromEntries(Object.entries(data.modelSelections).filter(([, v]) => v && typeof v.model === "string" && typeof v.effort === "string")) : {},
     api: { ...DEFAULT_SETTINGS.api, ...api },
+    // The built-in default connection is only listed once a key exists for it (checked on load).
+    providers: migrateProviders(data, { ...DEFAULT_SETTINGS.api, ...api })
+      .filter((item) => Array.isArray(data.providers) || item.secretId !== DEFAULT_SETTINGS.api.secretId)
+      // "Nothing selected = everything" is gone: never-curated providers start with recommended models.
+      .map((item) => item.enabledModels?.length ? item : { ...item, enabledModels: recommendedModels(item.provider, item.models ?? []) }),
+    recentModels: Array.isArray(data.recentModels) ? data.recentModels.filter((item) => item && typeof item.source === "string" && typeof item.model === "string").slice(0, 8) : [],
+    agentModelCache: normalizeModelCache(data.agentModelCache),
+    wechat: normalizeWechatSettings(data.wechat),
     quickPrompts: Array.isArray(data.quickPrompts)
       ? data.quickPrompts.filter((item): item is string => typeof item === "string").slice(0, 8)
       : [...DEFAULT_SETTINGS.quickPrompts],
@@ -52,4 +74,32 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
       ? data.lastConversation.filter((item) => item && typeof item.content === "string").slice(-80)
       : [],
   };
+}
+
+function normalizeWechatSettings(raw: unknown): QiaomuSettings["wechat"] {
+  const data = raw && typeof raw === "object" ? (raw as Partial<QiaomuSettings["wechat"]>) : {};
+  const text = (value: unknown, fallback: string) => (typeof value === "string" ? value : fallback);
+  const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
+  const defaults = DEFAULT_SETTINGS.wechat;
+  return {
+    bridgeUrl: text(data.bridgeUrl, defaults.bridgeUrl).trim(),
+    secretId: text(data.secretId, defaults.secretId) || defaults.secretId,
+    defaultAccountId: text(data.defaultAccountId, defaults.defaultAccountId),
+    themeId: text(data.themeId, defaults.themeId) || defaults.themeId,
+    author: text(data.author, defaults.author),
+    openComment: flag(data.openComment, defaults.openComment),
+    recordInNote: flag(data.recordInNote, defaults.recordInNote),
+  };
+}
+
+function normalizeModelCache(raw: unknown): QiaomuSettings["agentModelCache"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const result: QiaomuSettings["agentModelCache"] = {};
+  for (const [key, value] of Object.entries(raw as Record<string, { models?: unknown; fetchedAt?: unknown }>)) {
+    if (!Array.isArray(value?.models)) continue;
+    const models = value.models.filter((m): m is ModelChoice => Boolean(m && typeof (m as ModelChoice).id === "string"))
+      .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.id, efforts: Array.isArray(m.efforts) ? m.efforts.filter((e) => typeof e === "string") : [] }));
+    result[key] = { models: models.slice(0, 200), fetchedAt: typeof value.fetchedAt === "number" ? value.fetchedAt : 0 };
+  }
+  return result;
 }

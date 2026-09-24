@@ -1,10 +1,13 @@
 import type {
+  ApprovalOptionKind,
+  ApprovalRequest,
   ChatActivity,
   ChatActivityStatus,
   ChatBackend,
   ChatCallbacks,
   ChatRequest,
   CliDetection,
+  GeneratedAttachment,
   PermissionMode,
   ModelChoice,
 } from "../types";
@@ -49,6 +52,19 @@ function activityStatus(value: unknown): ChatActivityStatus {
     case "canceled": return "cancelled";
     default: return "pending";
   }
+}
+
+export function codexGeneratedAttachment(item: Record<string, unknown>): GeneratedAttachment | null {
+  const id = typeof item.id === "string" ? item.id : crypto.randomUUID();
+  const result = typeof item.result === "string" ? item.result.replace(/^data:[^;]+;base64,/, "") : undefined;
+  const savedPath = typeof item.savedPath === "string" ? item.savedPath : typeof item.path === "string" ? item.path : undefined;
+  if (!result && !savedPath) return null;
+  let cleanPath = savedPath?.replace(/^file:\/\//, "");
+  if (cleanPath) try { cleanPath = decodeURIComponent(cleanPath); } catch { /* keep the server path verbatim */ }
+  const name = cleanPath?.split(/[\\/]/).at(-1) || `${id}.png`;
+  const extension = name.split(".").at(-1)?.toLowerCase();
+  const mediaType = extension === "jpg" || extension === "jpeg" ? "image/jpeg" : extension === "webp" ? "image/webp" : extension === "gif" ? "image/gif" : "image/png";
+  return { id, name, mediaType, size: result ? Math.floor(result.length * 0.75) : 0, base64: result, localPath: savedPath };
 }
 
 function effectivePrompt(request: ChatRequest, includeSystemPrompt: boolean): string {
@@ -100,6 +116,8 @@ export class NativeAgentBackend implements ChatBackend {
   private legacyModels: ModelChoice[] = [];
   private imageInput = false;
   private prompted = false;
+  private mediaTasks: Promise<void>[] = [];
+  private emittedMedia = new Set<string>();
 
   async listModels(request: ChatRequest): Promise<ModelChoice[]> {
     if (this.activeCallbacks) throw new Error("请等当前回复结束后切换模型");
@@ -152,6 +170,8 @@ export class NativeAgentBackend implements ChatBackend {
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
     if (this.activeCallbacks) throw new Error(`${this.detection.label} 正在处理另一条消息`);
     this.activeCallbacks = callbacks;
+    this.mediaTasks = [];
+    this.emittedMedia.clear();
     this.activePermissionMode = request.permissionMode;
     let cancelTimer: ReturnType<typeof setTimeout> | undefined;
     const abort = (): void => {
@@ -165,6 +185,7 @@ export class NativeAgentBackend implements ChatBackend {
       if (!this.process) throw new Error("原生 Agent 连接未建立");
       if (this.detection.id === "codex") await this.sendCodex(request, signal);
       else await this.sendAcp(request);
+      await Promise.all(this.mediaTasks);
     } finally {
       signal.removeEventListener("abort", abort);
       if (cancelTimer) clearTimeout(cancelTimer);
@@ -224,7 +245,8 @@ export class NativeAgentBackend implements ChatBackend {
     } else {
       const initialized = await process.request("initialize", {
         protocolVersion: 1,
-        clientCapabilities: {},
+        // Reads and writes go through Obsidian so the turn can be reviewed and rolled back.
+        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
         clientInfo: { name: "qiaomu-agent", title: "Qiaomu Agent for Obsidian", version: "0.1.0" },
       }, 15_000);
       const protocolVersion = record(initialized)?.protocolVersion;
@@ -240,7 +262,7 @@ export class NativeAgentBackend implements ChatBackend {
     if (!this.sessionId) {
       const result = await this.process.request("thread/start", {
         cwd: request.cwd,
-        approvalPolicy: "never",
+        approvalPolicy: codexApprovalPolicy(request.permissionMode),
         sandbox: request.permissionMode === "full" ? "danger-full-access" : request.permissionMode === "edit" ? "workspace-write" : "read-only",
         developerInstructions: request.systemPrompt,
         serviceName: "qiaomu_agent_obsidian",
@@ -255,7 +277,7 @@ export class NativeAgentBackend implements ChatBackend {
       ...(request.model ? { model: request.model } : {}),
       ...(request.reasoningEffort ? { effort: request.reasoningEffort } : {}),
       cwd: request.cwd,
-      approvalPolicy: "never",
+      approvalPolicy: codexApprovalPolicy(request.permissionMode),
       sandboxPolicy: request.permissionMode === "full"
         ? { type: "dangerFullAccess" }
         : request.permissionMode === "edit"
@@ -346,6 +368,8 @@ export class NativeAgentBackend implements ChatBackend {
     }
     if (kind === "tool_call" || kind === "tool_call_update") {
       const id = typeof update.toolCallId === "string" ? update.toolCallId : `tool-${Date.now()}`;
+      const intents = acpFileIntents(update);
+      if (intents.length) this.activeCallbacks?.onFileIntent?.(intents);
       this.activeCallbacks?.onActivity?.({
         id,
         label: typeof update.title === "string" ? update.title : typeof update.name === "string" ? update.name : "工具调用",
@@ -359,6 +383,10 @@ export class NativeAgentBackend implements ChatBackend {
     const type = typeof item.type === "string" ? item.type : "tool";
     if (type === "userMessage" || type === "agentMessage" || type === "plan" || type === "thinking" || type === "reasoning") return;
     const id = typeof item.id === "string" ? item.id : `${type}-${Date.now()}`;
+    if (type === "fileChange" && !completed) {
+      const intents = codexFileIntents(item);
+      if (intents.length) this.activeCallbacks?.onFileIntent?.(intents);
+    }
     const labels: Record<string, string> = {
       commandExecution: "执行命令",
       fileChange: "修改文件",
@@ -372,23 +400,160 @@ export class NativeAgentBackend implements ChatBackend {
       status: completed ? activityStatus(item.status ?? "completed") : "running",
       detail: typeof item.command === "string" ? item.command : undefined,
     });
+    if (completed && (type === "imageGeneration" || type === "imageView")) this.emitCodexImage(item, type);
+  }
+
+  private emitCodexImage(item: Record<string, unknown>, type: string): void {
+    const callbacks = this.activeCallbacks;
+    if (!callbacks?.onAttachment) return;
+    const attachment = codexGeneratedAttachment(item);
+    if (!attachment) return;
+    let cleanPath = attachment.localPath?.replace(/^file:\/\//, "");
+    if (cleanPath) try { cleanPath = decodeURIComponent(cleanPath); } catch { /* keep the server path verbatim */ }
+    const key = cleanPath || `${type}:${attachment.id}`;
+    if (this.emittedMedia.has(key)) return;
+    this.emittedMedia.add(key);
+    const task = Promise.resolve(callbacks.onAttachment(attachment));
+    void task.catch(() => {});
+    this.mediaTasks.push(task);
   }
 
   private handleServerRequest(id: number | string, method: string, params: unknown): void {
-    if (!this.process) return;
+    const process = this.process;
+    if (!process) return;
+    const reply = (result: unknown) => { if (this.process === process) process.respond(id, result); };
     if (method === "session/request_permission") {
       const options = arrayAt(params, "options").map(record).filter((item): item is Record<string, unknown> => Boolean(item));
-      const desired = this.activePermissionMode !== "plan" ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
-      const selected = options.find((option) => desired.includes(String(option.kind)));
-      if (selected && typeof selected.optionId === "string") {
-        this.process.respond(id, { outcome: { outcome: "selected", optionId: selected.optionId } });
-      } else {
-        this.process.respond(id, { outcome: { outcome: "cancelled" } });
-      }
+      const pick = (kinds: string[]) => options.find((option) => kinds.includes(String(option.kind)));
+      const select = (option: Record<string, unknown> | undefined) => reply(option && typeof option.optionId === "string"
+        ? { outcome: { outcome: "selected", optionId: option.optionId } }
+        : { outcome: { outcome: "cancelled" } });
+      // Read-only turns never gain write access, whatever the agent asks.
+      if (this.activePermissionMode === "plan") { select(pick(["reject_once", "reject_always"])); return; }
+      const ask = this.activeCallbacks?.requestApproval;
+      if (!ask) { select(pick(["allow_once", "allow_always"])); return; }
+      const toolCall = record(record(params)?.toolCall);
+      void ask({
+        id: `acp-${String(id)}`,
+        title: stringAt(toolCall, "title") || "Agent 请求执行操作",
+        detail: toolDetail(toolCall?.content) ?? (arrayAt(toolCall, "locations").map((l) => stringAt(l, "path")).filter(Boolean).join("\n") || undefined),
+        options: options.filter((o) => typeof o.optionId === "string").map((o) => ({ id: String(o.optionId), label: OPTION_LABELS[String(o.kind)] ?? String(o.name || o.kind), kind: String(o.kind) as ApprovalOptionKind })),
+      }).then((chosen) => select(chosen ? options.find((o) => o.optionId === chosen) : undefined), () => select(undefined));
       return;
     }
-    this.process.reject(id, -32601, `Unsupported client method: ${method}`);
+    if (method === "fs/read_text_file" || method === "fs/write_text_file") {
+      void this.handleFs(method, params).then(reply, (error: unknown) => {
+        if (this.process === process) process.reject(id, -32602, error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+    const codexApproval = CODEX_APPROVALS[method];
+    if (codexApproval) {
+      const ask = this.activeCallbacks?.requestApproval;
+      const decide = (choice: "accept" | "session" | "decline" | "cancel") => reply({ decision: codexApproval.decision[choice] });
+      if (!ask) { decide("decline"); return; }
+      const request = codexApprovalRequest(method, params, String(id));
+      void ask(request).then((chosen) => decide(chosen === "allow_once" ? "accept" : chosen === "allow_always" ? "session" : chosen === "reject_once" ? "decline" : "cancel"), () => decide("cancel"));
+      return;
+    }
+    process.reject(id, -32601, `Unsupported client method: ${method}`);
   }
+
+  private async handleFs(method: string, params: unknown): Promise<unknown> {
+    const host = this.activeCallbacks?.host;
+    const path = stringAt(params, "path");
+    if (!host || !path) throw new Error("当前没有可用的文件访问");
+    if (method === "fs/read_text_file") {
+      const content = await host.readText(path);
+      const line = record(params)?.line;
+      const limit = record(params)?.limit;
+      if (typeof line !== "number" && typeof limit !== "number") return { content };
+      const lines = content.split("\n");
+      const start = typeof line === "number" ? Math.max(0, line - 1) : 0;
+      return { content: lines.slice(start, typeof limit === "number" ? start + limit : undefined).join("\n") };
+    }
+    if (this.activePermissionMode === "plan") throw new Error("当前为只读模式，不能写入文件");
+    const content = stringAt(params, "content");
+    if (content === null) throw new Error("缺少写入内容");
+    await host.writeText(path, content);
+    return null;
+  }
+}
+
+const OPTION_LABELS: Record<string, string> = { allow_once: "允许一次", allow_always: "本次会话都允许", reject_once: "拒绝", reject_always: "始终拒绝" };
+
+const CODEX_APPROVALS: Record<string, { decision: Record<"accept" | "session" | "decline" | "cancel", string> }> = {
+  "item/commandExecution/requestApproval": { decision: { accept: "accept", session: "acceptForSession", decline: "decline", cancel: "cancel" } },
+  "item/fileChange/requestApproval": { decision: { accept: "accept", session: "acceptForSession", decline: "decline", cancel: "cancel" } },
+  execCommandApproval: { decision: { accept: "approved", session: "approved_for_session", decline: "denied", cancel: "abort" } },
+  applyPatchApproval: { decision: { accept: "approved", session: "approved_for_session", decline: "denied", cancel: "abort" } },
+};
+
+/** Read-only turns cannot write at all; writable turns let Codex ask before escalating. */
+export function codexApprovalPolicy(mode: PermissionMode): "never" | "on-request" {
+  return mode === "edit" ? "on-request" : "never";
+}
+
+const APPROVAL_OPTIONS: ApprovalRequest["options"] = [
+  { id: "allow_once", label: "允许一次", kind: "allow_once" },
+  { id: "allow_always", label: "本次会话都允许", kind: "allow_always" },
+  { id: "reject_once", label: "拒绝", kind: "reject_once" },
+];
+
+export function codexApprovalRequest(method: string, params: unknown, id: string): ApprovalRequest {
+  const reason = stringAt(params, "reason");
+  const command = stringAt(params, "command") ?? (Array.isArray(record(params)?.command) ? (record(params)!.command as unknown[]).join(" ") : null);
+  const isCommand = method.includes("ommand") || method === "execCommandApproval";
+  const root = stringAt(params, "grantRoot");
+  return {
+    id: `codex-${id}`,
+    title: isCommand ? "Codex 请求执行命令" : "Codex 请求写入文件",
+    detail: [command, root ? `申请写入：${root}` : null, reason].filter(Boolean).join("\n") || undefined,
+    options: APPROVAL_OPTIONS,
+  };
+}
+
+/** ACP diff content carries exact before-text; edit locations let us snapshot before the write. */
+export function acpFileIntents(update: Record<string, unknown>): Array<{ path: string; before?: string | null; read?: boolean }> {
+  const intents: Array<{ path: string; before?: string | null; read?: boolean }> = [];
+  for (const raw of arrayAt(update, "content")) {
+    const item = record(raw);
+    if (item?.type !== "diff" || typeof item.path !== "string") continue;
+    intents.push({ path: item.path, before: typeof item.oldText === "string" ? item.oldText : null });
+  }
+  const kind = update.kind;
+  if (kind === "edit" || kind === "delete" || kind === "move" || kind === "read") {
+    // Agents name the target in locations or in the tool's raw input (OpenCode: rawInput.path before writing).
+    const input = record(update.rawInput);
+    const paths = [
+      ...arrayAt(update, "locations").map((location) => stringAt(location, "path")),
+      ...["path", "filePath", "file_path", "filepath", "target", "destination", "newPath", "new_path"].map((key) => typeof input?.[key] === "string" ? input[key] as string : null),
+    ];
+    // Reads are remembered as candidate before-states: agents usually read a file before editing it.
+    for (const path of paths) if (path && !intents.some((intent) => intent.path === path)) intents.push(kind === "read" ? { path, read: true } : { path });
+  }
+  return intents;
+}
+
+/** Codex announces a patch (item/started) before applying it. */
+export function codexFileIntents(item: Record<string, unknown>): Array<{ path: string; before?: string | null; patch?: string }> {
+  const intents: Array<{ path: string; before?: string | null; patch?: string }> = [];
+  for (const raw of arrayAt(item, "changes")) {
+    const change = record(raw);
+    const path = stringAt(change, "path");
+    if (!change || !path) continue;
+    const kind = stringAt(change, "kind", "type");
+    const diff = typeof change.diff === "string" ? change.diff : undefined;
+    if (kind === "add") intents.push({ path, before: null });
+    // The delete payload format is unverified, so the file is read from disk before Codex removes it.
+    else if (kind === "delete") intents.push({ path });
+    else {
+      intents.push({ path, ...(diff ? { patch: diff } : {}) });
+      const moved = stringAt(change, "kind", "move_path");
+      if (moved) intents.push({ path: moved, before: null });
+    }
+  }
+  return intents;
 }
 
 function toolDetail(value: unknown): string | undefined {

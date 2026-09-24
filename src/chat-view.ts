@@ -1,15 +1,23 @@
-import { ItemView, Menu, Notice, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { buildSystemPrompt } from "./services/agent-prompt";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Chat } from "@ai-sdk/react";
 import type QiaomuAgentPlugin from "./main";
-import type { AgentSkill, PermissionMode, ChatAttachment, ChatRequest, ModelChoice } from "./types";
-import { FilePicker, ModelIdDialog, PromptManager, AppendDialog } from "./ui/host-dialogs";
+import type { AgentSkill, PermissionMode, ChatAttachment, ChatRequest, EditorSelectionContext, GeneratedAttachment, ModelChoice } from "./types";
+import { FilePicker, PromptManager, AppendDialog } from "./ui/host-dialogs";
 import { readAttachment, validateAttachments, MAX_ATTACHMENT_BYTES } from "./services/attachments";
-import { AgentConnectionModal } from "./agent-connection-modal";
-import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage } from "./services/chat-transport";
+import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage, type TurnHooks } from "./services/chat-transport";
+import { TurnChangeTracker, toVaultPath } from "./services/change-tracker";
+import { RevertDialog } from "./ui/revert-dialog";
 import { ChatPanel } from "./ui/chat-panel";
 import { ModelManagerModal } from "./settings-tab";
+import { getRuntimeRequire } from "./services/runtime-require";
+import { ApiBackend } from "./services/api-backend";
+import { permitsEmptyKey } from "./services/api-providers";
+import { activeProvider, chooseModel, exposedModels, findProvider, providerIcon, providerLabel, type ModelSource } from "./services/model-sources";
+import { agentIconKey } from "./ui/brand-icon";
+import type { PickerSelection } from "./ui/model-picker";
 
 export const VIEW_TYPE_QIAOMU_AGENT = "qiaomu-agent-view";
 
@@ -19,6 +27,8 @@ export class ChatView extends ItemView {
   private selectedSkill: AgentSkill | null = null;
   private selectedBackend = "auto";
   private attachNote = true;
+  /** Selection the user removed from the composer; it comes back when the selection changes. */
+  private dismissedSelection = "";
   private prefill = "";
   private prefillVersion = 0;
   private statusText = "";
@@ -30,6 +40,9 @@ export class ChatView extends ItemView {
   private connectionIdentity = "";
   private persistQueue: Promise<void> = Promise.resolve();
   private readonly backendOwner = crypto.randomUUID();
+  private readonly sourceState = new Map<string, { loading?: boolean; error?: string }>();
+  /** Pending approval cards: id → resolver for the agent's request. */
+  private readonly approvals = new Map<string, (choice: string | null) => void>();
 
   constructor(leaf: WorkspaceLeaf, readonly plugin: QiaomuAgentPlugin) { super(leaf); }
   getViewType(): string { return VIEW_TYPE_QIAOMU_AGENT; }
@@ -43,7 +56,7 @@ export class ChatView extends ItemView {
     this.contentEl.empty();
     this.contentEl.addClass("qiaomu-agent", "qiaomu-agent--react");
     this.chat = new Chat<AgentMessage>({
-      messages: this.plugin.settings.lastConversation.map(fromStoredMessage),
+      messages: this.plugin.settings.lastConversation.map((message) => fromStoredMessage(message, (attachment) => this.resolveAttachment(attachment))),
       transport: new AgentTransport(async (messages, signal) => {
         // Capture every input before the first await: navigation cannot change this turn.
         const settings = this.plugin.settings;
@@ -54,8 +67,11 @@ export class ChatView extends ItemView {
         if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
         const parsed: unknown = backend.id === "api" ? {} : JSON.parse(settings.mcpConfig || "{}");
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
+        const selection = this.activeSelection();
+        const vaultInstructions = backend.id === "api" ? await this.vaultInstructions() : undefined;
         const request = {
-          prompt: messageText(last), systemPrompt: settings.systemPrompt,
+          prompt: messageText(last), systemPrompt: buildSystemPrompt(settings.systemPrompt, vaultInstructions),
+          selection: selection ?? undefined,
           cwd: this.plugin.skillService.getVaultRoot(),
           model: settings.modelSelections?.[this.selectionKey()]?.model || (backend.id === "api" ? settings.api.model : undefined),
           reasoningEffort: settings.modelSelections?.[this.selectionKey()]?.effort || undefined,
@@ -69,8 +85,15 @@ export class ChatView extends ItemView {
         validateAttachments(request.attachments ?? [], backend.id);
         const activeFileContent = file ? await this.app.vault.cachedRead(file) : undefined;
         signal.throwIfAborted();
-        return { backend, request: { ...request, activeFileContent } };
-      }),
+        let turn: TurnHooks | undefined;
+        if (backend.id.startsWith("cli:")) {
+          const snapshots = await this.mentionedSnapshots(request.prompt, file?.path ?? "");
+          if (file && activeFileContent !== undefined) snapshots.set(file.path, activeFileContent);
+          signal.throwIfAborted();
+          turn = this.turnHooks(snapshots);
+        }
+        return { backend, request: { ...request, activeFileContent }, turn };
+      }, (attachment) => this.storeGeneratedAttachment(attachment)),
       onData: (part) => {
         if (part.type === "data-status") { this.statusText = part.data; this.render(); }
       },
@@ -83,6 +106,7 @@ export class ChatView extends ItemView {
 
   override async onClose(): Promise<void> {
     this.modelGeneration++;
+    this.highlightSelection(false);
     if (!this.chat) return;
     await this.chat.stop();
     await this.plugin.backendService.release(this.backendOwner);
@@ -144,6 +168,10 @@ export class ChatView extends ItemView {
       const configured = settings.modelSelections?.[key]?.model || (backend.id === "api" ? settings.api.model : "");
       if (configured && !choices.some((m) => m.id === configured)) choices.unshift({ id: configured, name: configured, efforts: [] });
       this.models = choices;
+      if (backend.id.startsWith("cli:") && choices.length) {
+        settings.agentModelCache[backend.id.slice(4)] = { models: choices.map(({ id, name, efforts }) => ({ id, name, efforts })), fetchedAt: Date.now() };
+        void this.plugin.saveSettings();
+      }
     } catch (e) { new Notice(String(e)); }
     finally { if (generation === this.modelGeneration) { this.modelLoading = false; this.render(); } }
   }
@@ -176,12 +204,194 @@ export class ChatView extends ItemView {
     return this.persistQueue.catch(() => { new Notice("对话保存失败，请勿关闭窗口"); });
   }
   private openConnection(): void {
-    new AgentConnectionModal(this.app, this.plugin, this.selectedBackend, (value) => {
-      if (this.running()) return;
-      this.plugin.settings.backendKind = value.startsWith("cli:") ? "cli" : value === "api" ? "api" : "auto";
-      if (value.startsWith("cli:")) this.plugin.settings.preferredCli = value.slice(4);
-      void this.plugin.saveSettings();
+    new ModelManagerModal(this.app, this.plugin).open();
+  }
+  /** The editor selection in the most recent note, unless the user dismissed it from the composer. */
+  private activeSelection(): EditorSelectionContext | null {
+    const view = this.app.workspace.getMostRecentLeaf()?.view;
+    if (!(view instanceof MarkdownView) || !view.file || view.getMode() !== "source") return null;
+    const editor = view.editor;
+    const text = editor.getSelection();
+    if (!text.trim()) return null;
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    // A selection ending at the start of a line does not include that line.
+    const endLine = to.ch === 0 && to.line > from.line ? to.line : to.line + 1;
+    const selection = { path: view.file.path, startLine: from.line + 1, endLine, text: text.slice(0, 20_000) };
+    return this.editorSelectionKey(selection) === this.dismissedSelection ? null : selection;
+  }
+  /**
+   * Keeps the selection visible in the note while focus is in the sidebar, using the CSS Custom
+   * Highlight API (no document changes). Cleared when the editor regains focus or the chip goes away.
+   */
+  private highlightSelection(active: boolean): void {
+    const registry = (globalThis as unknown as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights;
+    const HighlightCtor = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+    if (!registry || !HighlightCtor) return;
+    registry.delete("qiaomu-selection");
+    if (!active) return;
+    const view = this.app.workspace.getMostRecentLeaf()?.view;
+    if (!(view instanceof MarkdownView)) return;
+    const cm = (view.editor as unknown as { cm?: { hasFocus: boolean; domAtPos(pos: number): { node: Node; offset: number } } }).cm;
+    if (!cm || cm.hasFocus) return;
+    try {
+      const from = cm.domAtPos(view.editor.posToOffset(view.editor.getCursor("from")));
+      const to = cm.domAtPos(view.editor.posToOffset(view.editor.getCursor("to")));
+      const range = view.contentEl.ownerDocument.createRange();
+      range.setStart(from.node, from.offset);
+      range.setEnd(to.node, to.offset);
+      registry.set("qiaomu-selection", new HighlightCtor(range));
+    } catch { /* lines outside the rendered viewport cannot be highlighted */ }
+  }
+  private editorSelectionKey(selection: EditorSelectionContext): string {
+    return `${selection.path}:${selection.startLine}-${selection.endLine}:${selection.text.length}:${selection.text.slice(0, 64)}`;
+  }
+  /** API models do not read the vault's AGENTS.md themselves (local agents do), so it is passed along. */
+  private async vaultInstructions(): Promise<string | undefined> {
+    const adapter = this.app.vault.adapter;
+    if (!await adapter.exists("AGENTS.md")) return undefined;
+    return (await adapter.read("AGENTS.md")).slice(0, 8_000);
+  }
+  /** Files named in the prompt ([[links]] or vault paths) are snapshotted so edits to them can be undone. */
+  private async mentionedSnapshots(prompt: string, sourcePath: string): Promise<Map<string, string>> {
+    const found = new Set<string>();
+    for (const match of prompt.matchAll(/\[\[([^\]|#]+)/g)) {
+      const file = this.app.metadataCache.getFirstLinkpathDest(match[1]!.trim(), sourcePath);
+      if (file) found.add(file.path);
+    }
+    for (const match of prompt.matchAll(/[^\s"'“”「」《》()（），。；：]+\.(?:md|canvas|base|txt|json|csv)/gi)) {
+      const file = this.app.vault.getAbstractFileByPath(normalizePath(match[0].replace(/^[./]+/, "")));
+      if (file instanceof TFile) found.add(file.path);
+    }
+    const snapshots = new Map<string, string>();
+    for (const path of [...found].slice(0, 20)) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile && file.stat.size <= 512 * 1024) snapshots.set(path, await this.app.vault.read(file));
+    }
+    return snapshots;
+  }
+  /** Tracks what an agent turn changes, routes ACP file access through the vault, and asks for approvals. */
+  private turnHooks(snapshots: Map<string, string>): TurnHooks {
+    const root = this.plugin.skillService.getVaultRoot();
+    const tracker = new TurnChangeTracker(this.app, root, snapshots);
+    tracker.start();
+    const inVault = (path: string) => {
+      const relative = toVaultPath(path, root);
+      if (relative === null) throw new Error("只能访问当前库内的文件");
+      return relative;
+    };
+    return {
+      onFileIntent: (paths) => { for (const item of paths) if (item.read) tracker.observe(item.path); else tracker.intent(item.path, item.before, item.patch); },
+      host: {
+        readText: async (path) => this.app.vault.adapter.read(inVault(path)),
+        writeText: async (path, content) => {
+          const relative = inVault(path);
+          const adapter = this.app.vault.adapter;
+          const exists = await adapter.exists(relative);
+          tracker.intent(relative, exists ? await adapter.read(relative) : null);
+          const file = this.app.vault.getAbstractFileByPath(relative);
+          if (file instanceof TFile) await this.app.vault.modify(file, content);
+          else if (exists) await adapter.write(relative, content);
+          else {
+            const folder = relative.split("/").slice(0, -1).join("/");
+            if (folder && !await adapter.exists(folder)) await this.app.vault.createFolder(folder);
+            await this.app.vault.create(relative, content);
+          }
+        },
+      },
+      awaitApproval: (request, signal) => new Promise<string | null>((resolve) => {
+        if (signal.aborted) { resolve(null); return; }
+        const done = (choice: string | null) => { this.approvals.delete(request.id); signal.removeEventListener("abort", cancel); resolve(choice); };
+        const cancel = () => done(null);
+        this.approvals.set(request.id, done);
+        signal.addEventListener("abort", cancel, { once: true });
+        new Notice("Agent 正在等待你批准一个操作");
+      }),
+      finish: () => tracker.finish(),
+      onLateChanges: (files) => this.attachLateChanges(files),
+    };
+  }
+  /** A stopped turn's changes arrive after its stream closed; attach them to that reply. */
+  private attachLateChanges(files: import("./types").FileChange[]): void {
+    const messages = [...this.chat.messages];
+    const index = messages.map((m) => m.role).lastIndexOf("assistant");
+    if (index < 0) return;
+    const message = messages[index]!;
+    messages[index] = { ...message, parts: [...message.parts.filter((p) => p.type !== "data-changes"), { type: "data-changes", id: "changes", data: { files } }] };
+    this.chat.messages = messages;
+    void this.persist();
+  }
+  private openRevert(messageId: string): void {
+    const message = this.chat.messages.find((m) => m.id === messageId);
+    const part = message?.parts.find((p) => p.type === "data-changes");
+    if (!message || !part || part.type !== "data-changes" || this.running()) return;
+    new RevertDialog(this.app, part.data.files, (restored) => {
+      if (!restored.length) return;
+      const done = new Set(restored);
+      this.chat.messages = this.chat.messages.map((m) => {
+        if (m.id !== messageId) return m;
+        return { ...m, parts: m.parts.map((p) => {
+          if (p.type !== "data-changes") return p;
+          const files = p.data.files.map((file) => done.has(file.path) ? { ...file, reverted: true } : file);
+          const pending = files.some((file) => file.tracked && !file.binary && !file.outside && !file.reverted);
+          return { ...p, data: { ...p.data, files, ...(pending ? {} : { revertedAt: Date.now() }) } };
+        }) };
+      });
+      void this.persist();
     }).open();
+  }
+  private modelSources(): ModelSource[] {
+    const settings = this.plugin.settings;
+    const currentKey = (() => { try { return this.selectionKey(); } catch { return ""; } })();
+    const agents: ModelSource[] = this.plugin.backendService.getDetections().filter((d) => d.callable).map((d) => {
+      const key = `cli:${d.id}`;
+      const cached = settings.agentModelCache[d.id]?.models;
+      const models = currentKey === key && this.models.length ? this.models : cached ?? [];
+      const state = this.sourceState.get(key) ?? (currentKey === key ? { loading: this.modelLoading, error: this.modelError } : {});
+      return { key, kind: "agent", label: d.label, icon: agentIconKey(d.id), models, loaded: Boolean(cached?.length) || (currentKey === key && this.models.length > 0), ...state };
+    });
+    const providers: ModelSource[] = settings.providers
+      .filter((p) => Boolean(this.app.secretStorage.getSecret(p.secretId)) || permitsEmptyKey(p))
+      .map((p) => ({ key: `api:${p.id}`, kind: "api", label: providerLabel(p), icon: providerIcon(p), models: exposedModels(p), loaded: true, ...this.sourceState.get(`api:${p.id}`) }));
+    return [...agents, ...providers];
+  }
+  private pickerSelection(): PickerSelection | null {
+    let key = "";
+    try { key = this.selectionKey(); } catch { return null; }
+    const settings = this.plugin.settings;
+    if (key.startsWith("cli:")) return { source: key, model: settings.modelSelections?.[key]?.model ?? "" };
+    const provider = activeProvider(settings);
+    return provider ? { source: `api:${provider.id}`, model: settings.modelSelections?.[key]?.model || settings.api.model } : null;
+  }
+  private pickModel(source: string, model: string): void {
+    if (this.running()) return;
+    try { chooseModel(this.plugin.settings, source, model); }
+    catch (e) { new Notice(e instanceof Error ? e.message : String(e)); return; }
+    this.plugin.backendService.resetSessions(this.backendOwner);
+    void this.plugin.saveSettings();
+  }
+  private async loadSourceModels(source: string): Promise<void> {
+    const settings = this.plugin.settings;
+    if (this.sourceState.get(source)?.loading) return;
+    this.sourceState.set(source, { loading: true }); this.render();
+    try {
+      if (source.startsWith("cli:")) {
+        const backend = this.plugin.backendService.resolve(source, this.backendOwner);
+        const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
+        const models = await backend.listModels?.(request) ?? [];
+        settings.agentModelCache[source.slice(4)] = { models: models.map(({ id, name, efforts }) => ({ id, name, efforts })), fetchedAt: Date.now() };
+      } else {
+        const provider = findProvider(settings, source.slice(4));
+        if (!provider) throw new Error("该服务商已被移除");
+        provider.models = await new ApiBackend(provider, this.app.secretStorage.getSecret(provider.secretId) ?? "").listModels();
+        provider.fetchedAt = Date.now();
+      }
+      this.sourceState.delete(source);
+      await this.plugin.saveSettings();
+    } catch (e) {
+      this.sourceState.set(source, { error: e instanceof Error ? e.message : "无法获取模型列表" });
+    }
+    this.render();
   }
   private openSkillMenu(event: MouseEvent): void {
     const menu = new Menu();
@@ -197,36 +407,69 @@ export class ChatView extends ItemView {
     for (const entry of history) menu.addItem((item) => item.setTitle(entry.title).onClick(() => {
       if (this.running()) return;
       this.newConversation();
-      this.chat.messages = entry.messages.map(fromStoredMessage);
+      this.chat.messages = entry.messages.map((message) => fromStoredMessage(message, (attachment) => this.resolveAttachment(attachment)));
       void this.persist(); this.render();
     }));
     menu.showAtMouseEvent(event);
   }
-  private selectModel(model: ModelChoice): void {
-    if (this.running()) return;
-    const settings = this.plugin.settings;
-    settings.modelSelections ??= {};
-    settings.modelSelections[this.selectionKey()] = { model: model.id, effort: "" };
-    this.plugin.backendService.resetSessions(this.backendOwner);
-    void this.plugin.saveSettings(); this.render();
+  private resolveAttachment(attachment: ChatAttachment): ChatAttachment {
+    return attachment.vaultPath
+      ? { ...attachment, url: this.app.vault.adapter.getResourcePath(normalizePath(attachment.vaultPath)) }
+      : attachment;
+  }
+
+  private async storeGeneratedAttachment(generated: GeneratedAttachment): Promise<ChatAttachment> {
+    let bytes: Uint8Array;
+    if (generated.base64) {
+      const binary = atob(generated.base64);
+      bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    } else if (generated.localPath) {
+      const runtimeRequire = getRuntimeRequire();
+      if (!runtimeRequire) throw new Error("本地生成文件仅能在桌面端导入");
+      const fileSystem = runtimeRequire("fs/promises") as { readFile(path: string): Promise<Uint8Array> };
+      const urlModule = runtimeRequire("url") as { fileURLToPath(url: string): string };
+      const localPath = generated.localPath.startsWith("file:") ? urlModule.fileURLToPath(generated.localPath) : generated.localPath;
+      bytes = await fileSystem.readFile(localPath);
+    } else {
+      throw new Error(`生成文件 ${generated.name} 没有可读取的内容`);
+    }
+    const root = normalizePath(".qiaomu-agent/generated-images");
+    const adapter = this.app.vault.adapter;
+    if (!await adapter.exists(".qiaomu-agent")) await adapter.mkdir(".qiaomu-agent");
+    if (!await adapter.exists(root)) await adapter.mkdir(root);
+    const safeName = generated.name.replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "") || "generated.png";
+    const vaultPath = normalizePath(`${root}/${generated.id.replace(/[^a-zA-Z0-9_-]/g, "-")}-${safeName}`);
+    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    await adapter.writeBinary(vaultPath, data);
+    return this.resolveAttachment({
+      id: generated.id,
+      name: safeName,
+      mediaType: generated.mediaType,
+      size: bytes.byteLength,
+      vaultPath,
+    });
   }
   private render(): void {
     if (!this.root) return;
     const file = this.plugin.getActiveMarkdownFile();
-    const label = this.plugin.backendService.getBackendOptions().find((o) => o.value === this.selectedBackend)?.label.replace(/\s*·.*$/, "") || "连接 Agent";
+    const label = this.plugin.backendService.getBackendOptions().find((o) => o.value === this.selectedBackend)?.label.replace(/\s*·.*$/, "") || "选择模型";
     let key = ""; try { key = this.selectionKey(); } catch { /* connection can be unavailable */ }
     const selection = this.plugin.settings.modelSelections?.[key];
-    const model = this.models.find((m) => m.id === selection?.model);
+    const editorSelection = this.activeSelection();
+    this.highlightSelection(Boolean(editorSelection));
+    const sources = this.modelSources();
+    const picked = this.pickerSelection();
+    const source = sources.find((item) => item.key === picked?.source);
+    const model = source?.models.find((m) => m.id === picked?.model) ?? this.models.find((m) => m.id === picked?.model);
     const fullAccessAvailable = key === "cli:codex";
     const permission = this.plugin.settings.permissionMode === "full" && !fullAccessAvailable ? "edit" : this.plugin.settings.permissionMode;
     this.root.render(createElement(ChatPanel, {
       chat: this.chat, app: this.app, parent: this,
-      backendLabel: this.modelLoading ? "加载模型…" : model?.name || selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : `${label} 默认模型`), skillLabel: this.selectedSkill?.name || "技能",
+      backendLabel: this.modelLoading && !model ? "加载模型…" : model?.name || picked?.model || (source ? source.label : sources.length ? label : "添加模型"), skillLabel: this.selectedSkill?.name || "技能",
       efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
-      onModels: () => { this.modelError = ""; void this.openModels(); },
-      models: this.models, selectedModel: selection?.model || (key.startsWith("api:") ? this.plugin.settings.api.model : ""), modelError: this.modelError,
-      onSelectModel: (choice: ModelChoice) => this.selectModel(choice),
-      onManualModel: () => new ModelIdDialog(this.app, selection?.model || "", (choice) => this.selectModel(choice)).open(),
+      sources, selection: picked, recentModels: this.plugin.settings.recentModels,
+      onPickModel: (sourceKey: string, modelId: string) => this.pickModel(sourceKey, modelId),
+      onLoadModels: (sourceKey: string) => void this.loadSourceModels(sourceKey),
       onManageModels: () => new ModelManagerModal(this.app, this.plugin).open(),
       onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
@@ -249,6 +492,12 @@ export class ChatView extends ItemView {
         if (mode === "full") new Notice("已为后续对话开启完全访问，请确认路径后再写入");
       },
       onToggleNote: () => { this.attachNote = !this.attachNote; this.render(); },
+      editorSelection: editorSelection ? { label: `选中 ${editorSelection.endLine - editorSelection.startLine + 1} 行 · ${editorSelection.path.split("/").pop()?.replace(/\.md$/, "")}`, detail: editorSelection.text } : null,
+      onDismissSelection: () => { const selection = this.activeSelection(); if (selection) { this.dismissedSelection = this.editorSelectionKey(selection); this.render(); } },
+      onComposerFocus: () => this.render(),
+      onApprove: (id: string, choice: string | null) => this.approvals.get(id)?.(choice),
+      onRevertChanges: (messageId: string) => this.openRevert(messageId),
+      onOpenFile: (path: string) => { const file = this.app.vault.getAbstractFileByPath(path); if (file instanceof TFile) void this.app.workspace.getLeaf(false).openFile(file); },
       onPersist: () => this.persist(),
     }));
   }

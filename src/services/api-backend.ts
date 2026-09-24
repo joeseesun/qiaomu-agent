@@ -1,3 +1,4 @@
+import { activeNoteBlock, selectionBlock } from "./agent-prompt";
 import { streamText, type ModelMessage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -9,9 +10,10 @@ import { apiProtocol, permitsEmptyKey, validateApiUrl } from "./api-providers";
 export function buildApiMessages(request: ChatRequest): ModelMessage[] {
   const sections: string[] = [];
   if (request.skill) sections.push(`<active_skill name="${request.skill.name}">\n${request.skill.body}\n</active_skill>`);
-  if (request.activeFilePath && request.activeFileContent !== undefined) {
-    sections.push(`<active_note path="${request.activeFilePath}">\n${request.activeFileContent}\n</active_note>`);
-  }
+  const note = activeNoteBlock(request);
+  if (note) sections.push(note);
+  const selection = selectionBlock(request);
+  if (selection) sections.push(selection);
   sections.push(request.prompt);
   sections.push(attachmentContext(request));
   return [
@@ -77,6 +79,13 @@ export class ApiBackend implements ChatBackend {
     });
     for await (const part of result.fullStream) {
       if (part.type === "text-delta") callbacks.onText(part.text);
+      if (part.type === "file") await callbacks.onAttachment?.({
+        id: crypto.randomUUID(),
+        name: `generated-${Date.now()}.${part.file.mediaType.split("/")[1] || "bin"}`,
+        mediaType: part.file.mediaType,
+        size: part.file.uint8Array.byteLength,
+        base64: part.file.base64,
+      });
       if (part.type === "error") throw part.error;
     }
     signal.throwIfAborted();

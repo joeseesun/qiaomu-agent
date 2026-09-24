@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "../src/defaults";
-import { API_PROVIDERS, apiProtocol, permitsEmptyKey, selectApiProvider, validateApiUrl } from "../src/services/api-providers";
+import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl } from "../src/services/api-providers";
 
 describe("API provider configuration", () => {
   it("covers requested providers with valid endpoints", () => {
@@ -8,18 +8,6 @@ describe("API provider configuration", () => {
     for (const [id, preset] of Object.entries(API_PROVIDERS)) {
       if (id !== "custom") expect(validateApiUrl(preset.baseUrl)).toBe(preset.baseUrl);
     }
-  });
-  it("isolates credentials and restores legacy settings when switching", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
-    const original = { ...settings.api };
-    selectApiProvider(settings, "mimo");
-    expect(settings.api.secretId).not.toBe(original.secretId);
-    settings.api.model = "my-model";
-    const mimo = { ...settings.api };
-    selectApiProvider(settings, "openai");
-    expect(settings.api).toEqual(original);
-    selectApiProvider(settings, "mimo");
-    expect(settings.api).toEqual(mimo);
   });
   it("uses native protocols for existing configs and explicit overrides", () => {
     expect(apiProtocol({ ...DEFAULT_SETTINGS.api, provider: "anthropic" })).toBe("anthropic");

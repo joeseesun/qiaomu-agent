@@ -12,4 +12,16 @@ AI SDK, React, Lucide and use-stick-to-bottom are dependencies, not unmodified A
 
 ## Mermaid
 
-Mermaid 11.17.2 (MIT), Copyright (c) 2014–2022 Knut Sveidqvist, https://github.com/mermaid-js/mermaid. The unmodified minified browser distribution is embedded as text for use only in an opaque-origin sandboxed frame, with CSP blocking network access. License included in `licenses/mermaid-LICENSE`; upstream bundled dependency notices remain in the distribution. No remote CDN is used.
+Not bundled. Diagrams are rendered with the Mermaid copy that Obsidian ships (`loadMermaid()`), themed per diagram with an init directive so Obsidian's global configuration is not changed. Output is displayed only as an inert `<img>` (chat) or rasterized PNG (WeChat export).
+
+## qmblog WeChat export (same author)
+
+`src/wechat/themes.ts`, `export-style.ts`, `list-markers.ts`, `publishing-enhancements.ts`, `publish-limits.ts`, `publish-inspect.ts` and parts of `normalize.ts` are ported from the author's own qmblog repository (`lib/wechat-*.ts`, `lib/code-highlight.ts`). Local modifications: strict-index TypeScript fixes, cross-window `nodeType` document checks, and removal of juice/KaTeX/highlight.js/html2pdf dependencies in favour of a CSSOM inliner (`inline-css.ts`).
+
+Studied for design only, no code copied: note-to-mp (MIT) for the Obsidian-to-WeChat workflow.
+
+## Lobe Icons
+
+`src/ui/brand-icons.ts` embeds provider and agent marks from [@lobehub/icons-static-svg](https://github.com/lobehub/lobe-icons) 1.95.1, MIT License. Local modifications: titles removed, internal ids namespaced, root `fill="currentColor"` added; Kimi uses the mono mark. Brand names and logos remain trademarks of their owners and are used only to identify the service.
+
+Design reference only, no code copied: [magpie](https://github.com/yetone/magpie) (MIT) for the provider list, one-field provider setup and grouped model picker.

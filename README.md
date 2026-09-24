@@ -11,7 +11,8 @@
 - 自动附加当前 Markdown 笔记，支持自定义系统 Prompt 和快捷提问
 - 桌面端探测 Codex、Claude Code、Kimi Code、Qwen Code、Grok、OpenCode、Pi 与 Gemini CLI
 - Codex 使用长连接 App Server；Kimi、Qwen、Gemini 与 OpenCode 优先使用原生 ACP
-- 卡片式“连接 Agent”中心展示检测状态、协议和版本，日常侧边栏只保留当前连接
+- 统一模型选择器：本地 Agent 与所有模型服务商在同一个列表里，按来源分组，可搜索、看最近使用、输入任意模型 ID；选中模型即切换来源
+- magpie 式模型设置：选厂商、贴密钥，自动拉取模型列表；可以勾选哪些模型出现在选择器中
 - “仅建议 / 允许修改”显式权限切换；本地 Agent 负责实际文件工具与审批
 - 支持 OpenAI、OpenRouter、Anthropic、Google、DeepSeek、xAI 和自定义兼容 API
 - API Key 保存到 Obsidian `SecretStorage`
@@ -26,11 +27,13 @@
 | 当前笔记读取 | 支持 | 支持 | 已实现 |
 | 本地 Agent CLI | 支持 | 不支持 | Codex App Server、ACP 与兼容 CLI 回退 |
 | 模型 API 对话 | 支持 | 支持，受服务商网络策略影响 | 已实现流式适配器 |
-| Markdown / GFM / Mermaid | 支持 | 待真机验收 | Markdown 使用宿主渲染，Mermaid 在本地隔离框架中自动展示 |
+| Markdown / GFM / Mermaid | 支持 | 待真机验收 | Markdown 与 Mermaid 都使用 Obsidian 内置渲染；图表以静态图片显示 |
 | Skills | 库内与外部目录 | 仅库内 | 已实现选择与注入 |
 | MCP | ACP 会话传入；Codex 使用本机配置；兼容 CLI 透传 | 尚未内置直连 | 已接入原生 Agent 会话 |
 | API 模式直接改库 | 尚未支持 | 尚未支持 | 后续使用受控工具层实现 |
+| 修改审阅与撤销 | 支持 | 不适用 | 本地 Agent 每轮给出变更摘要与 diff，撤销前预检；权限请求在对话中审批 |
 | Obsidian CLI | 支持自动检测与本地 Agent 引导 | 不可用 | 已接入，需在 Obsidian 中启用 |
+| 公众号草稿箱 | 支持 | 支持（未真机验收） | 通过自建 qmblog Bridge 发送，只进草稿箱 |
 
 “检测到”只代表版本探测成功；“可调用”代表已有参数适配器；“实际执行了 Skill/MCP 工具”必须以运行事件为准。ZCode 目前只检测桌面应用，不把它显示为可调用 CLI。
 
@@ -41,6 +44,15 @@
 手机打开同步仓库时，即使桌面选择了 CLI，也会在本设备使用 API，不自动改写桌面的连接偏好。API Key 需要在当前设备检查配置。手机以普通标签页打开对话，回车换行、按钮发送；触摸操作区至少 44px。
 
 移动端兼容声明不是实机验收：当前覆盖平台分支模拟和桌面构建，iOS/Android 的网络、软键盘、文件选择和流式回复仍需真机测试。部分 API 的跨域策略可能阻止直连。手机可确认后追加回复到指定笔记；“今日日记”目前仍依赖桌面 CLI，移动端日记适配尚未完成。API 模式尚不执行 MCP 或文件修改工具；Skill 正文注入不等同于支持其脚本执行。
+
+## 发布到公众号草稿箱
+
+命令面板「发布当前笔记到公众号草稿箱」，或在文件菜单选择「发布到公众号草稿箱」。弹窗里可以选公众号和排版主题，修改标题、作者、摘要，查看发布前检查和排版预览，然后发到草稿箱；也可以只复制公众号格式。
+
+- 排版复用乔木博客的公众号主题和规范化代码（`src/wechat/`），CSS 用浏览器 CSSOM 内联，不引入 juice。
+- 本地图片、公式（MathJax → MathML → PNG）和 Mermaid 图（Obsidian 内置 Mermaid → PNG）逐张上传到 Bridge，换成公众号图床地址。
+- 属性：`title/标题`、`author/作者`、`digest/摘要`、`cover/封面`、`wechat_account/公众号`、`wechat_theme/公众号主题`、`source_url/原文链接`。成功后写回 `wechat_media_id`、`wechat_draft_at`、`wechat_account`。
+- 需要在「设置 → 发布」填写 qmblog 公众号 Bridge 的地址和访问令牌（令牌存入 SecretStorage）。Bridge 需要包含 `POST /v1/wechat/images` 接口的版本。
 
 ## 开发
 
@@ -86,7 +98,7 @@ CLI 能力被放在动态加载边界之后，移动端不会静态导入 Node.j
 ## 迭代路线
 
 1. 完成 Kimi、Qwen、Gemini 与 OpenCode 的 ACP 端到端兼容矩阵。
-2. 增加来源引用、文件 diff 与逐次写入确认。
+2. 增加来源引用。（文件 diff、审批与撤销已完成）
 3. 引入独立的 MCP client 层，并完善权限请求 UI。
 4. 把 Obsidian CLI 扩展为 API 模式的受控工具调用。
 5. 完成移动端 API 兼容测试和社区插件发布材料。

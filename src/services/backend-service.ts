@@ -4,15 +4,6 @@ import { ApiBackend } from "./api-backend";
 import { CliBackend } from "./cli-backend";
 import { NativeAgentBackend, nativeTransportFor, nativeTransportLabel } from "./native-agent-backend";
 
-export interface AgentConnectionOption {
-  value: string;
-  label: string;
-  description: string;
-  ready: boolean;
-  transport: string;
-  version?: string;
-}
-
 export class BackendService {
   private detections: CliDetection[] = [];
   private readonly nativeBackends = new Map<string, NativeAgentBackend>();
@@ -44,42 +35,6 @@ export class BackendService {
       { value: "auto", label: "自动", ready: local.length > 0 || this.hasApiKey() },
       ...local,
       { value: "api", label: this.getSettings().api.model || "模型 API", ready: this.hasApiKey() },
-    ];
-  }
-
-  getConnectionOptions(): AgentConnectionOption[] {
-    const detected = this.detections.map((detection) => {
-      const transport = nativeTransportLabel(detection.id) || "CLI";
-      return {
-        value: `cli:${detection.id}`,
-        label: detection.label,
-        description: detection.callable
-          ? `已检测到本机 ${detection.label}，通过 ${transport} 连接。`
-          : detection.note || `未在本机发现可调用的 ${detection.label}。`,
-        ready: detection.callable,
-        transport,
-        version: detection.version || undefined,
-      };
-    });
-    const api = this.getSettings().api;
-    return [
-      {
-        value: "auto",
-        label: "自动选择",
-        description: Platform.isDesktopApp ? "优先使用首选的本地 Agent；不可用时回退到模型 API。" : "此设备使用模型 API；本地 CLI 仅限桌面端。",
-        ready: detected.some((option) => option.ready) || this.hasApiKey(),
-        transport: "智能路由",
-      },
-      ...detected,
-      {
-        value: "api",
-        label: api.model || "模型 API",
-        description: this.hasApiKey()
-          ? `已配置 ${api.provider}，适用于桌面端和移动端。`
-          : "尚未配置 API Key；可在插件设置中完成。",
-        ready: this.hasApiKey(),
-        transport: "模型 API",
-      },
     ];
   }
 

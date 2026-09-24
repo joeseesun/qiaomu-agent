@@ -92,9 +92,10 @@
 .qiaomu-agent__sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .qiaomu-agent-settings textarea { width: min(520px, 100%); }
-.qiaomu-agent-settings__tabs { display: flex; gap: 4px; margin: 22px 0 18px; padding-bottom: 8px; border-bottom: 1px solid var(--background-modifier-border); }
-.qiaomu-agent-settings__tab { min-width: 72px; padding: 7px 12px; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text-muted); }
-.qiaomu-agent-settings__tab.is-active { background: var(--background-modifier-hover); color: var(--text-normal); font-weight: var(--font-semibold); }
+.qiaomu-agent-settings__tabs { display: flex; gap: 4px; margin: 16px 0 18px; padding: 4px; border-radius: 10px; background: var(--background-secondary); }
+.qiaomu-agent-settings__tab { flex: 1; min-width: 0; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text-muted); }
+.qiaomu-agent-settings__tab.is-active { background: var(--background-primary); color: var(--text-normal); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+.is-mobile .qiaomu-agent-settings__tab { min-height: 44px; }
 .qiaomu-agent-settings__body > h3:first-child { margin-top: 0; }
 .qiaomu-agent-settings__disclosure { margin: 18px 0 8px; }
 .qiaomu-agent-settings__disclosure > summary { cursor: pointer; color: var(--text-muted); font-weight: var(--font-semibold); }

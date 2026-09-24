@@ -29,10 +29,10 @@ it("mobile ignores synced CLI selections without rewriting desktop preferences",
   expect(service.resolve("cli:codex").id).toBe("api");
   expect(service.resolve("auto").id).toBe("api");
   expect(service.getDetections()).toEqual([]);
-  expect(service.getConnectionOptions().some((o) => o.value.startsWith("cli:"))).toBe(false);
+  expect(service.getBackendOptions().some((o) => o.value.startsWith("cli:"))).toBe(false);
   expect(settings.backendKind).toBe("cli");
   expect(settings.preferredCli).toBe("codex");
-  expect(service.getConnectionOptions().find((o) => o.value === "api")?.ready).toBe(false);
+  expect(service.getBackendOptions().find((o) => o.value === "api")?.ready).toBe(false);
 });
 it("each view owns its backend, resets and close cannot affect another view", async () => {
   const { service } = setup();

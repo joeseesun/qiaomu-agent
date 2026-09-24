@@ -1,9 +1,12 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, Sparkles, Shield, FolderPen, ShieldAlert, Pencil } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate, ModelChoice } from "../types";
-import { ModelList } from "./model-list";
+import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
+import type { ModelSource } from "../services/model-sources";
+import { ModelPicker, type PickerSelection } from "./model-picker";
+import { BrandIcon } from "./brand-icon";
+import { ApprovalCard, ChangeSummary } from "./turn-review";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
 import { slashQuery, startsFileMention } from "../services/composer";
 import { Attachments } from "../components/ai-elements/attachments";
@@ -23,9 +26,11 @@ interface Props {
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onEditMessage: () => void;
   onToggleNote: () => void; onPersist: () => Promise<void>;
-  efforts: string[]; effort: string; modelLoading: boolean; onModels: () => void; onEffort: (effort: string) => void;
-  models: ModelChoice[]; selectedModel: string; modelError: string; onSelectModel: (model: ModelChoice) => void;
-  onManualModel: () => void; onManageModels: () => void;
+  editorSelection: { label: string; detail: string } | null; onDismissSelection: () => void; onComposerFocus: () => void;
+  onApprove: (id: string, choice: string | null) => void; onRevertChanges: (messageId: string) => void; onOpenFile: (path: string) => void;
+  efforts: string[]; effort: string; modelLoading: boolean; onEffort: (effort: string) => void;
+  sources: ModelSource[]; selection: PickerSelection | null; recentModels: PickerSelection[];
+  onPickModel: (source: string, model: string) => void; onLoadModels: (source: string) => void; onManageModels: () => void;
   customPrompts: PromptTemplate[]; onManagePrompts: () => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
   onValidateAttachments: (attachments: ChatAttachment[]) => void;
@@ -79,7 +84,6 @@ function Activities({ activities, running }: { activities: ChatActivity[]; runni
 const messageTime = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function ChatPanel(props: Props) {
-  const [showModelList, setShowModelList] = useState(false);
   const { messages, status, error, sendMessage, regenerate, setMessages, stop, clearError } = useChat({ chat: props.chat, experimental_throttle: 75 });
   const [input, setInput] = useState("");
   const [stopped, setStopped] = useState(false);
@@ -179,16 +183,23 @@ export function ChatPanel(props: Props) {
           const text = messageText(message);
           const active = running && index === visible.length - 1 && message.role === "assistant";
           const activities = message.parts.filter((p) => p.type === "data-activity").map((p) => p.data);
+          const approvals = message.parts.filter((p) => p.type === "data-approval").map((p) => p.data);
+          const changes = message.parts.find((p) => p.type === "data-changes");
+          const messageAttachments = new Map((message.metadata?.attachments ?? []).map((attachment) => [attachment.id, attachment]));
+          for (const part of message.parts) if (part.type === "data-attachment") messageAttachments.set(part.data.id, part.data);
           return <Message key={message.id} from={message.role} className={editingId === message.id ? "is-editing" : ""}>
             <MessageContent>
-              <Attachments files={message.metadata?.attachments ?? []} />
+              <Attachments files={[...messageAttachments.values()]} variant={message.role === "assistant" ? "grid" : "inline"} />
               <Activities activities={activities} running={active} />
+              {approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} onChoose={(choice) => props.onApprove(approval.id, choice)} />)}
               {message.role === "user" && editingId === message.id ? <form className="qa-message-editor" onSubmit={(event) => { event.preventDefault(); void submitEdit(message); }}>
                 <label className="qiaomu-agent__sr-only" htmlFor={`${inputId}-edit-${message.id}`}>编辑消息内容</label>
                 <textarea id={`${inputId}-edit-${message.id}`} value={editText} onChange={(event) => setEditText(event.currentTarget.value)} autoFocus rows={3}
                   onKeyDown={(event) => { if (Platform.isDesktopApp && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submitEdit(message); } }} />
                 <div className="qa-message-editor-actions"><button type="button" onClick={() => setEditingId(null)}>取消</button><button type="submit" className="mod-cta" disabled={!editText.trim()}>发送</button></div>
               </form> : text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking">正在处理…</div> : <div className="qa-thinking">没有文本回复</div>}
+              {changes?.type === "data-changes" && changes.data.files.length > 0 && <ChangeSummary changes={changes.data} disabled={running}
+                onOpen={props.onOpenFile} onRevert={() => props.onRevertChanges(message.id)} />}
             </MessageContent>
             {message.role === "user" && text && editingId !== message.id && <div className="qa-user-message-meta">
               <time dateTime={new Date(message.metadata?.createdAt ?? Date.now()).toISOString()}>{messageTime.format(message.metadata?.createdAt ?? Date.now())}</time>
@@ -221,10 +232,14 @@ export function ChatPanel(props: Props) {
         <input type="file" multiple hidden ref={upload} onChange={(e) => { void addFiles(Array.from(e.currentTarget.files ?? [])); e.currentTarget.value = ""; }} />
         <Attachments files={attachments} onRemove={(id) => setAttachments((current) => current.filter((a) => a.id !== id))} />
         {reading > 0 && <div className="qa-status">正在读取附件…</div>}
-        {props.note && <PromptInputHeader><span className="qa-note"><FileText size={13} /><span>{props.note.basename}</span>
-          <button type="button" disabled={running} onClick={props.onToggleNote}><X size={12} /><span className="qiaomu-agent__sr-only">不附加当前笔记</span></button></span></PromptInputHeader>}
+        {(props.note || props.editorSelection) && <PromptInputHeader>
+          {props.note && <span className="qa-note"><FileText size={13} /><span>{props.note.basename}</span>
+            <button type="button" disabled={running} onClick={props.onToggleNote}><X size={12} /><span className="qiaomu-agent__sr-only">不附加当前笔记</span></button></span>}
+          {props.editorSelection && <span className="qa-note qa-selection-chip" title={props.editorSelection.detail.slice(0, 400)}><TextSelect size={13} /><span>{props.editorSelection.label}</span>
+            <button type="button" disabled={running} onClick={props.onDismissSelection}><X size={12} /><span className="qiaomu-agent__sr-only">不附加选中的文字</span></button></span>}
+        </PromptInputHeader>}
         <label htmlFor={inputId} className="qiaomu-agent__sr-only">给 Agent 的消息</label>
-        <PromptInputTextarea submitOnEnter={Platform.isDesktopApp} id={inputId} ref={textarea} value={input} aria-controls={menuOpen ? `${inputId}-menu` : undefined} aria-activedescendant={menuOpen ? `${inputId}-option-${menuIndex}` : undefined}
+        <PromptInputTextarea submitOnEnter={Platform.isDesktopApp} id={inputId} ref={textarea} value={input} onFocus={props.onComposerFocus} aria-controls={menuOpen ? `${inputId}-menu` : undefined} aria-activedescendant={menuOpen ? `${inputId}-option-${menuIndex}` : undefined}
           onKeyDown={(e) => {
             if (!menuOpen || e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setMenuIndex((n) => (n + (e.key === "ArrowDown" ? 1 : promptChoices.length)) % (promptChoices.length + 1)); }
@@ -256,19 +271,11 @@ export function ChatPanel(props: Props) {
           </ComposerPopover>}
         </PromptInputTools>
         <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running}
-          trigger={<><span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
-          {(close) => showModelList ? <ModelList models={props.models} selected={props.selectedModel} loading={props.modelLoading} error={props.modelError}
-            onSelect={(model) => { props.onSelectModel(model); setShowModelList(false); close(); }} onRetry={props.onModels}
-            onBack={() => setShowModelList(false)} onManual={() => { close(); props.onManualModel(); }} onManage={() => { close(); props.onManageModels(); }} /> : <>
-            <button className="qa-model" type="button" onClick={() => { setShowModelList(true); props.onModels(); }}><span>{props.backendLabel}</span><ChevronRight size={14} /></button>
-            {!!props.efforts.length && <div className="qa-reasoning">
-              <label htmlFor={`${inputId}-effort`}><span>推理强度</span><span className="qa-reasoning-value">{effortLabel(props.effort)}</span></label>
-              <input id={`${inputId}-effort`} type="range" min={0} max={props.efforts.length} step={1}
-                value={Math.max(0, props.efforts.indexOf(props.effort) + 1)} aria-valuetext={effortLabel(props.effort)}
-                onChange={(e) => props.onEffort(props.efforts[Number(e.target.value) - 1] ?? "")} />
-              <div className="qa-reasoning-ends" aria-hidden="true"><span>默认</span><span>{effortLabel(props.efforts.at(-1)!)}</span></div>
-            </div>}
-          </>}
+          trigger={<>{(() => { const source = props.sources.find((item) => item.key === props.selection?.source); return source ? <BrandIcon icon={source.icon} kind={source.kind} size={14} /> : null; })()}<span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && props.effort && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
+          {(close) => <ModelPicker sources={props.sources} current={props.selection} recent={props.recentModels}
+            efforts={props.efforts} effort={props.effort} onEffort={props.onEffort}
+            onSelect={(source, model) => { props.onPickModel(source, model); close(); }}
+            onLoad={props.onLoadModels} onManage={() => { close(); props.onManageModels(); }} />}
         </ComposerPopover>
         <PromptInputSubmit status={status} disabled={(!input.trim() && !attachments.length) || reading > 0 || props.modelLoading} onStop={() => { setStopped(true); void stop().then(props.onPersist); }} />
         </PromptInputFooter>

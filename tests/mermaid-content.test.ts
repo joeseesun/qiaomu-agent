@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { splitMermaid, mermaidFrameDocument } from "../src/services/mermaid-content";
+import { splitMermaid } from "../src/services/mermaid-content";
+import { sizeSvg, svgDataUrl, withTheme } from "../src/services/host-mermaid";
 
 it("extracts complete Mermaid without passing its fence to the host trust processor", () => {
   expect(splitMermaid("前文\n```mermaid\nflowchart LR\nA --> B\n```\n后文")).toEqual([
@@ -13,11 +14,8 @@ it("keeps incomplete streams and nested fences as code until complete", () => {
   expect(splitMermaid(nested)).toEqual([{ kind: "markdown", text: nested }]);
   expect(splitMermaid("~~~mermaid\ngraph LR\nA-->B\n~~~")[0]?.kind).toBe("mermaid");
 });
-it("escapes source out of script context and denies external resources", () => {
-  const doc = mermaidFrameDocument("/* library */", '</script><script>alert(1)</script>', "abc123", false);
-  expect(doc).not.toContain('</script><script>alert');
-  expect(doc).toContain("\\u003c/script>");
-  expect(doc).toContain("default-src 'none'");
-  expect(doc).toContain("connect-src 'none'");
-  expect(doc).toContain("securityLevel:'strict'");
+it("themes per diagram without overriding an author's own init directive", () => {
+  expect(withTheme("graph LR\nA-->B", "dark")).toBe('%%{init: {"theme": "dark"}}%%\ngraph LR\nA-->B');
+  const custom = '%%{init: {"theme": "forest"}}%%\ngraph LR';
+  expect(withTheme(custom, "neutral")).toBe(custom);
 });

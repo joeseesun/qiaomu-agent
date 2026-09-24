@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acpLaunch,
+  codexGeneratedAttachment,
   acpMcpServers,
   nativeTransportFor,
   nativeTransportLabel,
@@ -39,4 +40,14 @@ describe("native agent transports", () => {
       { type: "http", name: "remote", url: "https://example.com/mcp", headers: [] },
     ]);
   });
+});
+
+it("extracts generated images and image-view paths from Codex App Server items", () => {
+  expect(codexGeneratedAttachment({ id: "image-1", result: "data:image/png;base64,AQID", savedPath: "/tmp/小狗.png" })).toEqual({
+    id: "image-1", name: "小狗.png", mediaType: "image/png", size: 3, base64: "AQID", localPath: "/tmp/小狗.png",
+  });
+  expect(codexGeneratedAttachment({ id: "view-1", path: "file:///tmp/%E5%B0%8F%E7%8B%97.webp" })).toMatchObject({
+    id: "view-1", name: "小狗.webp", mediaType: "image/webp", localPath: "file:///tmp/%E5%B0%8F%E7%8B%97.webp",
+  });
+  expect(codexGeneratedAttachment({ id: "empty" })).toBeNull();
 });

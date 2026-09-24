@@ -1,3 +1,4 @@
+import { activeNoteBlock, selectionBlock } from "./agent-prompt";
 import type { ChatRequest, CliProfile } from "../types";
 import { attachmentContext } from "./attachments";
 
@@ -21,11 +22,10 @@ export function promptWithContext(request: ChatRequest): string {
       `<active_skill name="${request.skill.name}" path="${request.skill.path}">\n${request.skill.body}\n</active_skill>`
     );
   }
-  if (request.activeFilePath && request.activeFileContent) {
-    sections.push(
-      `<active_note path="${request.activeFilePath}">\n${request.activeFileContent}\n</active_note>`
-    );
-  }
+  const note = activeNoteBlock(request);
+  if (note) sections.push(note);
+  const selection = selectionBlock(request);
+  if (selection) sections.push(selection);
   sections.push(request.prompt);
   const attached = attachmentContext(request);
   if (attached) sections.push(attached);
