@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -27,12 +27,13 @@ interface Props {
   onOpenParent: (id: string) => void; onForkMessage: (messageId: string) => void;
   imageTargetNote: TFile | null;
   backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null;
-  statusText: string; prompts: string[]; prefill: string; prefillVersion: number;
+  statusText: string; prompts: string[]; prefill: string; prefillVersion: number; focusVersion?: number;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onEditMessage: () => void;
   onToggleNote: () => void; onPersist: () => Promise<void>;
   editorSelection: { label: string; detail: string } | null; onDismissSelection: () => void; onComposerFocus: () => void;
+  reading?: ReadingChip | null; onDismissReading?: () => void;
   onApprove: (id: string, choice: string | null) => void; onRevertChanges: (messageId: string) => void; onOpenFile: (path: string) => void;
   efforts: string[]; effort: string; modelLoading: boolean; onEffort: (effort: string) => void;
   sources: ModelSource[]; selection: PickerSelection | null; recentModels: PickerSelection[];
@@ -147,6 +148,7 @@ export function ChatPanel(props: Props) {
     if (!props.prefillVersion) return;
     setInput(props.prefill); textarea.current?.focus();
   }, [props.prefill, props.prefillVersion]);
+  useEffect(() => { if (props.focusVersion) textarea.current?.focus(); }, [props.focusVersion]);
   useEffect(() => {
     const el = textarea.current;
     if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
@@ -286,11 +288,13 @@ export function ChatPanel(props: Props) {
         <input type="file" multiple hidden ref={upload} onChange={(e) => { void addFiles(Array.from(e.currentTarget.files ?? [])); e.currentTarget.value = ""; }} />
         <Attachments files={attachments} onRemove={(id) => setAttachments((current) => current.filter((a) => a.id !== id))} />
         {reading > 0 && <div className="qa-status">正在读取附件…</div>}
-        {!imageEditing && (props.note || props.editorSelection) && <PromptInputHeader>
+        {!imageEditing && (props.note || props.editorSelection || props.reading) && <PromptInputHeader>
           {props.note && <span className="qa-note"><FileText size={13} /><span>{props.note.basename}</span>
             <button type="button" disabled={running} onClick={props.onToggleNote}><X size={12} /><span className="qiaomu-agent__sr-only">不附加当前笔记</span></button></span>}
           {props.editorSelection && <span className="qa-note qa-selection-chip" title={props.editorSelection.detail.slice(0, 400)}><TextSelect size={13} /><span>{props.editorSelection.label}</span>
             <button type="button" disabled={running} onClick={props.onDismissSelection}><X size={12} /><span className="qiaomu-agent__sr-only">不附加选中的文字</span></button></span>}
+          {props.reading && <span className="qa-note qa-reading-chip" title={props.reading.detail}><ReadingIcon chip={props.reading} /><span>{props.reading.label}</span>
+            <button type="button" disabled={running} onClick={props.onDismissReading}><X size={12} /><span className="qiaomu-agent__sr-only">不附加正在阅读的内容</span></button></span>}
         </PromptInputHeader>}
         <label htmlFor={inputId} className="qiaomu-agent__sr-only">给 Agent 的消息</label>
         <PromptInputTextarea submitOnEnter={Platform.isDesktopApp} id={inputId} ref={textarea} value={input} onFocus={props.onComposerFocus} aria-controls={menuOpen ? `${inputId}-menu` : undefined} aria-activedescendant={menuOpen ? `${inputId}-option-${menuIndex}` : undefined}
@@ -336,4 +340,13 @@ export function ChatPanel(props: Props) {
       </PromptInput>
     </div>
   </>;
+}
+
+/** Reading context from another plugin or view, shown as a removable composer chip. */
+export interface ReadingChip { label: string; detail: string; kind: "article" | "book" | "document" | "page" | "other"; selected: boolean }
+
+function ReadingIcon({ chip }: { chip: ReadingChip }) {
+  if (chip.selected) return <TextSelect size={13} />;
+  const Icon = { article: Newspaper, book: BookOpen, document: FileText, page: Globe, other: Shapes }[chip.kind];
+  return <Icon size={13} />;
 }

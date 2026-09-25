@@ -80,13 +80,19 @@ describe("ReadingContextService", () => {
     warn.mockRestore();
   });
 
-  it("ignores the agent and sidebars, and a note clears the reading leaf", () => {
+  it("ignores the agent, sidebars and notes, and a hidden reading leaf yields nothing", () => {
     const reader = leaf("pdf", ws.rootSplit, { view: Object.assign(new (FileView as unknown as new () => object)(), { file: { basename: "论文", path: "papers/论文.pdf" } }) });
     ws.trigger("active-leaf-change", reader);
     ws.trigger("active-leaf-change", leaf("qiaomu-agent", ws.rightSplit));
     ws.trigger("active-leaf-change", leaf("file-explorer", ws.leftSplit));
     expect(service.current()).toMatchObject({ kind: "document", path: "papers/论文.pdf" });
     ws.trigger("active-leaf-change", leaf("markdown", ws.rootSplit));
+    expect(service.current()?.path).toBe("papers/论文.pdf");
+    Object.assign(reader.view.containerEl, { isShown: () => false });
+    expect(service.current()).toBeNull();
+    reader.view.containerEl.remove();
+    ws.trigger("layout-change");
+    Object.assign(reader.view.containerEl, { isShown: () => true });
     expect(service.current()).toBeNull();
   });
 

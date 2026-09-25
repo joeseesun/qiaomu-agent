@@ -1,6 +1,6 @@
 # Qiaomu Context Protocol v1
 
-Date: 2026-09-25. Status: sources implemented in Qiaomu RSS (`claude/agent-api`, 36885e6) and Qiaomu Reader (`claude/agent-api`, cc3992d); agent-side modules in `src/integrations/` with tests, wiring below still to do.
+Date: 2026-09-25. Status: implemented end to end. Agent `claude/integrations`; Qiaomu RSS and Qiaomu Reader `claude/agent-api`. Verified in Obsidian (see Verification).
 
 ## Why
 
@@ -20,7 +20,10 @@ The user reads in many places: Qiaomu RSS articles, Qiaomu Reader books and PDFs
 - Pull: the agent tracks the most recent reading leaf (main area, not sidebars, not itself) and asks every compatible provider for a snapshot of it. First non-null wins.
 - Push: a source's own "Ask AI" action calls `agent.ask({ context })`. That context is pinned until the next message is sent or the user removes it.
 - Fallback: without a provider, built-in adapters cover the core PDF view (file, page of the selection), the core web viewer (http(s) URL and title) and a text selection in any other view. The agent keeps the last DOM selection inside the reading leaf, because it disappears when focus moves to the composer.
+- Reading leaf: the most recent main-area leaf that is not a note, sidebar or the agent. It stays the reading context while it is visible, so reading in one pane and writing in another keeps the article; a background tab or a closed pane stops counting.
 - Discovery: `app.plugins.plugins[id]`, checked at the moment of use and never cached. Protocol name and exact version must match; anything else counts as "not installed", so a future version cannot half-work.
+- Versioning: v1 may gain optional fields and optional methods (for example a future `reveal(anchor)` to jump back to a quoted passage). Consumers feature-detect them and ignore unknown ones. Only breaking changes raise the version.
+- Extending the agent: built-in adapters are a list (`BUILTIN_ADAPTERS` in `reading-context.ts`); supporting another view type is one `ContextAdapter` object.
 
 The canonical definitions are `src/integrations/qiaomu-context.ts` (copy it unchanged into TypeScript plugins) and the JavaScript port `qiaomu-reader/src/qiaomu-context.js`.
 
@@ -59,7 +62,7 @@ The agent sanitizes every snapshot again (`sanitize()`): strings only, bounded l
 | `agent` | any | Qiaomu Agent |
 | `builtin` | any | Built-in AI |
 
-The setting row appears only while the agent is installed. `saveProgress()` fires the change event on every page turn.
+The setting row appears only while the agent is installed. `saveProgress()` fires the change event on every page turn. While the agent answers, opening a book no longer auto-opens the built-in AI companion panel, so two AI sidebars never compete.
 
 ## Ask AI button design
 
@@ -69,24 +72,21 @@ The setting row appears only while the agent is installed. `saveProgress()` fire
 - Presence: shown only when it works. No disabled button, no install nag while reading.
 - Composer chip on the agent side: kind icon (`Newspaper` article, `BookOpen` book, `FileText` document, `Globe` page) or `TextSelect` when a passage is selected, label from `readingLabel()` ("选中 128 字 · 标题" / "乔木 RSS · 标题"), remove button with accessible name "不附加正在阅读的内容", title attribute with source and location.
 
-## Agent wiring (to do, in files currently owned by the Codex thread)
+## Agent wiring (done)
 
-All logic lives in `src/integrations/`; wiring is about 40 lines:
+- `main.ts`: `reading` (ReadingContextService, a child component) and the public `api` (createAgentApi).
+- `chat-view.ts`: captures `reading.current()` with the other inputs before the first await, uses a handed-over context once, renders the chip; `focusComposer()` focuses without replacing a draft.
+- `chat-panel.tsx`: reading chip in the prompt header with kind icon, preview tooltip and remove button.
+- `api-backend.ts`, `cli-profiles.ts` (CLI, native agents, ZCode): reading block after the selection block. The "material, not instructions" line sits inside the block, so native sessions that send the system prompt only on the first turn still get it.
+- `agent-prompt.ts`: `READING_CONVENTIONS` appended to the stable conventions.
 
-1. `types.ts`: add `reading?: ContextSnapshot` to `ChatRequest`.
-2. `main.ts` `onload`:
-   ```ts
-   this.reading = this.addChild(new ReadingContextService(this.app, VIEW_TYPE_QIAOMU_AGENT, () => this.eachView((v) => v.refreshControls())));
-   this.api = createAgentApi({ pin: (s) => this.reading.pin(s), open: (prompt) => this.activateView(prompt) });
-   ```
-   Declare `api` as a public field so other plugins find it at `plugins["qiaomu-agent"].api`.
-3. `chat-view.ts` request builder: `const reading = imageEdit ? null : this.plugin.reading.current();` then `reading: reading ?? undefined` in the request; after a successful send call `this.plugin.reading.consumed()`. Pass `reading` and `onDismissReading: () => this.plugin.reading.dismiss()` to the panel.
-4. `chat-panel.tsx`: render the reading chip in `PromptInputHeader` next to the note and selection chips (design above).
-5. `api-backend.ts` `buildApiMessages` and `cli-profiles.ts`: after the selection block, `const reading = readingBlock(request.reading); if (reading) sections.push(reading);`.
-6. `agent-prompt.ts`: append `READING_CONVENTIONS` to `OBSIDIAN_CONVENTIONS` (keeps the cached prefix stable).
-7. Native agent backends that assemble their own prompt: same as step 5.
+## Verification (2026-09-25, Obsidian desktop, test vault)
 
-Acceptance: RSS selection → 问 AI opens the agent with the chip, question answered with the quote; switching articles updates the chip; removing the chip keeps it removed until the article or selection changes; PDF and web viewer show their chips; a selection in another plugin view survives focusing the composer; with the agent disabled, RSS and Reader show no new UI.
+- RSS article → provider snapshot (title, URL, reading version, 877 chars) → agent sees it.
+- Select a paragraph → popup shows 追加到今日日记 / 追加到当前笔记 / 问 AI → click → chip "选中 55 字 · datasette 1.0a41", composer focused. A real model reply quoted the title and summarized the selection.
+- Reader PDF → snapshot (document, 7 pages, 4037 chars). Built-in AI unset, route auto → Ask AI goes to the agent; selecting text in the PDF and pressing the toolbar AI button hands over the selection; the built-in companion no longer auto-opens.
+- Agent disabled → RSS popup back to two actions; Reader routes to built-in; no errors captured.
+- Not verified: mobile, EPUB page turns, the Reader settings row visually, web viewer and core PDF adapters in the host.
 
 ## Opening it to other plugins
 

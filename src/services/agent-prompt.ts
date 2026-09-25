@@ -1,4 +1,5 @@
 import type { ChatRequest } from "../types";
+import { READING_CONVENTIONS } from "../integrations/reading-prompt";
 
 /** Escapes a value for use inside a double-quoted XML attribute. */
 export function xmlAttr(value: string): string {
@@ -19,7 +20,7 @@ export const OBSIDIAN_CONVENTIONS = `## Working in an Obsidian vault
 
 /** Conventions, then the user's instructions, then (API only) the vault's AGENTS.md. */
 export function buildSystemPrompt(userPrompt: string, vaultInstructions?: string): string {
-  const parts = [OBSIDIAN_CONVENTIONS, userPrompt.trim()];
+  const parts = [`${OBSIDIAN_CONVENTIONS}\n${READING_CONVENTIONS}`, userPrompt.trim()];
   if (vaultInstructions?.trim()) parts.push(`<vault_instructions source="AGENTS.md">\n${vaultInstructions.trim()}\n</vault_instructions>`);
   return parts.filter(Boolean).join("\n\n");
 }

@@ -1,4 +1,7 @@
 import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { readingLabel } from "./integrations/reading-prompt";
+import type { ContextSnapshot } from "./integrations/qiaomu-context";
+import type { ReadingChip } from "./ui/chat-panel";
 import { buildSystemPrompt } from "./services/agent-prompt";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -36,6 +39,7 @@ export class ChatView extends ItemView {
   private shownSelection = "";
   private prefill = "";
   private prefillVersion = 0;
+  private focusVersion = 0;
   private statusText = "";
   private models: ModelChoice[] = [];
   private modelLoading = false;
@@ -75,6 +79,8 @@ export class ChatView extends ItemView {
         const parsed: unknown = backend.id === "api" ? {} : enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
         const selection = imageEdit ? null : this.activeSelection();
+        const reading = imageEdit ? null : this.plugin.reading.current();
+        if (reading) this.plugin.reading.consumed();
         const modelId = settings.modelSelections?.[this.selectionKey()]?.model || settings.api.model;
         const modelOptions = backend.id === "api" ? activeProvider(settings)?.modelOptions?.[modelId] : undefined;
         const vaultInstructions = backend.id === "api" ? await this.vaultInstructions() : undefined;
@@ -83,6 +89,7 @@ export class ChatView extends ItemView {
             ? `请使用图像编辑或生成工具，以附带图片为参考生成修改后的图片，并在回复中展示结果。不要修改笔记或其他文件。用户的修改要求：${messageText(last)}`
             : messageText(last), systemPrompt: buildSystemPrompt(settings.systemPrompt, vaultInstructions),
           selection: selection ?? undefined,
+          reading: reading ?? undefined,
           cwd: this.plugin.skillService.getVaultRoot(),
           model: settings.modelSelections?.[this.selectionKey()]?.model || (backend.id === "api" ? settings.api.model : undefined),
           modelOptions,
@@ -128,6 +135,9 @@ export class ChatView extends ItemView {
   }
 
   setComposer(text: string): void { this.prefill = text; this.prefillVersion++; this.render(); }
+  /** Focuses the composer without touching a draft the user is writing. */
+  focusComposer(): void { this.focusVersion++; this.render(); }
+  refreshReading(): void { if (this.root) this.render(); }
   refreshSelection(): void {
     if (!this.root) return;
     const selection = this.activeSelection();
@@ -513,7 +523,7 @@ export class ChatView extends ItemView {
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
       permission, fileAccessAvailable: !key.startsWith("api:"), fullAccessAvailable, note: this.attachNote ? file : null,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
-      prefill: this.prefill, prefillVersion: this.prefillVersion,
+      prefill: this.prefill, prefillVersion: this.prefillVersion, focusVersion: this.focusVersion,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
       onHistory: (event: MouseEvent) => this.openHistory(event),
       branch: this.plugin.settings.activeConversation?.fork ?? null,
@@ -531,6 +541,8 @@ export class ChatView extends ItemView {
       onToggleNote: () => { this.attachNote = !this.attachNote; this.render(); },
       editorSelection: editorSelection ? { label: `选中 ${editorSelection.endLine - editorSelection.startLine + 1} 行 · ${editorSelection.path.split("/").pop()?.replace(/\.md$/, "")}`, detail: editorSelection.text } : null,
       onDismissSelection: () => { const selection = this.activeSelection(); if (selection) { this.dismissedSelection = this.editorSelectionKey(selection); this.render(); } },
+      reading: readingChip(this.plugin.reading.current()),
+      onDismissReading: () => this.plugin.reading.dismiss(),
       onComposerFocus: () => this.render(),
       onApprove: (id: string, choice: string | null) => this.approvals.get(id)?.(choice),
       onRevertChanges: (messageId: string) => this.openRevert(messageId),
@@ -538,4 +550,12 @@ export class ChatView extends ItemView {
       onPersist: () => this.persist(),
     }));
   }
+}
+
+/** Composer chip for the reading context; the tooltip shows where it comes from and a preview. */
+function readingChip(snapshot: ContextSnapshot | null): ReadingChip | null {
+  if (!snapshot) return null;
+  const origin = [snapshot.sourceName, snapshot.title, snapshot.location].filter(Boolean).join(" · ");
+  const preview = (snapshot.selection?.text ?? snapshot.text ?? "").slice(0, 400);
+  return { label: readingLabel(snapshot), detail: preview ? `${origin}\n\n${preview}` : origin, kind: snapshot.kind, selected: Boolean(snapshot.selection) };
 }

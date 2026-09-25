@@ -21,12 +21,20 @@ export class ReadingContextService extends Component {
   private dismissed = "";
   private timer = 0;
 
-  constructor(private readonly app: App, private readonly agentViewType: string, private readonly onChange: () => void) { super(); }
+  constructor(
+    private readonly app: App,
+    private readonly agentViewType: string,
+    private readonly onChange: () => void,
+    private readonly adapters: readonly ContextAdapter[] = BUILTIN_ADAPTERS,
+  ) { super(); }
 
   override onload(): void {
     this.track(this.app.workspace.getMostRecentLeaf());
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => { if (this.track(leaf)) this.changed(); }));
-    this.registerEvent(this.app.workspace.on("layout-change", () => { if (this.leaf && !this.attached(this.leaf)) { this.leaf = null; this.selection = null; this.changed(); } }));
+    this.registerEvent(this.app.workspace.on("layout-change", () => {
+      if (this.leaf && !this.leaf.view.containerEl.isConnected) { this.leaf = null; this.selection = null; this.pinned = null; }
+      this.changed();
+    }));
     // Custom workspace events are untyped in the public API.
     const on = this.app.workspace.on.bind(this.app.workspace) as (name: string, callback: (...data: unknown[]) => unknown) => ReturnType<typeof this.app.workspace.on>;
     this.registerEvent(on(CONTEXT_CHANGED_EVENT, () => this.changed()));
@@ -74,24 +82,29 @@ export class ReadingContextService extends Component {
       try { snapshot = provider.snapshot(leaf); } catch (error) { console.warn(`Qiaomu Agent: context provider ${id} failed`, error); }
       if (snapshot) return sanitize({ ...snapshot, sourceId: snapshot.sourceId || id, selection: snapshot.selection ?? cached });
     }
-    return builtinSnapshot(leaf, cached);
+    return builtinSnapshot(leaf, cached, this.adapters);
   }
 
-  /** Remembers a reading leaf; sidebars and the agent itself never replace it. */
+  /**
+   * Remembers a reading leaf. Notes, sidebars and the agent never replace it, so reading in one pane
+   * while writing in another keeps the article; it stops counting once it is no longer on screen.
+   */
   private track(leaf: WorkspaceLeaf | null): boolean {
     if (!leaf || leaf === this.leaf) return false;
     const type = leaf.view.getViewType();
-    if (type === this.agentViewType || (IGNORED_VIEWS.has(type) && type !== "markdown")) return false;
+    if (type === this.agentViewType || IGNORED_VIEWS.has(type)) return false;
     const root = leaf.getRoot();
     if (root === this.app.workspace.leftSplit || root === this.app.workspace.rightSplit) return false;
-    this.leaf = type === "markdown" ? null : leaf;
+    this.leaf = leaf;
     this.selection = null;
     this.pinned = null;
     return true;
   }
 
+  /** Attached and visible: a leaf in a background tab or a closed pane is not being read. */
   private attached(leaf: WorkspaceLeaf): boolean {
-    return leaf.view.containerEl.isConnected;
+    const element = leaf.view.containerEl as HTMLElement & { isShown?: () => boolean };
+    return element.isConnected && (element.isShown?.() ?? true);
   }
 
   /**
@@ -120,23 +133,54 @@ export class ReadingContextService extends Component {
   private changed(): void { this.onChange(); }
 }
 
-/** Core PDF and web viewer views, then a selection in any other plugin's view. */
-export function builtinSnapshot(leaf: WorkspaceLeaf, selection?: ContextSelection): ContextSnapshot | null {
-  const view = leaf.view;
-  const type = view.getViewType();
-  if (IGNORED_VIEWS.has(type)) return null;
-  if (type === "pdf" && view instanceof FileView && view.file) {
+/**
+ * Reads context from views whose plugins do not speak the protocol. Add one to support another view
+ * type (Canvas, Bases, Excalidraw…); adapters run in order and the first non-null result wins.
+ */
+export interface ContextAdapter {
+  id: string;
+  snapshot(leaf: WorkspaceLeaf, selection?: ContextSelection): ContextSnapshot | null;
+}
+
+export const pdfAdapter: ContextAdapter = {
+  id: "pdf",
+  snapshot(leaf, selection) {
+    const view = leaf.view;
+    if (view.getViewType() !== "pdf" || !(view instanceof FileView) || !view.file) return null;
     return { sourceId: "pdf", sourceName: "PDF", kind: "document", title: view.file.basename, path: view.file.path, location: selection?.location, selection };
-  }
-  if (type === "webviewer") {
+  },
+};
+
+export const webViewerAdapter: ContextAdapter = {
+  id: "webviewer",
+  snapshot(leaf, selection) {
+    if (leaf.view.getViewType() !== "webviewer") return null;
     const state = leaf.getViewState().state as { url?: unknown } | undefined;
     const url = typeof state?.url === "string" && /^https?:\/\//.test(state.url) ? state.url : undefined;
-    return { sourceId: "webviewer", sourceName: "网页", kind: "page", title: view.getDisplayText(), url, selection };
+    return { sourceId: "webviewer", sourceName: "网页", kind: "page", title: leaf.view.getDisplayText(), url, selection };
+  },
+};
+
+/** Any other plugin's view: only an explicit selection is meaningful there. */
+export const selectionAdapter: ContextAdapter = {
+  id: "selection",
+  snapshot(leaf, selection) {
+    if (!selection) return null;
+    const view = leaf.view;
+    const file = view instanceof FileView ? view.file : null;
+    return { sourceId: view.getViewType(), sourceName: view.getDisplayText(), kind: "other", title: file?.basename ?? view.getDisplayText(), path: file?.path, selection };
+  },
+};
+
+export const BUILTIN_ADAPTERS: readonly ContextAdapter[] = [pdfAdapter, webViewerAdapter, selectionAdapter];
+
+export function builtinSnapshot(leaf: WorkspaceLeaf, selection?: ContextSelection, adapters: readonly ContextAdapter[] = BUILTIN_ADAPTERS): ContextSnapshot | null {
+  if (IGNORED_VIEWS.has(leaf.view.getViewType())) return null;
+  for (const adapter of adapters) {
+    const snapshot = adapter.snapshot(leaf, selection);
+    if (snapshot) return snapshot;
   }
-  // Views of plugins that do not speak the protocol: only an explicit selection is meaningful.
-  if (!selection) return null;
-  const file = view instanceof FileView ? view.file : null;
-  return { sourceId: type, sourceName: view.getDisplayText(), kind: "other", title: file?.basename ?? view.getDisplayText(), path: file?.path, selection };
+  return null;
 }
 
 /** Page number of a PDF.js text layer node, e.g. "p. 12". */

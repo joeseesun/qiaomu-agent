@@ -10,12 +10,19 @@ import type { QiaomuSettings } from "./types";
 import { WechatPublishModal } from "./wechat/publish-modal";
 import { InlineEditModal } from "./ui/inline-edit-modal";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
+import { ReadingContextService } from "./integrations/reading-context";
+import { createAgentApi } from "./integrations/agent-api";
+import type { AgentApi } from "./integrations/qiaomu-context";
 
 export default class QiaomuAgentPlugin extends Plugin {
   override settings: QiaomuSettings = { ...DEFAULT_SETTINGS, api: { ...DEFAULT_SETTINGS.api } };
   backendService!: BackendService;
   skillService!: SkillService;
   obsidianCliService!: ObsidianCliService;
+  /** What the user is reading in other plugins and views. */
+  reading!: ReadingContextService;
+  /** Found by other plugins at `app.plugins.plugins["qiaomu-agent"].api` (Qiaomu Context Protocol). */
+  api!: AgentApi;
   private lastMarkdownFile: TFile | null = null;
 
   override async onload(): Promise<void> {
@@ -31,6 +38,11 @@ export default class QiaomuAgentPlugin extends Plugin {
     this.rememberActiveMarkdownFile();
 
     this.registerView(VIEW_TYPE_QIAOMU_AGENT, (leaf) => new ChatView(leaf, this));
+    this.reading = this.addChild(new ReadingContextService(this.app, VIEW_TYPE_QIAOMU_AGENT, () => this.eachView((view) => view.refreshReading())));
+    this.api = createAgentApi({
+      pin: (snapshot) => this.reading.pin(snapshot),
+      open: (prompt) => this.activateView(prompt, true),
+    });
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
 
     this.addRibbonIcon("sparkles", "打开乔木 Agent", () => void this.activateView());
@@ -141,7 +153,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     if (skills.length > 0) console.debug(`Qiaomu Agent: loaded ${skills.length} skills`);
   }
 
-  async activateView(prefill?: string): Promise<void> {
+  async activateView(prefill?: string, focus = false): Promise<void> {
     this.rememberActiveMarkdownFile();
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_QIAOMU_AGENT)[0];
     if (!leaf) {
@@ -157,6 +169,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     if (view instanceof ChatView) {
       await view.ensureReady();
       if (prefill) view.setComposer(prefill);
+      else if (focus) view.focusComposer();
     }
   }
 
