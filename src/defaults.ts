@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: QiaomuSettings = {
     author: "",
     openComment: true,
     recordInNote: true,
+    connections: [],
   },
 };
 
@@ -132,6 +133,15 @@ function normalizeWechatSettings(raw: unknown): QiaomuSettings["wechat"] {
     author: text(data.author, defaults.author),
     openComment: flag(data.openComment, defaults.openComment),
     recordInNote: flag(data.recordInNote, defaults.recordInNote),
+    connections: Array.isArray(data.connections) ? data.connections.filter((item) => item && typeof item.id === "string" && typeof item.name === "string" && (item.mode === "direct" || item.mode === "relay") && typeof item.appId === "string" && typeof item.appSecretId === "string").map((item) => ({
+      id: item.id,
+      name: item.name,
+      mode: item.mode,
+      appId: item.appId,
+      appSecretId: item.appSecretId,
+      relayUrl: typeof item.relayUrl === "string" ? item.relayUrl : "",
+      inviteSecretId: typeof item.inviteSecretId === "string" ? item.inviteSecretId : "",
+    })) : [],
   };
 }
 

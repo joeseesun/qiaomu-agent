@@ -8,6 +8,7 @@ import { ObsidianCliService } from "./services/obsidian-cli";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
 import { WechatPublishModal } from "./wechat/publish-modal";
+import { WechatPreviewView, WECHAT_PREVIEW_VIEW } from "./wechat/preview-view";
 import { InlineEditModal } from "./ui/inline-edit-modal";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
 
@@ -31,6 +32,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     this.rememberActiveMarkdownFile();
 
     this.registerView(VIEW_TYPE_QIAOMU_AGENT, (leaf) => new ChatView(leaf, this));
+    this.registerView(WECHAT_PREVIEW_VIEW, (leaf) => new WechatPreviewView(leaf, this));
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
 
     this.addRibbonIcon("sparkles", "打开乔木 Agent", () => void this.activateView());
@@ -79,6 +81,16 @@ export default class QiaomuAgentPlugin extends Plugin {
         const file = this.app.workspace.getActiveFile();
         if (file?.extension !== "md") return false;
         if (!checking) this.openWechatPublish(file);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "preview-wechat-note",
+      name: "实时预览当前笔记的公众号排版",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (file?.extension !== "md") return false;
+        if (!checking) void this.openWechatPreview(file);
         return true;
       },
     });
@@ -162,6 +174,17 @@ export default class QiaomuAgentPlugin extends Plugin {
 
   openWechatPublish(file: TFile): void {
     new WechatPublishModal(this.app, file, this.settings.wechat).open();
+  }
+
+  private async openWechatPreview(file: TFile): Promise<void> {
+    let leaf = this.app.workspace.getLeavesOfType(WECHAT_PREVIEW_VIEW)[0];
+    if (!leaf) {
+      leaf = Platform.isDesktopApp ? this.app.workspace.getRightLeaf(true) ?? undefined : this.app.workspace.getLeaf("tab");
+      await leaf?.setViewState({ type: WECHAT_PREVIEW_VIEW, active: true });
+    }
+    if (!leaf) { new Notice("无法打开公众号预览"); return; }
+    if (leaf.view instanceof WechatPreviewView) leaf.view.setFile(file);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   private openInlineEdit(editor: Editor, ctx: MarkdownView | MarkdownFileInfo): void {

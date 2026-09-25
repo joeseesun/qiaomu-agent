@@ -1,6 +1,7 @@
 import { type App, Component, Modal, Notice, setIcon, Setting, type TFile } from "obsidian";
 import type { WechatPublishSettings } from "../types";
-import { WechatBridgeClient, type WechatAccount } from "./bridge-client";
+import type { WechatAccount } from "./bridge-client";
+import { WechatTransportRouter } from "./transport-router";
 import { buildWechatHtml, listWechatThemes, resolveWechatTheme } from "./export-html";
 import { type DraftMeta, imageMime, metaFromFrontmatter, preflight, publishDraft, recordDraft, resolveCover } from "./publisher";
 import { renderNoteForWechat, type ArticleImage, type RenderedNote } from "./render-note";
@@ -23,7 +24,7 @@ export class WechatPublishModal extends Modal {
   private themeId: string;
   private wechatHtml = "";
   private accounts: WechatAccount[] = [];
-  private client: WechatBridgeClient | null = null;
+  private client: WechatTransportRouter | null = null;
   private clientError = "";
   private abort: AbortController | null = null;
   private busy = false;
@@ -57,21 +58,18 @@ export class WechatPublishModal extends Modal {
 
   private async load(): Promise<void> {
     try {
-      try {
-        this.client = new WechatBridgeClient(this.settings.bridgeUrl, this.app.secretStorage.getSecret(this.settings.secretId) ?? "");
-      } catch (error) {
-        this.clientError = error instanceof Error ? error.message : String(error);
-      }
+      this.client = new WechatTransportRouter(this.app, this.settings);
       const [note, accounts] = await Promise.all([
         renderNoteForWechat(this.app, this.file, this.component),
-        this.client ? this.client.listAccounts().catch((error: unknown) => {
-          this.clientError = `无法连接 Bridge：${error instanceof Error ? error.message : String(error)}`;
+        this.client.listAccounts().catch((error: unknown) => {
+          this.clientError = `无法连接公众号：${error instanceof Error ? error.message : String(error)}`;
           return [] as WechatAccount[];
-        }) : Promise.resolve([] as WechatAccount[]),
+        }),
       ]);
       if (!this.contentEl.isConnected) { note.dispose(); return; }
       this.note = note;
       this.accounts = accounts;
+      if (!accounts.length) this.clientError ||= this.client.errors.join("；") || "尚未连接公众号";
       this.meta = metaFromFrontmatter(note.frontmatter, note.title, {
         accountId: this.settings.defaultAccountId,
         author: this.settings.author,
@@ -164,7 +162,7 @@ export class WechatPublishModal extends Modal {
     if (!this.note || !this.meta) return;
     const hasCover = Boolean(resolveCover(this.app, this.file.path, this.meta, this.note.images));
     const checks = preflight(this.meta, this.wechatHtml, hasCover, this.note.warnings);
-    if (this.clientError) checks.unshift({ level: "error", message: this.clientError, fix: "在 设置 → 乔木 Agent → 发布 中填写 Bridge 地址和访问令牌。" });
+    if (this.clientError) checks.unshift({ level: "error", message: this.clientError, fix: "在 设置 → 乔木 Agent → 发布 中连接公众号；也可以先复制公众号格式。" });
     this.checksEl.empty();
     for (const check of checks) {
       const item = this.checksEl.createEl("li", { cls: `is-${check.level}` });

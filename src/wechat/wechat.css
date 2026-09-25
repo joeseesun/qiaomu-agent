@@ -11,6 +11,16 @@
 .qiaomu-wechat-check-icon { flex: none; display: inline-flex; margin-top: 2px; }
 .qiaomu-wechat-check-icon svg { width: 16px; height: 16px; }
 .qiaomu-wechat-preview { max-height: 46vh; overflow: auto; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: #ffffff; }
+.qiaomu-wechat-connection { border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 4px 14px 10px; margin: 12px 0; }
+.qiaomu-wechat-connection h4 { margin: 12px 0 4px; }
+.qiaomu-wechat-live-preview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.qiaomu-wechat-preview-toolbar { display: flex; justify-content: flex-end; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--background-modifier-border); }
+.qiaomu-wechat-preview-toolbar button { min-width: 36px; min-height: 36px; }
+.qiaomu-wechat-preview-toolbar button[aria-pressed="true"] { background: var(--background-modifier-hover); }
+.qiaomu-wechat-preview-status { color: var(--text-muted); font-size: var(--font-ui-small); padding: 8px 12px; }
+.qiaomu-wechat-preview-frame { flex: 1; min-height: 0; overflow: auto; background: var(--background-secondary); }
+.qiaomu-wechat-preview-frame.is-phone { max-width: 375px; width: 100%; margin: 0 auto; border-left: 1px solid var(--background-modifier-border); border-right: 1px solid var(--background-modifier-border); }
+.qiaomu-wechat-preview-frame.is-dark { filter: invert(1) hue-rotate(180deg); }
 .qiaomu-wechat-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .qiaomu-wechat-status { color: var(--text-muted); font-size: var(--font-ui-small); min-height: 1.5em; flex: 1 1 200px; }
 .qiaomu-wechat-actions { display: flex; gap: 8px; flex-wrap: wrap; }

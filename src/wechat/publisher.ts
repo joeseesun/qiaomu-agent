@@ -1,7 +1,7 @@
 import { type App, getLinkpath, TFile } from "obsidian";
 import type { ArticleImage, RenderedNote } from "./render-note";
 import { finalizeWechatImages } from "./export-html";
-import type { WechatBridgeClient } from "./bridge-client";
+import type { WechatTransport } from "./transport";
 import { inspectWechatPublishInput } from "./publish-inspect";
 import { truncateWechatText, WECHAT_DRAFT_AUTHOR_MAX_CHARS, WECHAT_DRAFT_DIGEST_MAX_BYTES, WECHAT_DRAFT_DIGEST_MAX_CHARS } from "./publish-limits";
 
@@ -96,7 +96,7 @@ export interface PublishProgress { (message: string): void; }
 /** Uploads local/generated images, then creates a draft. Never publishes directly. */
 export async function publishDraft(options: {
   app: App;
-  client: WechatBridgeClient;
+  client: WechatTransport;
   note: RenderedNote;
   file: TFile;
   wechatHtml: string;
