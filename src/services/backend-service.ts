@@ -4,6 +4,7 @@ import { ApiBackend } from "./api-backend";
 import { CliBackend } from "./cli-backend";
 import { ZcodeBackend } from "./zcode-backend";
 import { NativeAgentBackend, nativeTransportFor, nativeTransportLabel } from "./native-agent-backend";
+import { WEB_SEARCH_SECRET_ID } from "./web-search";
 
 export class BackendService {
   private detections: CliDetection[] = [];
@@ -109,7 +110,7 @@ export class BackendService {
   private apiBackend(): ApiBackend {
     const settings = this.getSettings();
     const key = this.app.secretStorage.getSecret(settings.api.secretId) ?? "";
-    return new ApiBackend(settings.api, key);
+    return new ApiBackend(settings.api, key, this.app.secretStorage.getSecret(WEB_SEARCH_SECRET_ID) ?? "", this.app);
   }
 
   private hasApiKey(): boolean {

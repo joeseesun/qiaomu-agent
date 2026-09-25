@@ -1,13 +1,15 @@
 import { Modal, Notice, Platform, setIcon, type App } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
-import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ProviderConfig } from "../types";
-import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl } from "../services/api-providers";
-import { ApiBackend, apiEfforts } from "../services/api-backend";
-import { detectKey, recommendedModels } from "../services/key-detection";
+import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ModelOptions, ProviderConfig } from "../types";
+import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, type ProviderGroup } from "../services/api-providers";
+import { ApiBackend } from "../services/api-backend";
+import { compactTokens, resolveModel } from "../services/model-capabilities";
+import { isChatModel, recommendedModels } from "../services/key-detection";
 import { agentShown, connectProvider, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, removeProvider, upsertProvider } from "../services/model-sources";
 import { nativeTransportFor, nativeTransportLabel } from "../services/native-agent-backend";
 import { agentIconKey } from "./brand-icon";
 import { BRAND_ICONS } from "./brand-icons";
+import { actionButton, hostSwitch, iconAction, sectionHead } from "./settings-kit";
 
 function brand(parent: HTMLElement, icon: string | undefined, fallback: string, size = 20): void {
   const span = parent.createSpan({ cls: "qa-brand" });
@@ -18,14 +20,21 @@ function brand(parent: HTMLElement, icon: string | undefined, fallback: string, 
   else { span.addClass("qa-brand--generic"); setIcon(span, fallback); }
 }
 
-function dot(parent: HTMLElement, state: "ok" | "error" | "idle"): void {
-  parent.createSpan({ cls: `qa-dot is-${state}`, attr: { "aria-hidden": "true" } });
-}
+
 
 function labeledInput(parent: HTMLElement, label: string, type: string, cls: string, attr: Record<string, string> = {}): HTMLInputElement {
   const wrapper = parent.createEl("label", { cls: "qa-input-label" });
   wrapper.createSpan({ cls: "qiaomu-agent__sr-only", text: label });
   return wrapper.createEl("input", { type, cls, attr });
+}
+
+/** A visible field label above its control. */
+function field(parent: HTMLElement, label: string, hint?: string): HTMLElement {
+  const wrapper = parent.createDiv({ cls: "qa-ms-field" });
+  const head = wrapper.createDiv({ cls: "qa-ms-field-head" });
+  head.createSpan({ cls: "qa-ms-field-label", text: label });
+  if (hint) head.createSpan({ cls: "qa-ms-field-hint", text: hint });
+  return wrapper;
 }
 
 function labelGroup(group: HTMLElement, label: string): void {
@@ -34,38 +43,29 @@ function labelGroup(group: HTMLElement, label: string): void {
   group.setAttribute("aria-labelledby", id);
 }
 
-/** A Vercel-style card: body plus a muted footer bar. */
-function card(parent: HTMLElement, title: string, description?: string): { body: HTMLElement; footer: HTMLElement } {
-  const root = parent.createDiv({ cls: "qa-card" });
-  const body = root.createDiv({ cls: "qa-card-body" });
-  body.createEl("h3", { cls: "qa-card-title", text: title });
-  if (description) body.createEl("p", { cls: "qa-card-desc", text: description });
-  return { body, footer: root.createDiv({ cls: "qa-card-footer" }) };
+
+
+/** Modal title with an optional back control in the same row. */
+function modalTitle(modal: Modal, text: string, icon?: { key: string | undefined; fallback: string }, back?: () => void): void {
+  modal.titleEl.empty();
+  modal.titleEl.addClass("qa-modal-title");
+  if (back) iconAction(modal.titleEl, "arrow-left", "返回", "qa-modal-back").addEventListener("click", back);
+  if (icon) brand(modal.titleEl, icon.key, icon.fallback, 22);
+  modal.titleEl.createSpan({ cls: "qa-modal-title-text", text });
 }
 
 function listModelsFor(connection: ApiConnection, key: string): Promise<ModelChoice[]> {
   return new ApiBackend(connection, key).listModels();
 }
 
-type Result = { state: "busy" | "ok" | "error"; title: string; detail?: string; icon?: string } | { state: "choose"; candidates: string[] };
-
 /**
- * Model settings: paste one key and it is done. Unique key prefixes connect immediately;
- * shared shapes ask which vendor first, so a key is only ever sent to one provider.
+ * Model sources on one page: cloud services first, then local agents on desktop.
+ * A row opens its details; its switch decides whether it appears in the composer.
  */
 export class ProviderSettings {
-  private result: Result | null = null;
-  private pendingKey = "";
-  private custom = false;
-  private showProviderChoices = false;
-  private chosenPreset = "";
-  private customName = "";
-  private customUrl = "";
-  private customProtocol: NonNullable<ApiConnection["protocol"]> = "openai-chat";
   private detecting = false;
   private detectionAttempted = false;
   private detectionError = "";
-  private tab: "agents" | "api" = Platform.isDesktopApp ? "agents" : "api";
   private showOtherAgents = false;
 
   constructor(private readonly plugin: QiaomuAgentPlugin, private readonly rerender: () => void) {}
@@ -76,254 +76,67 @@ export class ProviderSettings {
 
   render(container: HTMLElement): void {
     container.addClass("qa-models");
-    this.renderCurrent(container);
-    if (Platform.isDesktopApp) {
-      const tabs = container.createDiv({ cls: "qa-model-tabs", attr: { role: "tablist" } });
-      for (const [index, id, label] of [[0, "agents", "本机 Agent"], [1, "api", "API 模型"]] as const) {
-        const selected = this.tab === id;
-        const button = tabs.createEl("button", { cls: "qa-model-tab", text: label, attr: { role: "tab", "aria-selected": String(selected) } });
-        button.tabIndex = selected ? 0 : -1;
-        button.addEventListener("click", () => this.switchTab(id, container));
-        button.addEventListener("keydown", (event) => {
-          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-          event.preventDefault();
-          this.switchTab(index === 0 ? "api" : "agents", container, true);
-        });
-      }
-    }
-    const panel = container.createDiv({ cls: "qa-model-panel", attr: { role: "tabpanel" } });
-    if (this.tab === "agents" && Platform.isDesktopApp) this.renderAgents(panel);
-    else this.renderApi(panel);
+    this.renderApi(container.createDiv({ cls: "qa-ms-section" }));
+    if (Platform.isDesktopApp) this.renderAgents(container.createDiv({ cls: "qa-ms-section" }));
   }
 
-  private switchTab(tab: "agents" | "api", container: HTMLElement, focus = false): void {
-    if (this.tab !== tab) {
-      this.tab = tab;
-      const scrollArea = container.closest<HTMLElement>(".modal-content, .vertical-tab-content");
-      this.rerender();
-      scrollArea?.scrollTo({ top: 0 });
-      if (focus) scrollArea?.querySelector<HTMLElement>(`[role=tab][aria-selected=true]`)?.focus();
-    }
-  }
-
-  private renderCurrent(container: HTMLElement): void {
-    const current = container.createDiv({ cls: "qa-current" });
-    const copy = current.createDiv();
-    copy.createDiv({ cls: "qa-eyebrow", text: "当前对话" });
-    const settings = this.settings;
-    if (settings.backendKind === "api") {
-      const provider = settings.providers.find((item) => item.secretId === settings.api.secretId);
-      copy.createDiv({ cls: "qa-current-name", text: provider ? (provider.models?.find((item) => item.id === settings.api.model)?.name || settings.api.model || "尚未选择模型") : "尚未连接模型" });
-      copy.createDiv({ cls: "qa-current-detail", text: provider ? `${providerLabel(provider)} · 在对话输入框中切换模型` : "请先添加模型服务商" });
-    } else if (settings.backendKind === "cli") {
-      const agent = this.plugin.backendService.getDetections().find((item) => item.id === settings.preferredCli);
-      const selected = settings.modelSelections?.[`cli:${settings.preferredCli}`]?.model || "";
-      const modelName = settings.agentModelCache[settings.preferredCli]?.models.find((item) => item.id === selected)?.name || selected;
-      copy.createDiv({ cls: "qa-current-name", text: modelName || agent?.label || settings.preferredCli || "本机 Agent" });
-      copy.createDiv({ cls: "qa-current-detail", text: `${agent?.label || "本机 Agent"} · 在对话输入框中切换模型` });
-    } else {
-      copy.createDiv({ cls: "qa-current-name", text: "自动选择" });
-      copy.createDiv({ cls: "qa-current-detail", text: "在对话输入框中选择具体模型" });
-    }
-  }
-
-  private renderAddCard(container: HTMLElement): void {
-    const { body, footer } = card(container, this.chosenPreset ? `连接 ${API_PROVIDERS[this.chosenPreset]?.label ?? "服务商"}` : "连接新的模型服务商", this.custom ? "填写接口地址和 API Key，连接后自动读取模型。" : "粘贴 API Key，识别服务商并读取模型。");
-    if (this.chosenPreset) {
-      const back = body.createEl("button", { cls: "qa-text-button qa-provider-back", text: "返回自动识别" });
-      back.addEventListener("click", () => { this.chosenPreset = ""; this.custom = false; this.result = null; this.rerender(); });
-    }
-    const row = body.createDiv({ cls: "qa-keyrow" });
-    const inputLabel = row.createEl("label", { cls: "qa-field-label" });
-    inputLabel.createSpan({ cls: "qiaomu-agent__sr-only", text: "API Key" });
-    const input = inputLabel.createEl("input", { type: "password", cls: "qa-keyinput", attr: { placeholder: "粘贴 API Key", autocomplete: "off", spellcheck: "false" } });
-    input.value = this.pendingKey;
-    const connect = row.createEl("button", { cls: "mod-cta", text: "连接" });
-    const run = () => { this.pendingKey = input.value.trim(); void this.start(); };
-    connect.addEventListener("click", run);
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); run(); } });
-    input.addEventListener("input", () => { this.pendingKey = input.value.trim(); });
-    // Pasting is the whole flow: the value lands after the paste event, then detection starts.
-    input.addEventListener("paste", () => { if (!this.chosenPreset) window.setTimeout(run, 0); });
-
-    if (this.custom) {
-      const panel = body.createDiv({ cls: "qa-custom" });
-      panel.createDiv({ cls: "qa-custom-label", text: "显示名称" });
-      const name = labeledInput(panel, "显示名称", "text", "qa-custom-name", { placeholder: "例如：我的中转站" });
-      name.value = this.customName;
-      name.addEventListener("input", () => { this.customName = name.value.trim(); });
-      panel.createDiv({ cls: "qa-custom-label", text: "接口类型" });
-      const seg = panel.createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
-      labelGroup(seg, "接口类型");
-      for (const [value, label] of [["openai-chat", "OpenAI 兼容"], ["anthropic", "Anthropic 兼容"]] as const) {
-        const option = seg.createEl("button", { text: label, attr: { role: "radio", "aria-checked": String(this.customProtocol === value) } });
-        option.addEventListener("click", () => { this.customProtocol = value; this.rerender(); });
-      }
-      panel.createDiv({ cls: "qa-custom-label", text: "接口地址" });
-      const url = labeledInput(panel, "接口地址", "url", "qa-custom-url", { placeholder: this.customProtocol === "anthropic" ? "https://api.example.com" : "https://api.example.com/v1" });
-      url.value = this.customUrl;
-      url.addEventListener("input", () => { this.customUrl = url.value.trim(); });
-    }
-
-    const status = body.createDiv({ cls: "qa-result", attr: { role: "status", "aria-live": "polite" } });
-    this.renderResult(status);
-
-    const lock = footer.createDiv({ cls: "qa-card-footer-note" });
-    setIcon(lock.createSpan({ cls: "qa-inline-icon" }), "lock");
-    lock.createSpan({ text: "密钥仅保存在这台设备" });
-    const actions = footer.createDiv({ cls: "qa-card-footer-actions" });
-    const other = actions.createEl("button", { cls: "qa-text-button", text: this.showProviderChoices ? "收起服务商" : "选择服务商或自定义接口" });
-    other.setAttribute("aria-expanded", String(this.showProviderChoices));
-    other.addEventListener("click", () => { this.showProviderChoices = !this.showProviderChoices; this.rerender(); });
-    if (this.showProviderChoices) this.renderProviderChoices(container);
-  }
-
-  private renderProviderChoices(container: HTMLElement): void {
-    const panel = container.createDiv({ cls: "qa-provider-choices" });
-    const search = labeledInput(panel, "搜索服务商", "search", "qa-provider-search", { placeholder: "搜索服务商" });
-    const list = panel.createDiv({ cls: "qa-provider-choices-list" });
-    const items: Array<{ label: string; button: HTMLButtonElement }> = [];
-    for (const [id, preset] of Object.entries(API_PROVIDERS)) {
-      if (id === "custom") continue;
-      const button = list.createEl("button", { cls: "qa-provider-choice" });
-      brand(button, preset.icon, "boxes", 18);
-      button.createSpan({ text: preset.label });
-      button.addEventListener("click", () => { this.chosenPreset = id; this.custom = false; this.showProviderChoices = false; this.result = null; this.rerender(); });
-      items.push({ label: `${preset.label} ${id}`.toLowerCase(), button });
-    }
-    const custom = list.createEl("button", { cls: "qa-provider-choice qa-provider-choice-custom", text: "自定义接口" });
-    custom.addEventListener("click", () => { this.chosenPreset = "custom"; this.custom = true; this.showProviderChoices = false; this.result = null; this.rerender(); });
-    search.addEventListener("input", () => {
-      const q = search.value.trim().toLowerCase();
-      for (const item of items) item.button.hidden = !item.label.includes(q);
-      custom.hidden = Boolean(q) && !"自定义接口 custom".includes(q);
-    });
-  }
-
-  private renderResult(status: HTMLElement): void {
-    const result = this.result;
-    if (!result) return;
-    if (result.state === "choose") {
-      status.createDiv({ cls: "qa-result-title", text: "这是哪一家的密钥？确认后只发给这一家验证。" });
-      const chips = status.createDiv({ cls: "qa-candidates" });
-      for (const id of result.candidates) {
-        const preset = API_PROVIDERS[id];
-        if (!preset) continue;
-        const chip = chips.createEl("button", { cls: "qa-candidate" });
-        brand(chip, preset.icon, "boxes", 16);
-        chip.createSpan({ text: preset.label });
-        chip.addEventListener("click", () => void this.connect(id));
-      }
-      const more = chips.createEl("button", { cls: "qa-candidate is-more", text: "其他…" });
-      more.addEventListener("click", () => { this.showProviderChoices = true; this.rerender(); });
-      return;
-    }
-    const line = status.createDiv({ cls: `qa-result-row is-${result.state}` });
-    if (result.state === "busy") setIcon(line.createSpan({ cls: "qa-inline-icon is-spinning" }), "loader");
-    else brand(line, result.icon, result.state === "ok" ? "check" : "circle-alert", 18);
-    const text = line.createDiv({ cls: "qa-result-text" });
-    text.createDiv({ cls: "qa-result-title", text: result.title });
-    if (result.detail) text.createDiv({ cls: "qa-result-detail", text: result.detail });
-    if (result.state !== "busy") dot(line, result.state === "ok" ? "ok" : "error");
-  }
-
-  private async start(): Promise<void> {
-    if (this.chosenPreset && !this.custom) { await this.connect(this.chosenPreset); return; }
-    if (this.custom) {
-      try { this.customUrl = validateApiUrl(this.customUrl); }
-      catch (error) { this.result = { state: "error", title: "接口地址无效", detail: error instanceof Error ? error.message : String(error) }; this.rerender(); return; }
-      await this.connect("custom");
-      return;
-    }
-    const detection = detectKey(this.pendingKey);
-    if (detection.kind === "empty") return;
-    if (detection.kind === "unique") { await this.connect(detection.provider); return; }
-    this.result = { state: "choose", candidates: detection.candidates };
-    this.rerender();
-  }
-
-  private async connect(presetId: string): Promise<void> {
-    const preset = API_PROVIDERS[presetId] ?? API_PROVIDERS.custom!;
-    const key = this.pendingKey;
-    if (!key && !preset.local) { this.result = { state: "error", title: "请先粘贴 API Key" }; this.rerender(); return; }
-    const label = presetId === "custom" ? this.customName || providerHost({ baseUrl: this.customUrl }) : preset.label;
-    this.result = { state: "busy", title: `正在验证 ${label}…` };
-    this.rerender();
-    try {
-      const endpoint = presetId === "custom" ? { baseUrl: this.customUrl, protocol: this.customProtocol, name: this.customName || undefined } : {};
-      const { provider, models } = await connectProvider(this.settings, presetId, key, {
-        listModels: listModelsFor,
-        getSecret: (id) => this.app.secretStorage.getSecret(id),
-        setSecret: (id, value) => this.app.secretStorage.setSecret(id, value),
-      }, endpoint);
-      await this.plugin.saveSettings();
-      this.pendingKey = "";
-      this.custom = false;
-      this.chosenPreset = "";
-      this.result = { state: "ok", icon: preset.icon, title: `已连接 ${providerLabel(provider)}`, detail: `已验证 · ${models.length} 个模型${provider.model ? ` · 默认 ${provider.model}` : ""}` };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.result = { state: "error", icon: preset.icon, title: `${label} 验证失败`, detail: /[(（](401|403)[)）]/.test(message) ? "密钥无效或没有权限。如果选错了服务商，重新粘贴后换一家。" : message };
-    }
-    this.rerender();
-  }
-
-  private renderApi(container: HTMLElement): void {
+  private renderApi(section: HTMLElement): void {
     const providers = this.settings.providers;
-    this.renderAddCard(container);
-    const { body } = card(container, "已接入的服务商", providers.length ? "在这里管理聊天时可选的模型。" : "连接后会显示在这里。");
-    const list = body.createDiv({ cls: "qa-list" });
-    if (!providers.length) list.createDiv({ cls: "qa-list-empty", text: "还没有接入服务商。粘贴上方的 API Key 即可开始。" });
+    const actions = sectionHead(section, "模型服务", "用 API Key 连接云端模型。开关决定是否出现在对话的模型菜单里。");
+    const openChooser = () => new ProviderChooserModal(this.app, this.plugin, this.rerender).open();
+    if (providers.length) actionButton(actions, "plus", "添加服务商").addEventListener("click", openChooser);
+    if (!providers.length) {
+      const empty = section.createDiv({ cls: "qa-ms-empty" });
+      empty.createDiv({ cls: "qa-ms-empty-title", text: "还没有连接模型服务" });
+      empty.createDiv({ cls: "qa-ms-empty-text", text: "选择服务商并粘贴 API Key，即可在对话中使用它的模型。" });
+      actionButton(empty, "plus", "添加服务商", "is-primary").addEventListener("click", openChooser);
+      return;
+    }
+    const list = section.createDiv({ cls: "qa-ms-list" });
     for (const provider of providers) {
-      const key = this.secret(provider);
-      const ok = Boolean(key) || permitsEmptyKey(provider);
-      const enabled = new Set(provider.enabledModels ?? []).size;
-      this.row(list, providerIcon(provider), "boxes", providerLabel(provider), `${enabled} 个模型可选`, ok ? "ok" : "error", ok ? "已配置" : "需要密钥",
+      const ok = Boolean(this.secret(provider)) || permitsEmptyKey(provider);
+      const count = new Set(provider.enabledModels ?? []).size;
+      const sub = !ok ? "需要 API Key" : count ? `${count} 个模型 · ${providerHost(provider)}` : "尚未启用模型";
+      this.row(list, providerIcon(provider), "boxes", providerLabel(provider), sub, !ok || !count,
         () => new ProviderModal(this.app, this.plugin, provider.id, this.rerender).open(), provider.showInPicker !== false,
         async (shown) => { upsertProvider(this.settings, { ...provider, showInPicker: shown }); await this.plugin.saveSettings(); this.rerender(); });
     }
-    if (Platform.isDesktopApp && !providers.length) {
-      const next = container.createEl("button", { cls: "qa-cross-link", text: "没有 API Key？查看本机 Agent" });
-      next.addEventListener("click", () => this.switchTab("agents", container));
-    }
   }
 
-  private renderAgents(container: HTMLElement): void {
+  private renderAgents(section: HTMLElement): void {
     const agents = this.plugin.backendService.getDetections();
     const ready = agents.filter((agent) => agent.callable);
     const popular: readonly string[] = DEFAULT_VISIBLE_AGENT_IDS;
     const main = ready.filter((agent) => popular.includes(agent.id) || agent.id === this.settings.preferredCli)
       .sort((a, b) => popular.indexOf(a.id) - popular.indexOf(b.id));
     const other = ready.filter((agent) => !main.includes(agent));
-    const { body, footer } = card(container, "使用本机 Agent", "读取已安装的程序；账号和密钥继续由各程序管理。");
-    const list = body.createDiv({ cls: "qa-list" });
-    if (!agents.length) list.createDiv({ cls: "qa-list-empty", text: this.detecting ? "正在检测本机 Agent…" : "尚未完成检测。" });
-    else if (!ready.length) list.createDiv({ cls: "qa-list-empty", text: "尚未找到可调用的 Agent。安装本机 CLI 后点“重新检测”。" });
-    for (const agent of main) this.agentRow(list, agent);
-    if (other.length) {
-      const group = list.createDiv({ cls: "qa-list-group qa-local-head" });
-      group.createSpan({ text: `其他 Agent · ${other.length}` });
-      const expand = group.createEl("button", { cls: "qa-text-button", text: this.showOtherAgents ? "收起" : "查看" });
-      expand.setAttribute("aria-expanded", String(this.showOtherAgents));
-      expand.addEventListener("click", () => { this.showOtherAgents = !this.showOtherAgents; this.rerender(); });
-      if (this.showOtherAgents) for (const agent of other) this.agentRow(list, agent);
-    }
-    const missing = agents.filter((agent) => !agent.available);
-    const unavailable = agents.filter((agent) => agent.available && !agent.callable);
-    if (this.detectionError) body.createDiv({ cls: "qa-inline-error", text: `检测失败：${this.detectionError}`, attr: { role: "alert" } });
-    const note = unavailable.map(agent => agent.note || `${agent.label} 已安装，暂不可调用`).join("；");
-    footer.createDiv({ cls: "qa-card-footer-note", text: note || (missing.length ? `另有 ${missing.length} 个未安装` : "登录状态以各 Agent 自己的提示为准") });
-    const redetect = footer.createDiv({ cls: "qa-card-footer-actions" }).createEl("button", { cls: "qa-text-button", text: this.detecting ? "检测中…" : "重新检测" });
+    const actions = sectionHead(section, "本机 Agent", "已安装的命令行 Agent，使用它们自己的登录与模型。");
+    const redetect = actionButton(actions, "refresh-cw", this.detecting ? "检测中…" : "重新检测", this.detecting ? "is-busy" : "");
     redetect.disabled = this.detecting;
     redetect.addEventListener("click", () => void this.detect());
+    if (this.detectionError) section.createDiv({ cls: "qa-inline-error", text: `检测失败：${this.detectionError}`, attr: { role: "alert" } });
+    if (!ready.length) {
+      const empty = section.createDiv({ cls: "qa-ms-empty" });
+      empty.createDiv({ cls: "qa-ms-empty-text", text: this.detecting || !this.detectionAttempted && !agents.length ? "正在检测本机 Agent…" : "没有找到可用的 Agent CLI。安装后点“重新检测”。" });
+    } else {
+      const list = section.createDiv({ cls: "qa-ms-list" });
+      for (const agent of main) this.agentRow(list, agent);
+      if (other.length) {
+        if (this.showOtherAgents) for (const agent of other) this.agentRow(list, agent);
+        const more = list.createEl("button", { cls: "qa-ms-more", attr: { type: "button", "aria-expanded": String(this.showOtherAgents) } });
+        more.createSpan({ text: this.showOtherAgents ? "收起其他 Agent" : `其他 ${other.length} 个 Agent` });
+        setIcon(more.createSpan({ cls: "qa-ms-chevron", attr: { "aria-hidden": "true" } }), this.showOtherAgents ? "chevron-up" : "chevron-down");
+        more.addEventListener("click", () => { this.showOtherAgents = !this.showOtherAgents; this.rerender(); });
+      }
+    }
+    const unavailable = agents.filter((agent) => agent.available && !agent.callable);
+    if (unavailable.length) section.createDiv({ cls: "qa-ms-note", text: unavailable.map((agent) => agent.note || `${agent.label} 已安装，暂不可调用`).join("；") });
     if (!agents.length && !this.detecting && !this.detectionAttempted) void this.detect();
-    const next = container.createEl("button", { cls: "qa-cross-link", text: "使用 API Key 接入模型" });
-    next.addEventListener("click", () => this.switchTab("api", container));
   }
 
   private agentRow(list: HTMLElement, agent: CliDetection): void {
     const count = this.settings.agentModelCache[agent.id]?.models.length ?? 0;
-    this.row(list, agentIconKey(agent.id), "bot", agent.label, count ? `已读取 ${count} 个模型` : "已找到本机程序", "ok", "",
+    this.row(list, agentIconKey(agent.id), "bot", agent.label, count ? `${count} 个模型` : "使用 Agent 的默认模型", false,
       () => new AgentModal(this.app, this.plugin, agent, this.rerender).open(), agentShown(this.settings, agent.id),
       async (shown) => { this.settings.agentVisibility[agent.id] = shown; this.settings.hiddenAgents = this.settings.hiddenAgents.filter((id) => id !== agent.id); await this.plugin.saveSettings(); this.rerender(); });
   }
@@ -338,37 +151,183 @@ export class ProviderSettings {
     finally { this.detecting = false; this.rerender(); }
   }
 
-  private row(list: HTMLElement, icon: string | undefined, fallback: string, name: string, sub: string, state: "ok" | "error", statusText: string, open: () => void, shown: boolean, onShown: (shown: boolean) => void): void {
-    const entry = list.createDiv({ cls: "qa-list-entry" });
-    const row = entry.createEl("button", { cls: "qa-list-row" });
-    brand(row, icon, fallback);
-    const text = row.createDiv({ cls: "qa-list-text" });
-    text.createDiv({ cls: "qa-list-name", text: name });
-    text.createDiv({ cls: "qa-list-sub", text: sub });
-    if (statusText) row.createSpan({ cls: `qa-source-status is-${state}`, text: statusText });
-    setIcon(row.createSpan({ cls: "qa-list-chevron" }), "chevron-right");
-    row.addEventListener("click", open);
-    const visibility = entry.createEl("button", { cls: "qa-visibility-action", text: shown ? "显示中" : "已隐藏" });
-    visibility.createSpan({ cls: "qiaomu-agent__sr-only", text: ` ${name}的模型` });
-    visibility.setAttribute("aria-pressed", String(shown));
-    visibility.addEventListener("click", () => onShown(!shown));
+  private row(list: HTMLElement, icon: string | undefined, fallback: string, name: string, sub: string, attention: boolean, open: () => void, shown: boolean, onShown: (shown: boolean) => void): void {
+    const entry = list.createDiv({ cls: `qa-ms-row${shown ? "" : " is-off"}` });
+    const main = entry.createEl("button", { cls: "qa-ms-row-main", attr: { type: "button", "aria-label": `${name}：${sub}，打开设置` } });
+    brand(main, icon, fallback);
+    const text = main.createDiv({ cls: "qa-ms-row-text" });
+    text.createDiv({ cls: "qa-ms-row-name", text: name });
+    text.createDiv({ cls: `qa-ms-row-sub${attention ? " is-attention" : ""}`, text: sub });
+    setIcon(main.createSpan({ cls: "qa-ms-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+    main.addEventListener("click", open);
+    hostSwitch(entry.createDiv({ cls: "qa-ms-row-switch" }), shown, `在对话中显示 ${name}`, onShown);
   }
 }
 
-/** One provider: key, searchable model switches, default model, endpoint, removal. */
+const GROUPS: Array<[ProviderGroup, string]> = [["global", "海外"], ["cn", "国内"], ["relay", "聚合平台"]];
+
+/** Choose a provider, then paste its key — one modal, two steps. */
+class ProviderChooserModal extends Modal {
+  private selected = "";
+  private key = "";
+  private name = "";
+  private url = "";
+  private protocol: NonNullable<ApiConnection["protocol"]> = "openai-chat";
+  private busy = false;
+  private error = "";
+  private changed = false;
+  constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly onChange: () => void) { super(app); }
+
+  override onOpen(): void { this.modalEl.addClass("qa-provider-chooser-modal"); this.draw(); }
+  override onClose(): void { this.contentEl.empty(); if (this.changed) this.onChange(); }
+
+  private draw(): void {
+    this.contentEl.empty();
+    if (this.selected) { this.drawConnection(); return; }
+    modalTitle(this, "添加服务商");
+    const search = labeledInput(this.contentEl, "搜索服务商", "search", "qa-provider-search", { placeholder: "搜索服务商", autocomplete: "off" });
+    const scroller = this.contentEl.createDiv({ cls: "qa-provider-choices" });
+    const items: Array<{ text: string; button: HTMLButtonElement; group: HTMLElement }> = [];
+    const choose = (id: string) => { this.selected = id; this.error = ""; this.draw(); };
+    const group = (title: string) => {
+      const wrapper = scroller.createDiv({ cls: "qa-provider-group" });
+      wrapper.createDiv({ cls: "qa-provider-group-title", text: title });
+      return { wrapper, grid: wrapper.createDiv({ cls: "qa-provider-grid" }) };
+    };
+    const choice = (target: { wrapper: HTMLElement; grid: HTMLElement }, id: string, label: string, icon: string | undefined, fallback: string, keywords = "") => {
+      const button = target.grid.createEl("button", { cls: "qa-provider-choice", attr: { type: "button" } });
+      brand(button, icon, fallback, 18);
+      button.createSpan({ text: label });
+      button.addEventListener("click", () => choose(id));
+      items.push({ text: `${label} ${id} ${keywords}`.toLowerCase(), button, group: target.wrapper });
+    };
+    for (const [groupId, title] of GROUPS) {
+      const presets = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && preset.group === groupId);
+      if (!presets.length) continue;
+      const target = group(title);
+      for (const [id, preset] of presets) choice(target, id, preset.label, preset.icon, "boxes");
+    }
+    const rest = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && !GROUPS.some(([groupId]) => groupId === preset.group));
+    const extra = group("本地与自定义");
+    for (const [id, preset] of rest) choice(extra, id, preset.label, preset.icon, "boxes");
+    if (Platform.isDesktopApp) choice(extra, "ollama", "Ollama · 本地", API_PROVIDERS.ollama?.icon, "boxes", "local 本地");
+    choice(extra, "custom", "自定义接口", undefined, "settings-2", "custom openai anthropic 中转");
+    const empty = scroller.createDiv({ cls: "qa-ms-empty-text qa-provider-none", text: "没有匹配的服务商，可以用“自定义接口”连接" });
+    const filter = () => {
+      const q = search.value.trim().toLowerCase();
+      for (const item of items) item.button.hidden = Boolean(q) && !item.text.includes(q);
+      for (const wrapper of new Set(items.map((item) => item.group))) wrapper.hidden = items.every((item) => item.group !== wrapper || item.button.hidden);
+      empty.hidden = items.some((item) => !item.button.hidden);
+    };
+    search.addEventListener("input", filter);
+    search.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { const first = items.find((item) => !item.button.hidden); if (first) { event.preventDefault(); first.button.click(); } }
+      if (event.key === "ArrowDown") { const first = items.find((item) => !item.button.hidden); if (first) { event.preventDefault(); first.button.focus(); } }
+    });
+    filter();
+    search.focus();
+  }
+
+  private drawConnection(): void {
+    const preset = API_PROVIDERS[this.selected] ?? API_PROVIDERS.custom!;
+    modalTitle(this, this.selected === "custom" ? "自定义接口" : preset.label, { key: preset.icon, fallback: this.selected === "custom" ? "settings-2" : "boxes" },
+      () => { this.selected = ""; this.error = ""; this.draw(); });
+    const form = this.contentEl.createDiv({ cls: "qa-ms-form" });
+    if (this.selected === "custom") {
+      const name = labeledInput(field(form, "显示名称"), "显示名称", "text", "qa-ms-input", { placeholder: "例如：我的中转站" });
+      name.value = this.name;
+      name.addEventListener("input", () => { this.name = name.value.trim(); });
+      const types = field(form, "接口类型").createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
+      labelGroup(types, "接口类型");
+      for (const [value, label] of [["openai-chat", "OpenAI 兼容"], ["anthropic", "Anthropic 兼容"]] as const) {
+        const option = types.createEl("button", { text: label, attr: { type: "button", role: "radio", "aria-checked": String(this.protocol === value) } });
+        option.addEventListener("click", () => { this.protocol = value; this.draw(); });
+      }
+      const url = labeledInput(field(form, "接口地址"), "接口地址", "url", "qa-ms-input is-mono", { placeholder: this.protocol === "anthropic" ? "https://api.example.com" : "https://api.example.com/v1" });
+      url.value = this.url;
+      url.addEventListener("input", () => { this.url = url.value.trim(); });
+    }
+    let keyInput: HTMLInputElement | null = null;
+    if (!preset.local) {
+      const keyField = field(form, "API Key");
+      keyInput = labeledInput(keyField, "API Key", "password", "qa-ms-input is-mono", { placeholder: "粘贴 API Key", autocomplete: "off", spellcheck: "false" });
+      keyInput.value = this.key;
+      keyInput.addEventListener("input", () => { this.key = keyInput!.value.trim(); });
+      keyInput.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void this.connect(); } });
+      if (preset.website) this.keyLink(keyField, preset.website);
+    } else {
+      form.createDiv({ cls: "qa-ms-note", text: "会连接本机 Ollama（http://localhost:11434），请先启动 Ollama。" });
+    }
+    if (this.error) form.createDiv({ cls: "qa-inline-error", text: this.error, attr: { role: "alert" } });
+    const footer = this.contentEl.createDiv({ cls: "qa-ms-footer" });
+    const note = footer.createDiv({ cls: "qa-ms-footer-note" });
+    if (!preset.local) {
+      setIcon(note.createSpan({ cls: "qa-inline-icon", attr: { "aria-hidden": "true" } }), "lock");
+      note.createSpan({ text: "密钥只保存在本机，验证通过后自动读取模型列表" });
+    }
+    const connect = footer.createEl("button", { cls: "mod-cta", text: this.busy ? "正在验证…" : preset.local ? "检测并连接" : "验证并连接", attr: { type: "button" } });
+    connect.disabled = this.busy;
+    connect.addEventListener("click", () => void this.connect());
+    keyInput?.focus();
+  }
+
+  private keyLink(parent: HTMLElement, href: string): void {
+    const link = parent.createEl("a", { cls: "qa-ms-link", text: "在服务商后台获取 API Key", href, attr: { rel: "noopener noreferrer", target: "_blank" } });
+    setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), "arrow-up-right");
+  }
+
+  private async connect(): Promise<void> {
+    if (this.busy) return;
+    const preset = API_PROVIDERS[this.selected] ?? API_PROVIDERS.custom!;
+    if (!preset.local && !this.key) { this.error = "请输入 API Key"; this.draw(); return; }
+    let endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string } = {};
+    if (this.selected === "custom") {
+      try { endpoint = { baseUrl: validateApiUrl(this.url), protocol: this.protocol, name: this.name || undefined }; }
+      catch (error) { this.error = error instanceof Error ? error.message : String(error); this.draw(); return; }
+    }
+    this.busy = true; this.error = ""; this.draw();
+    try {
+      const { provider } = await connectProvider(this.plugin.settings, this.selected, preset.local ? "" : this.key, {
+        listModels: listModelsFor,
+        getSecret: (id) => this.app.secretStorage.getSecret(id),
+        setSecret: (id, value) => this.app.secretStorage.setSecret(id, value),
+      }, endpoint);
+      await this.plugin.saveSettings();
+      this.changed = true;
+      new Notice(`已连接 ${providerLabel(provider)}`);
+      this.close();
+      new ProviderModal(this.app, this.plugin, provider.id, this.onChange).open();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.error = /[(（](401|403)[)）]/.test(message) ? "密钥无效或没有权限，请检查服务商与密钥" : message;
+      this.busy = false; this.draw();
+    }
+  }
+}
+
+/** One provider on one page: connection, then its models; every change applies immediately. */
 class ProviderModal extends Modal {
   private query = "";
-  private changingKey = false;
+  private detailModel = "";
+  private keyDraft = "";
+  private endpointDraft = "";
+  private protocolDraft: ApiConnection["protocol"] = "openai-chat";
+  private addingModel = false;
   private confirmRemove = false;
   private busy = "";
   private error = "";
-  private testResult = "";
 
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly id: string, private readonly onChange: () => void) { super(app); }
 
   private get provider(): ProviderConfig | undefined { return this.plugin.settings.providers.find((item) => item.id === this.id); }
+  private secret(provider: ProviderConfig): string { return this.app.secretStorage.getSecret(provider.secretId) ?? ""; }
 
-  override onOpen(): void { this.modalEl.addClass("qa-provider-modal"); this.draw(); }
+  override onOpen(): void {
+    this.modalEl.addClass("qa-provider-modal");
+    const provider = this.provider;
+    if (provider) { this.endpointDraft = provider.baseUrl; this.protocolDraft = apiProtocol(provider); }
+    this.draw();
+  }
   override onClose(): void { this.contentEl.empty(); this.onChange(); }
 
   private async save(provider: ProviderConfig): Promise<void> {
@@ -378,178 +337,17 @@ class ProviderModal extends Modal {
 
   private draw(): void {
     const provider = this.provider;
-    const { contentEl } = this;
-    contentEl.empty();
+    const scroll = this.contentEl.scrollTop;
+    this.contentEl.empty();
     if (!provider) { this.close(); return; }
-    this.titleEl.empty();
-    brand(this.titleEl, providerIcon(provider), "boxes", 22);
-    this.titleEl.createSpan({ text: providerLabel(provider) });
-    this.titleEl.addClass("qa-modal-title");
-    const preset = API_PROVIDERS[provider.provider] ?? API_PROVIDERS.custom!;
-
-    // Keep connection details available after the primary model choices.
-    const keySection = contentEl.createDiv({ cls: "qa-section" });
-    keySection.createEl("h4", { text: "API Key" });
-    const key = this.app.secretStorage.getSecret(provider.secretId) ?? "";
-    const keyRow = keySection.createDiv({ cls: "qa-keyrow" });
-    if (this.changingKey) {
-      const input = labeledInput(keyRow, "新的 API Key", "password", "qa-keyinput", { placeholder: "粘贴新的密钥", autocomplete: "off" });
-      const verify = keyRow.createEl("button", { cls: "mod-cta", text: this.busy === "key" ? "验证中…" : "验证并保存" });
-      verify.disabled = this.busy === "key";
-      const submit = async () => {
-        if (!input.value.trim()) return;
-        const value = input.value;
-        this.busy = "key"; this.error = ""; this.draw();
-        try {
-          await connectProvider(this.plugin.settings, provider.provider, value, {
-            listModels: listModelsFor,
-            getSecret: (id) => this.app.secretStorage.getSecret(id),
-            setSecret: (id, secret) => this.app.secretStorage.setSecret(id, secret),
-          }, { baseUrl: provider.baseUrl, protocol: provider.protocol, name: provider.name });
-          await this.plugin.saveSettings();
-          this.changingKey = false;
-          new Notice("密钥已验证并更换");
-        } catch (error) { this.error = `验证失败：${error instanceof Error ? error.message : String(error)}`; }
-        this.busy = ""; this.draw();
-      };
-      verify.addEventListener("click", () => void submit());
-      input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) void submit(); });
-      window.setTimeout(() => input.focus(), 0);
-    } else {
-      keyRow.createSpan({ cls: "qa-keymask", text: key ? maskKey(key) : permitsEmptyKey(provider) ? "本机服务，无需密钥" : "未保存密钥" });
-      if (!preset.local || provider.provider === "custom") {
-        const change = keyRow.createEl("button", { cls: "qa-text-button", text: "更换" });
-        change.addEventListener("click", () => { this.changingKey = true; this.draw(); });
-      }
-      if (preset.website) keyRow.createEl("a", { cls: "qa-text-link", text: "获取密钥 ↗", href: preset.website, attr: { rel: "noopener noreferrer" } });
-    }
-    if (this.error) keySection.createDiv({ cls: "qa-inline-error", text: this.error, attr: { role: "alert" } });
-
-    // Models
-    const modelSection = contentEl.createDiv({ cls: "qa-section" });
-    const all = provider.models ?? [];
-    const enabled = new Set(provider.enabledModels ?? []);
-    const recommended = new Set(recommendedModels(provider.provider, all));
-    const head = modelSection.createDiv({ cls: "qa-section-head" });
-    head.createEl("h4", { text: `在对话中可选 · ${enabled.size}` });
-    const actions = head.createDiv({ cls: "qa-section-actions" });
-    const refresh = actions.createEl("button", { cls: "qa-text-button", text: this.busy === "models" ? "获取中…" : "刷新列表" });
-    refresh.disabled = Boolean(this.busy);
-    refresh.addEventListener("click", async () => {
-      this.busy = "models"; this.draw();
-      try {
-        const models = await listModelsFor(provider, key);
-        await this.save({ ...provider, models, fetchedAt: Date.now() });
-      } catch (error) { new Notice(error instanceof Error ? error.message : "获取模型失败"); }
-      this.busy = ""; this.draw();
-    });
-    const test = actions.createEl("button", { cls: "qa-text-button", text: this.busy === "test" ? "测试中…" : "测试模型" });
-    test.disabled = Boolean(this.busy) || !key || !(provider.model || provider.enabledModels?.[0]);
-    test.addEventListener("click", () => void this.testModel(provider, key));
-    if (this.testResult) modelSection.createDiv({ cls: this.testResult.startsWith("测试成功") ? "qa-card-desc" : "qa-inline-error", text: this.testResult, attr: { role: "status" } });
-    const search = labeledInput(modelSection, "搜索模型", "search", "qa-model-search", { placeholder: all.length ? `搜索 ${all.length} 个模型` : "没有模型列表，可在下方手动添加" });
-    search.value = this.query;
-    const list = modelSection.createDiv({ cls: "qa-switch-list" });
-    const drawList = () => {
-      list.empty();
-      const q = this.query.trim().toLowerCase();
-      const ids = [...all.map((model) => model.id), ...[...enabled].filter((id) => !all.some((model) => model.id === id))];
-      // Enabled first, then recommended, then the rest in vendor order.
-      const rank = (id: string) => enabled.has(id) ? 0 : recommended.has(id) ? 1 : 2;
-      const shown = ids.filter((id) => !q || id.toLowerCase().includes(q) || (all.find((m) => m.id === id)?.name ?? "").toLowerCase().includes(q))
-        .sort((a, b) => rank(a) - rank(b));
-      for (const id of shown.slice(0, 200)) {
-        const model = all.find((item) => item.id === id);
-        const row = list.createDiv({ cls: "qa-switch-row" });
-        const label = row.createEl("label", { cls: "qa-switch-label" });
-        const toggle = label.createEl("input", { type: "checkbox", attr: { role: "switch" } });
-        toggle.checked = enabled.has(id);
-        const text = label.createDiv({ cls: "qa-switch-text" });
-        const name = text.createDiv({ cls: "qa-switch-name", text: model?.name && model.name !== id ? model.name : id });
-        if (recommended.has(id)) name.createSpan({ cls: "qa-pill", text: "推荐" });
-        if (provider.model === id) name.createSpan({ cls: "qa-pill is-strong", text: "该服务商默认" });
-        if (model?.name && model.name !== id) text.createDiv({ cls: "qa-switch-id", text: id });
-        if (!model) text.createDiv({ cls: "qa-switch-id", text: "手动添加" });
-        toggle.addEventListener("change", async () => {
-          if (toggle.checked) enabled.add(id); else enabled.delete(id);
-          const next = { ...provider, enabledModels: ids.filter((item) => enabled.has(item)) };
-          if (!toggle.checked && provider.model === id) next.model = next.enabledModels[0] ?? "";
-          if (toggle.checked && !provider.model) next.model = id;
-          await this.save(next);
-          this.draw();
-        });
-        if (toggle.checked && provider.model !== id) {
-          const makeDefault = row.createEl("button", { cls: "qa-text-button", text: "设为该服务商默认" });
-          makeDefault.addEventListener("click", async () => { await this.save({ ...provider, model: id }); this.draw(); });
-        }
-        if (toggle.checked) {
-          const details = row.createEl("button", { cls: "qa-text-button", text: "配置", attr: { "aria-expanded": "false" } });
-          const panel = list.createDiv({ cls: "qa-model-options" });
-          panel.hidden = true;
-          details.addEventListener("click", () => { panel.hidden = !panel.hidden; details.setAttribute("aria-expanded", String(!panel.hidden)); });
-          panel.createDiv({ cls: "qa-switch-id", text: id });
-          const options = provider.modelOptions?.[id] ?? {};
-          const addNumber = (label: string, value: number | undefined, min: number, max: number, step: string, field: "temperature" | "maxOutputTokens") => {
-            const wrapper = panel.createEl("label", { cls: "qa-model-option" });
-            wrapper.createSpan({ text: label });
-            const input = wrapper.createEl("input", { type: "number", attr: { min: String(min), max: String(max), step, placeholder: "默认" } });
-            input.value = value === undefined ? "" : String(value);
-            input.addEventListener("change", async () => {
-              if (input.value !== "" && (!input.validity.valid || !Number.isFinite(input.valueAsNumber))) { new Notice(`${label}超出允许范围`); input.value = value === undefined ? "" : String(value); return; }
-              const latest = this.provider ?? provider;
-              const next = { ...(latest.modelOptions?.[id] ?? options) };
-              if (input.value === "") delete next[field]; else next[field] = input.valueAsNumber;
-              await this.save({ ...latest, modelOptions: { ...latest.modelOptions, [id]: next } });
-            });
-          };
-          if (!apiEfforts(provider.provider, id).length) addNumber("温度（0–2）", options.temperature, 0, 2, "0.1", "temperature");
-          addNumber("最大输出 Token（1–65536）", options.maxOutputTokens, 1, 65536, "1", "maxOutputTokens");
-        }
-      }
-      if (shown.length > 200) list.createDiv({ cls: "qa-list-empty", text: `还有 ${shown.length - 200} 个，请搜索` });
-      if (!shown.length) list.createDiv({ cls: "qa-list-empty", text: q ? "没有匹配的模型" : "还没有模型。点“刷新列表”，或手动添加模型 ID。" });
-    };
-    search.addEventListener("input", () => { this.query = search.value; drawList(); });
-    drawList();
-    const add = labeledInput(modelSection, "手动添加模型 ID", "text", "qa-model-add", { placeholder: "手动添加模型 ID，回车确认" });
-    add.addEventListener("keydown", async (event) => {
-      const id = add.value.trim();
-      if (event.key !== "Enter" || event.isComposing || !id) return;
-      await this.save({ ...provider, enabledModels: [...(provider.enabledModels ?? []).filter((item) => item !== id), id], model: provider.model || id });
-      this.draw();
-    });
-
-    contentEl.appendChild(keySection);
-    keySection.createDiv({ cls: "qa-card-desc", text: "密钥仅在连接失败或需要更换时操作。" });
-
-    // Endpoint
-    const advanced = contentEl.createEl("details", { cls: "qa-section qa-advanced" });
-    advanced.createEl("summary", { text: `接口地址 · ${providerHost(provider)}` });
-    if (provider.provider === "custom") {
-      const seg = advanced.createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
-      labelGroup(seg, "接口类型");
-      for (const [value, label] of [["openai-chat", "OpenAI 兼容"], ["anthropic", "Anthropic 兼容"]] as const) {
-        const option = seg.createEl("button", { text: label, attr: { role: "radio", "aria-checked": String(apiProtocol(provider) === value) } });
-        option.addEventListener("click", async () => { await this.save({ ...provider, protocol: value }); this.draw(); });
-      }
-    }
-    const url = labeledInput(advanced, "接口地址", "url", "qa-endpoint-url");
-    url.value = provider.baseUrl;
-    advanced.createDiv({ cls: "qa-card-desc", text: "修改地址后需要重新填写密钥，避免把密钥发到错误的服务。" });
-    url.addEventListener("change", async () => {
-      try {
-        const next = validateApiUrl(url.value);
-        if (next === provider.baseUrl) return;
-        this.app.secretStorage.setSecret(provider.secretId, "");
-        await this.save({ ...provider, baseUrl: next, secretId: `qiaomu-agent-${provider.id}-${crypto.randomUUID()}` });
-        this.changingKey = true;
-        this.draw();
-      } catch (error) { new Notice(error instanceof Error ? error.message : "地址无效"); }
-    });
-
-    // Footer
-    const footer = contentEl.createDiv({ cls: "qa-modal-footer" });
-    const remove = footer.createEl("button", { cls: `qa-text-button ${this.confirmRemove ? "is-danger-strong" : "is-danger"}`, text: this.confirmRemove ? "确认移除？" : "移除服务商" });
+    if (this.detailModel) { this.drawModelPage(provider); return; }
+    modalTitle(this, providerLabel(provider), { key: providerIcon(provider), fallback: "boxes" });
+    this.drawConnection(provider);
+    this.drawModels(provider);
+    const footer = this.contentEl.createDiv({ cls: "qa-ms-footer is-danger-zone" });
+    footer.createDiv({ cls: "qa-ms-footer-note", text: this.confirmRemove ? "会删除这个服务商和它的密钥，且不能撤销。" : "" });
+    if (this.confirmRemove) footer.createEl("button", { cls: "qa-ms-button", text: "取消", attr: { type: "button" } }).addEventListener("click", () => { this.confirmRemove = false; this.draw(); });
+    const remove = footer.createEl("button", { cls: `qa-ms-button ${this.confirmRemove ? "is-danger-strong" : "is-danger"}`, text: this.confirmRemove ? "确认移除" : "移除服务商", attr: { type: "button" } });
     remove.addEventListener("click", async () => {
       if (!this.confirmRemove) { this.confirmRemove = true; this.draw(); return; }
       this.app.secretStorage.setSecret(provider.secretId, "");
@@ -557,26 +355,248 @@ class ProviderModal extends Modal {
       await this.plugin.saveSettings();
       this.close();
     });
-    const done = footer.createEl("button", { cls: "mod-cta", text: "完成" });
-    done.addEventListener("click", () => this.close());
+    this.contentEl.scrollTop = scroll;
   }
+
+  private drawConnection(provider: ProviderConfig): void {
+    const section = this.contentEl.createDiv({ cls: "qa-ms-section" });
+    sectionHead(section, "连接");
+    const preset = API_PROVIDERS[provider.provider] ?? API_PROVIDERS.custom!;
+    const currentKey = this.secret(provider);
+    const form = section.createDiv({ cls: "qa-ms-form" });
+    let save!: HTMLButtonElement;
+    const dirty = () => Boolean(this.keyDraft) || this.endpointDraft.trim() !== provider.baseUrl || this.protocolDraft !== apiProtocol(provider);
+    const refresh = () => { save.disabled = Boolean(this.busy) || !dirty(); };
+    if (!preset.local) {
+      const keyField = field(form, "API Key", currentKey ? `当前 ${maskKey(currentKey)}` : "未填写");
+      const key = labeledInput(keyField, "API Key", "password", "qa-ms-input is-mono", { placeholder: currentKey ? "粘贴新的 Key 以替换" : "粘贴 API Key", autocomplete: "off", spellcheck: "false" });
+      key.value = this.keyDraft;
+      key.addEventListener("input", () => { this.keyDraft = key.value.trim(); refresh(); });
+      if (preset.website) {
+        const link = keyField.createEl("a", { cls: "qa-ms-link", text: "在服务商后台获取 API Key", href: preset.website, attr: { rel: "noopener noreferrer", target: "_blank" } });
+        setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), "arrow-up-right");
+      }
+    }
+    const endpoint = labeledInput(field(form, "接口地址"), "接口地址", "url", "qa-ms-input is-mono");
+    endpoint.value = this.endpointDraft;
+    endpoint.addEventListener("input", () => { this.endpointDraft = endpoint.value.trim(); refresh(); });
+    if (provider.provider === "custom") {
+      const types = field(form, "接口类型").createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
+      labelGroup(types, "接口类型");
+      for (const [value, label] of [["openai-chat", "OpenAI 兼容"], ["anthropic", "Anthropic 兼容"]] as const) {
+        const option = types.createEl("button", { text: label, attr: { type: "button", role: "radio", "aria-checked": String(this.protocolDraft === value) } });
+        option.addEventListener("click", () => { this.protocolDraft = value; this.draw(); });
+      }
+    }
+    if (this.error) form.createDiv({ cls: "qa-inline-error", text: this.error, attr: { role: "alert" } });
+    const actions = form.createDiv({ cls: "qa-ms-form-actions" });
+    save = actions.createEl("button", { cls: "qa-ms-button", text: this.busy === "connection" ? "正在验证…" : "验证并保存", attr: { type: "button" } });
+    save.addEventListener("click", () => void this.saveConnection(provider));
+    refresh();
+  }
+
+  private async saveConnection(provider: ProviderConfig): Promise<void> {
+    if (this.busy) return;
+    let endpoint: string;
+    try { endpoint = validateApiUrl(this.endpointDraft); }
+    catch (error) { this.error = error instanceof Error ? error.message : "接口地址无效"; this.draw(); return; }
+    const oldKey = this.secret(provider);
+    const changedEndpoint = endpoint !== provider.baseUrl;
+    const key = this.keyDraft || (!changedEndpoint ? oldKey : "");
+    if (!key && !permitsEmptyKey({ ...provider, baseUrl: endpoint })) {
+      this.error = changedEndpoint ? "修改接口地址后，请填写新地址的 API Key" : "请填写 API Key";
+      this.draw(); return;
+    }
+    const candidate = { ...provider, baseUrl: endpoint, protocol: this.protocolDraft };
+    this.busy = "connection"; this.error = ""; this.draw();
+    try {
+      const models = await listModelsFor(candidate, key);
+      const nextSecretId = this.keyDraft || changedEndpoint ? `qiaomu-agent-${provider.id}-${crypto.randomUUID()}` : provider.secretId;
+      if (nextSecretId !== provider.secretId) this.app.secretStorage.setSecret(nextSecretId, key);
+      await this.save({ ...candidate, secretId: nextSecretId, models, fetchedAt: Date.now() });
+      if (nextSecretId !== provider.secretId) this.app.secretStorage.setSecret(provider.secretId, "");
+      this.keyDraft = "";
+      this.endpointDraft = endpoint;
+      new Notice("连接已更新");
+    } catch (error) { this.error = `验证失败：${error instanceof Error ? error.message : String(error)}`; }
+    finally { this.busy = ""; this.draw(); }
+  }
+
+  private drawModels(provider: ProviderConfig): void {
+    const section = this.contentEl.createDiv({ cls: "qa-ms-section" });
+    const all = provider.models ?? [];
+    const enabled = new Set(provider.enabledModels ?? []);
+    const recommended = new Set(recommendedModels(provider.provider, all, 3, { pad: false }));
+    const key = this.secret(provider);
+    const total = new Set([...all.map((model) => model.id), ...enabled]).size;
+    const actions = sectionHead(section, "模型", `打开的模型会出现在对话的模型菜单里${total ? ` · 已启用 ${enabled.size} / ${total}` : ""}`);
+    const refresh = actionButton(actions, "refresh-cw", this.busy === "models" ? "刷新中…" : "刷新列表", this.busy === "models" ? "is-busy" : "");
+    refresh.disabled = Boolean(this.busy);
+    refresh.addEventListener("click", async () => {
+      this.busy = "models"; this.draw();
+      try {
+        const models = await listModelsFor(provider, key);
+        await this.save({ ...provider, models, fetchedAt: Date.now() });
+        new Notice(`已获取 ${models.length} 个模型`);
+      } catch (error) { new Notice(error instanceof Error ? error.message : "获取模型失败"); }
+      this.busy = ""; this.draw();
+    });
+    const defaultModel = provider.model || provider.enabledModels?.[0];
+    const test = actionButton(actions, "flask-conical", this.busy === "test" ? "测试中…" : "测试", this.busy === "test" ? "is-busy" : "");
+    test.setAttribute("aria-label", defaultModel ? `测试默认模型 ${defaultModel}` : "测试默认模型");
+    test.disabled = Boolean(this.busy) || (!key && !permitsEmptyKey(provider)) || !defaultModel;
+    test.addEventListener("click", () => void this.testModel(provider, key));
+
+    const search = total > 8 ? labeledInput(section, "搜索模型", "search", "qa-ms-input qa-ms-search", { placeholder: `搜索 ${total} 个模型` }) : null;
+    if (search) search.value = this.query;
+    const list = section.createDiv({ cls: "qa-ms-list qa-ms-models" });
+    const ids = [...all.map((model) => model.id), ...[...enabled].filter((id) => !all.some((model) => model.id === id))];
+    // Enabled first, then recommended, then chat models, then speech/image/embedding models last.
+    const rank = (id: string) => enabled.has(id) ? 0 : recommended.has(id) ? 1 : isChatModel(id) ? 2 : 3;
+    const sorted = [...ids].sort((a, b) => rank(a) - rank(b));
+    const drawList = () => {
+      list.empty();
+      const q = this.query.trim().toLowerCase();
+      const shown = sorted.filter((id) => !q || id.toLowerCase().includes(q) || (all.find((m) => m.id === id)?.name ?? "").toLowerCase().includes(q));
+      let lastGroup = -1;
+      for (const id of shown.slice(0, 200)) {
+        const group = enabled.has(id) ? 0 : isChatModel(id) ? 1 : 2;
+        if (group !== lastGroup && !q) list.createDiv({ cls: "qa-ms-list-label", text: ["已启用", "可启用", "非对话模型（语音、图像、向量等）"][group] });
+        lastGroup = group;
+        this.modelRow(list, provider, id, all.find((item) => item.id === id), enabled, ids, recommended.has(id));
+      }
+      if (shown.length > 200) list.createDiv({ cls: "qa-ms-list-empty", text: `还有 ${shown.length - 200} 个，请搜索` });
+      if (!shown.length) list.createDiv({ cls: "qa-ms-list-empty", text: q ? "没有匹配的模型" : "还没有模型。点“刷新列表”读取，或手动添加模型 ID。" });
+    };
+    search?.addEventListener("input", () => { this.query = search.value; drawList(); });
+    drawList();
+
+    if (!this.addingModel) {
+      const add = actionButton(section, "plus", "手动添加模型 ID", "is-quiet");
+      add.addEventListener("click", () => { this.addingModel = true; this.draw(); this.contentEl.querySelector<HTMLInputElement>(".qa-ms-add input")?.focus(); });
+      return;
+    }
+    const row = section.createDiv({ cls: "qa-ms-add" });
+    const input = labeledInput(row, "模型 ID", "text", "qa-ms-input is-mono", { placeholder: "例如 gpt-5.2", autocomplete: "off", spellcheck: "false" });
+    const error = section.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
+    const submit = async () => {
+      const id = input.value.trim();
+      if (!id || /\s/.test(id)) { error.setText("请输入不含空格的模型 ID"); return; }
+      const latest = this.provider;
+      if (!latest) return;
+      await this.save({ ...latest, enabledModels: [...new Set([...(latest.enabledModels ?? []), id])], model: latest.model || id });
+      this.addingModel = false; this.draw();
+    };
+    row.createEl("button", { cls: "qa-ms-button", text: "添加", attr: { type: "button" } }).addEventListener("click", () => void submit());
+    row.createEl("button", { cls: "qa-ms-button is-quiet", text: "取消", attr: { type: "button" } }).addEventListener("click", () => { this.addingModel = false; this.draw(); });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void submit(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this.addingModel = false; this.draw(); }
+    });
+  }
+
+  private modelRow(list: HTMLElement, provider: ProviderConfig, id: string, model: ModelChoice | undefined, enabled: Set<string>, ids: string[], recommended: boolean): void {
+    const on = enabled.has(id);
+    const label = model?.name && model.name !== id ? model.name : id;
+    const row = list.createDiv({ cls: `qa-ms-model${on ? " is-on" : ""}` });
+    const text = row.createDiv({ cls: "qa-ms-row-text" });
+    const name = text.createDiv({ cls: "qa-ms-row-name" });
+    name.createSpan({ cls: "qa-ms-model-name", text: label });
+    if (provider.model === id) name.createSpan({ cls: "qa-pill is-strong", text: "默认" });
+    else if (recommended && !on) name.createSpan({ cls: "qa-pill", text: "推荐" });
+    const capabilities = resolveModel(provider, id);
+    const meta = [label !== id ? id : "", !model ? "手动添加" : "", capabilities.contextWindow ? `${compactTokens(capabilities.contextWindow)} 上下文` : "", capabilities.vision ? "图片" : "", capabilities.thinking ? "思考" : ""].filter(Boolean).join(" · ");
+    if (meta) text.createDiv({ cls: "qa-ms-row-sub", text: meta });
+    const tools = row.createDiv({ cls: "qa-ms-model-tools" });
+    if (on && provider.model !== id) {
+      const makeDefault = tools.createEl("button", { cls: "qa-ms-text-button", text: "设为默认", attr: { type: "button", "aria-label": `把 ${label} 设为默认模型` } });
+      makeDefault.addEventListener("click", async () => { await this.save({ ...provider, model: id }); this.draw(); });
+    }
+    if (on) iconAction(tools, "sliders-horizontal", `${label} 的参数`).addEventListener("click", () => { this.detailModel = id; this.draw(); });
+    hostSwitch(tools, on, `在对话中使用 ${label}`, async (checked) => {
+      if (checked) enabled.add(id); else enabled.delete(id);
+      const next = { ...provider, enabledModels: ids.filter((item) => enabled.has(item)) };
+      if (!checked && provider.model === id) next.model = next.enabledModels[0] ?? "";
+      if (checked && !provider.model) next.model = id;
+      await this.save(next);
+      this.draw();
+    });
+  }
+
+  private drawModelPage(provider: ProviderConfig): void {
+    const id = this.detailModel;
+    const model = provider.models?.find((item) => item.id === id);
+    modalTitle(this, model?.name || id, undefined, () => { this.detailModel = ""; this.draw(); });
+    const options = provider.modelOptions?.[id] ?? {};
+    const save = async (patch: Partial<ModelOptions>) => {
+      const latest = this.provider ?? provider;
+      const next: ModelOptions = { ...(latest.modelOptions?.[id] ?? {}), ...patch };
+      for (const key of Object.keys(next) as Array<keyof ModelOptions>) if (next[key] === undefined) delete next[key];
+      await this.save({ ...latest, modelOptions: { ...latest.modelOptions, [id]: next } });
+      this.draw();
+    };
+    const auto = resolveModel({ provider: provider.provider, models: provider.models }, id);
+    const reported = [model?.contextWindow ? `${compactTokens(model.contextWindow)} 上下文` : "", model?.maxOutputTokens ? `最多输出 ${compactTokens(model.maxOutputTokens)}` : "", model?.reasoning ? "支持思考" : "", model?.vision ? "支持图片" : ""].filter(Boolean);
+    const intro = this.contentEl.createDiv({ cls: "qa-ms-note" });
+    intro.setText(`${model?.name && model.name !== id ? `${id} · ` : ""}${reported.length ? `服务商提供：${reported.join("、")}` : "服务商没有提供能力信息，可以在下面手动指定"}`);
+    const list = this.contentEl.createDiv({ cls: "qa-ms-list qa-ms-options" });
+
+    const detected = (value: boolean | undefined) => value === undefined ? "未知" : value ? "支持" : "不支持";
+    this.tristate(list, "思考模式", `自动：${detected(auto.thinking)}`, options.reasoning, ["开启", "关闭"], (value) => void save({ reasoning: value }));
+    this.tristate(list, "图片输入", `自动：${detected(auto.vision)}`, options.vision, ["支持", "不支持"], (value) => void save({ vision: value }));
+    const number = (title: string, hint: string, value: number | undefined, attr: Record<string, string>, onValue: (value: number | undefined) => void) => {
+      const row = this.optionRow(list, title, hint);
+      const input = row.createEl("input", { type: "number", cls: "qa-ms-input qa-ms-number", attr: { ...attr, placeholder: "自动", "aria-label": title } });
+      input.value = value === undefined ? "" : String(value);
+      input.addEventListener("change", () => {
+        if (input.value !== "" && (!input.validity.valid || !Number.isFinite(input.valueAsNumber))) { new Notice(`${title}超出允许范围`); input.value = value === undefined ? "" : String(value); return; }
+        onValue(input.value === "" ? undefined : input.valueAsNumber);
+      });
+    };
+    number("上下文窗口", `留空：${auto.contextWindow ? compactTokens(auto.contextWindow) : "未知"}`, options.contextWindow, { min: "1", step: "1" }, (value) => {
+      if (value !== undefined && !Number.isInteger(value)) { new Notice("上下文窗口需要是正整数"); return; }
+      void save({ contextWindow: value });
+    });
+    number("最大输出 Token", "留空：服务商默认", options.maxOutputTokens, { min: "1", max: String(model?.maxOutputTokens ?? 1_000_000), step: "1" }, (value) => void save({ maxOutputTokens: value }));
+    // Thinking models fix their own sampling temperature.
+    if (!resolveModel(provider, id).efforts.length) number("温度", "0–2，留空：服务商默认", options.temperature, { min: "0", max: "2", step: "0.1" }, (value) => void save({ temperature: value }));
+  }
+
+  private optionRow(list: HTMLElement, title: string, hint: string): HTMLElement {
+    const row = list.createDiv({ cls: "qa-ms-option" });
+    const text = row.createDiv({ cls: "qa-ms-row-text" });
+    text.createDiv({ cls: "qa-ms-row-name", text: title });
+    text.createDiv({ cls: "qa-ms-row-sub", text: hint });
+    return row;
+  }
+
+  /** 自动 / on / off; the hint names what 自动 resolves to. */
+  private tristate(list: HTMLElement, title: string, hint: string, value: boolean | undefined, [on, off]: [string, string], onChange: (value: boolean | undefined) => void): void {
+    const group = this.optionRow(list, title, hint).createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
+    labelGroup(group, title);
+    for (const [choice, text] of [[undefined, "自动"], [true, on], [false, off]] as const) {
+      const button = group.createEl("button", { text, attr: { type: "button", role: "radio", "aria-checked": String(value === choice) } });
+      button.addEventListener("click", () => { if (value !== choice) onChange(choice); });
+    }
+  }
+
   private async testModel(provider: ProviderConfig, key: string): Promise<void> {
     const model = provider.model || provider.enabledModels?.[0];
     if (!model || this.busy) return;
-    this.busy = "test"; this.testResult = ""; this.draw();
+    this.busy = "test"; this.draw();
     try {
       let response = "";
       await new ApiBackend({ ...provider, model }, key).send(
         { prompt: "只回复 OK。", systemPrompt: "", cwd: null, model, modelOptions: { maxOutputTokens: 128 }, permissionMode: "plan", history: [] },
         { onText: (text) => { response += text; }, onStatus: () => {} }, AbortSignal.timeout(25_000));
       if (!response.trim()) throw new Error("模型没有返回文字");
-      this.testResult = `测试成功：${model} 已返回内容`;
-    } catch (error) { this.testResult = `测试失败：${error instanceof Error ? error.message : String(error)}`; }
+      new Notice(`${model} 测试成功`);
+    } catch (error) { new Notice(`测试失败：${error instanceof Error ? error.message : String(error)}`); }
     finally { this.busy = ""; this.draw(); }
   }
 }
 
-/** A local agent: read-only facts; its login and models belong to the agent itself. */
+/** A local agent: which of its models appear in the composer; login and models belong to the agent. */
 class AgentModal extends Modal {
   private busy = false;
   private error = "";
@@ -586,42 +606,35 @@ class AgentModal extends Modal {
   override onOpen(): void { this.modalEl.addClass("qa-provider-modal"); this.draw(); }
   private draw(): void {
     if (this.closed) return;
-    this.modalEl.addClass("qa-provider-modal");
-    this.titleEl.empty();
-    this.titleEl.addClass("qa-modal-title");
-    brand(this.titleEl, agentIconKey(this.agent.id), "bot", 22);
-    this.titleEl.createSpan({ text: this.agent.label });
+    modalTitle(this, this.agent.label, { key: agentIconKey(this.agent.id), fallback: "bot" });
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createDiv({ cls: "qa-card-desc", text: "已找到本机程序。登录状态由该 Agent 管理。" });
     const settings = this.plugin.settings;
     const reported = settings.agentModelCache[this.agent.id]?.models ?? [];
     const custom = settings.agentCustomModels[this.agent.id] ?? [];
     const models = [...reported, ...custom.filter((id) => !reported.some((model) => model.id === id)).map((id) => ({ id, name: id, efforts: [] }))];
     const visible = settings.agentEnabledModels[this.agent.id];
     const isVisible = (id: string) => !visible || visible.includes(id);
-    const section = contentEl.createDiv({ cls: "qa-section" });
-    const head = section.createDiv({ cls: "qa-section-head" });
-    head.createEl("h4", { text: models.length ? `在对话中显示 · ${models.filter((model) => isVisible(model.id)).length + Number(isVisible(""))}/${models.length + 1}` : "在对话中显示" });
-    if (nativeTransportFor(this.agent.id) || this.agent.id === "antigravity" || this.agent.id === "pi") {
-      const refresh = head.createEl("button", { cls: "qa-text-button", text: this.busy ? "读取中…" : models.length ? "重新读取" : "读取模型" });
+    const canList = Boolean(nativeTransportFor(this.agent.id)) || this.agent.id === "antigravity" || this.agent.id === "pi";
+    const section = contentEl.createDiv({ cls: "qa-ms-section" });
+    const count = models.filter((model) => isVisible(model.id)).length + Number(isVisible(""));
+    const actions = sectionHead(section, "模型", `打开的模型会出现在对话的模型菜单里 · 已启用 ${count} / ${models.length + 1}`);
+    if (canList) {
+      const refresh = actionButton(actions, "refresh-cw", this.busy ? "读取中…" : models.length ? "重新读取" : "读取模型", this.busy ? "is-busy" : "");
       refresh.disabled = this.busy;
       refresh.addEventListener("click", () => void this.loadModels());
     }
     if (this.error) section.createDiv({ cls: "qa-inline-error", text: this.error, attr: { role: "alert" } });
-    const search = models.length > 10 ? labeledInput(section, "筛选模型", "search", "qa-model-search", { placeholder: "筛选模型" }) : null;
-    const list = section.createDiv({ cls: "qa-switch-list" });
+    const search = models.length > 10 ? labeledInput(section, "搜索模型", "search", "qa-ms-input qa-ms-search", { placeholder: "搜索模型" }) : null;
+    const list = section.createDiv({ cls: "qa-ms-list qa-ms-models" });
     const rows: Array<{ row: HTMLElement; text: string }> = [];
     const addChoice = (id: string, name: string, detail = "") => {
-      const row = list.createDiv({ cls: "qa-switch-row" });
+      const row = list.createDiv({ cls: `qa-ms-model${isVisible(id) ? " is-on" : ""}` });
       rows.push({ row, text: `${name} ${id}`.toLowerCase() });
-      const label = row.createEl("label", { cls: "qa-switch-label" });
-      const toggle = label.createEl("input", { type: "checkbox", attr: { role: "switch" } });
-      toggle.checked = isVisible(id);
-      const text = label.createDiv({ cls: "qa-switch-text" });
-      text.createDiv({ cls: "qa-switch-name", text: name });
-      if (detail) text.createDiv({ cls: "qa-switch-id", text: detail });
-      toggle.addEventListener("change", () => void this.setModelVisible(id, toggle.checked, models));
+      const text = row.createDiv({ cls: "qa-ms-row-text" });
+      text.createDiv({ cls: "qa-ms-row-name", text: name });
+      if (detail) text.createDiv({ cls: "qa-ms-row-sub", text: detail });
+      hostSwitch(row.createDiv({ cls: "qa-ms-model-tools" }), isVisible(id), `在对话中使用 ${name}`, (checked) => void this.setModelVisible(id, checked, models));
     };
     addChoice("", "默认模型", this.agent.id === "zcode" ? "在 ZCode 中更换具体模型" : "使用该 Agent 当前设置的模型");
     for (const model of models) addChoice(model.id, model.name || model.id, model.name !== model.id ? model.id : custom.includes(model.id) ? "手动添加" : "");
@@ -629,11 +642,10 @@ class AgentModal extends Modal {
       const query = search.value.trim().toLowerCase();
       for (const item of rows) item.row.hidden = Boolean(query) && !item.text.includes(query);
     });
-    if (!reported.length) section.createDiv({ cls: "qa-card-desc", text: nativeTransportFor(this.agent.id) || this.agent.id === "antigravity" || this.agent.id === "pi" ? "首次读取后会保存列表；需要更新时再手动读取。" : "该 Agent 未提供模型列表，可使用默认模型或在下方添加模型 ID。" });
+    if (!reported.length) section.createDiv({ cls: "qa-ms-note", text: canList ? "点“读取模型”获取列表，之后会保存下来。" : "该 Agent 不提供模型列表，可使用默认模型或手动添加模型 ID。" });
     if (this.agent.id !== "zcode") {
-      const manual = section.createDiv({ cls: "qa-manual-model" });
-      const input = labeledInput(manual, "手动添加模型 ID", "text", "qa-model-add", { placeholder: "模型 ID" });
-      const add = manual.createEl("button", { cls: "qa-text-button", text: "添加" });
+      const manual = section.createDiv({ cls: "qa-ms-add" });
+      const input = labeledInput(manual, "手动添加模型 ID", "text", "qa-ms-input is-mono", { placeholder: "手动添加模型 ID", autocomplete: "off", spellcheck: "false" });
       const submit = async () => {
         const id = input.value.trim();
         if (!id || id.length > 160 || models.some((model) => model.id === id)) { new Notice("请输入尚未添加的模型 ID"); return; }
@@ -641,20 +653,18 @@ class AgentModal extends Modal {
         if (settings.agentEnabledModels[this.agent.id]) settings.agentEnabledModels[this.agent.id]!.push(id);
         await this.plugin.saveSettings(); this.draw();
       };
-      add.addEventListener("click", () => void submit());
-      input.addEventListener("keydown", (event) => { if (event.key === "Enter") void submit(); });
+      manual.createEl("button", { cls: "qa-ms-button", text: "添加", attr: { type: "button" } }).addEventListener("click", () => void submit());
+      input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) void submit(); });
     }
-    if (this.agent.note) contentEl.createDiv({ cls: "qa-card-desc", text: this.agent.note });
-    const advanced = contentEl.createEl("details", { cls: "qa-section qa-advanced" });
-    advanced.createEl("summary", { text: "本机程序信息" });
-    const facts = advanced.createDiv({ cls: "qa-facts" });
-    for (const [name, value] of [["版本", this.agent.version ?? "未知"], ["连接方式", nativeTransportLabel(this.agent.id) || "命令行"], ["位置", this.agent.path ?? ""]] as const) {
-      const row = facts.createDiv({ cls: "qa-fact" });
-      row.createSpan({ cls: "qa-fact-name", text: name });
-      row.createSpan({ cls: "qa-fact-value", text: value });
+    if (this.agent.note) contentEl.createDiv({ cls: "qa-ms-note", text: this.agent.note });
+    const info = contentEl.createDiv({ cls: "qa-ms-section" });
+    sectionHead(info, "本机程序", "登录与账号由 Agent 自己管理，首次使用时确认。");
+    const facts = info.createDiv({ cls: "qa-ms-list qa-ms-facts" });
+    for (const [name, value] of [["版本", this.agent.version ?? "未知"], ["连接方式", nativeTransportLabel(this.agent.id) || "命令行"], ["位置", this.agent.path ?? "未知"]] as const) {
+      const row = facts.createDiv({ cls: "qa-ms-fact" });
+      row.createSpan({ text: name });
+      row.createSpan({ cls: name === "位置" ? "is-mono" : "", text: value });
     }
-    const footer = contentEl.createDiv({ cls: "qa-modal-footer qa-modal-footer-simple" });
-    footer.createEl("button", { cls: "mod-cta", text: "完成" }).addEventListener("click", () => this.close());
   }
   private async setModelVisible(id: string, shown: boolean, models: ModelChoice[]): Promise<void> {
     const settings = this.plugin.settings;

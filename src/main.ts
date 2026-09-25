@@ -1,13 +1,13 @@
-import { Menu, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo, type MarkdownView } from "obsidian";
+import { MarkdownView, Menu, Notice, Platform, Plugin, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo } from "obsidian";
 import { ChatView, VIEW_TYPE_QIAOMU_AGENT } from "./chat-view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./defaults";
 import { BackendService } from "./services/backend-service";
 import { discoverLocalClis } from "./services/cli-discovery";
 import { SkillService } from "./services/skill-service";
 import { ObsidianCliService } from "./services/obsidian-cli";
+import { ADD_COMMANDS, type AddKind } from "./services/hotkeys";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
-import { WechatPublishModal } from "./wechat/publish-modal";
 import { InlineEditModal } from "./ui/inline-edit-modal";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
 import { ReadingContextService } from "./integrations/reading-context";
@@ -23,7 +23,6 @@ export default class QiaomuAgentPlugin extends Plugin {
   reading!: ReadingContextService;
   /** Found by other plugins at `app.plugins.plugins["qiaomu-agent"].api` (Qiaomu Context Protocol). */
   api!: AgentApi;
-  private lastMarkdownFile: TFile | null = null;
 
   override async onload(): Promise<void> {
     this.settings = normalizeSettings(await this.loadData());
@@ -35,7 +34,6 @@ export default class QiaomuAgentPlugin extends Plugin {
     this.backendService = new BackendService(this.app, () => this.settings);
     this.skillService = new SkillService(this.app);
     this.obsidianCliService = new ObsidianCliService();
-    this.rememberActiveMarkdownFile();
 
     this.registerView(VIEW_TYPE_QIAOMU_AGENT, (leaf) => new ChatView(leaf, this));
     this.reading = this.addChild(new ReadingContextService(this.app, VIEW_TYPE_QIAOMU_AGENT, () => this.eachView((view) => view.refreshReading())));
@@ -45,7 +43,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     });
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
 
-    this.addRibbonIcon("sparkles", "打开乔木 Agent", () => void this.activateView());
+    this.addRibbonIcon("tree-deciduous", "打开乔木 Agent", () => void this.activateView());
     this.addCommand({
       id: "open-agent",
       name: "打开 Agent 对话",
@@ -55,6 +53,11 @@ export default class QiaomuAgentPlugin extends Plugin {
       id: "new-conversation",
       name: "新建 Agent 对话",
       callback: () => this.eachView((view) => view.newConversation()),
+    });
+    for (const [kind, command] of Object.entries(ADD_COMMANDS) as [AddKind, typeof ADD_COMMANDS[AddKind]][]) this.addCommand({
+      id: command.id,
+      name: command.name,
+      callback: () => void this.activateView().then(() => this.eachView((view) => view.requestAdd(kind))),
     });
     this.addCommand({
       id: "manage-capabilities",
@@ -84,25 +87,7 @@ export default class QiaomuAgentPlugin extends Plugin {
         .setSection("action").onClick(() => this.openInlineEdit(editor, ctx)));
     }));
 
-    this.addCommand({
-      id: "publish-wechat-draft",
-      name: "发布当前笔记到公众号草稿箱",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (file?.extension !== "md") return false;
-        if (!checking) this.openWechatPublish(file);
-        return true;
-      },
-    });
-    this.registerEvent(
-      this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
-        if (!(file instanceof TFile) || file.extension !== "md") return;
-        menu.addItem((item) => item.setTitle("发布到公众号草稿箱").setIcon("send").setSection("action").onClick(() => this.openWechatPublish(file)));
-      })
-    );
-
     this.app.workspace.onLayoutReady(() => {
-      this.rememberActiveMarkdownFile();
       this.eachView((view) => void view.ensureReady());
       void this.refreshIntegrations();
     });
@@ -121,13 +106,11 @@ export default class QiaomuAgentPlugin extends Plugin {
     });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
-        this.rememberActiveMarkdownFile();
         this.eachView((view) => view.refreshControls());
       })
     );
     this.registerEvent(
-      this.app.workspace.on("file-open", (file) => {
-        if (file?.extension === "md") this.lastMarkdownFile = file;
+      this.app.workspace.on("file-open", () => {
         this.eachView((view) => view.refreshControls());
       })
     );
@@ -154,7 +137,6 @@ export default class QiaomuAgentPlugin extends Plugin {
   }
 
   async activateView(prefill?: string, focus = false): Promise<void> {
-    this.rememberActiveMarkdownFile();
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_QIAOMU_AGENT)[0];
     if (!leaf) {
       leaf = Platform.isDesktopApp ? this.app.workspace.getRightLeaf(false) ?? undefined : this.app.workspace.getLeaf("tab");
@@ -173,10 +155,6 @@ export default class QiaomuAgentPlugin extends Plugin {
     }
   }
 
-  openWechatPublish(file: TFile): void {
-    new WechatPublishModal(this.app, file, this.settings.wechat).open();
-  }
-
   private openInlineEdit(editor: Editor, ctx: MarkdownView | MarkdownFileInfo): void {
     const original = editor.getSelection();
     if (!original.trim() || !ctx.file) { new Notice("请先在笔记中选中要改写的文字"); return; }
@@ -186,26 +164,13 @@ export default class QiaomuAgentPlugin extends Plugin {
     }).open();
   }
 
+  /**
+   * The note on screen in the main area. When the main area shows something else (an article, a PDF,
+   * a web page), no note is being looked at, so none is returned rather than an older one.
+   */
   getActiveMarkdownFile(): TFile | null {
-    const file = this.app.workspace.getActiveFile();
-    if (file?.extension === "md") this.lastMarkdownFile = file;
-    return this.lastMarkdownFile;
-  }
-
-  private rememberActiveMarkdownFile(): void {
-    const file = this.app.workspace.getActiveFile();
-    if (file?.extension === "md") {
-      this.lastMarkdownFile = file;
-      return;
-    }
-    if (this.lastMarkdownFile) return;
-    for (const path of this.app.workspace.getLastOpenFiles()) {
-      const recent = this.app.vault.getAbstractFileByPath(path);
-      if (recent instanceof TFile && recent.extension === "md") {
-        this.lastMarkdownFile = recent;
-        return;
-      }
-    }
+    const leaf = this.app.workspace.getMostRecentLeaf(this.app.workspace.rootSplit);
+    return leaf?.view instanceof MarkdownView && leaf.view.file?.extension === "md" ? leaf.view.file : null;
   }
 
   private eachView(callback: (view: ChatView) => void): void {

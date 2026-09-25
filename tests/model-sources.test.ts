@@ -8,14 +8,14 @@ function fresh(): QiaomuSettings {
 }
 
 describe("model providers", () => {
-  it("defaults to at most seven visible agents and keeps Pi's catalog opt-in", () => {
+  it("shows every discovered agent by default while keeping Pi's catalog opt-in", () => {
     const settings = normalizeSettings({});
     expect(DEFAULT_VISIBLE_AGENT_IDS).toHaveLength(7);
     expect(agentShown(settings, "codex")).toBe(true);
-    expect(agentShown(settings, "grok")).toBe(false);
+    expect(agentShown(settings, "grok")).toBe(true);
     expect(visibleAgentModels(settings, "pi", [{ id: "anthropic/claude", name: "Claude", efforts: [] }]).models).toEqual([]);
-    settings.agentVisibility.grok = true;
-    expect(agentShown(normalizeSettings(settings), "grok")).toBe(true);
+    settings.agentVisibility.grok = false;
+    expect(agentShown(normalizeSettings(settings), "grok")).toBe(false);
   });
   it("migrates the old single connection and per-provider profiles into a list", () => {
     const settings = normalizeSettings({

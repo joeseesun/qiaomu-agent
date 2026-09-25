@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
-import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
+import { Component, Keymap, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -9,14 +9,17 @@ import { BrandIcon } from "./brand-icon";
 import { ApprovalCard, ChangeSummary } from "./turn-review";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
 import { slashQuery, startsFileMention } from "../services/composer";
+import type { AddKind } from "../services/hotkeys";
 import { Attachments } from "../components/ai-elements/attachments";
-import { type AgentMessage, messageText } from "../services/chat-transport";
+import { type AgentMessage, messageText, messageUsage } from "../services/chat-transport";
 import { Conversation, ConversationContent, ConversationScrollButton } from "../components/ai-elements/conversation";
 import { Message, MessageContent, MessageAction, MessageActions } from "../components/ai-elements/message";
 import { PromptInput, PromptInputFooter, PromptInputHeader, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "../components/ai-elements/prompt-input";
 import { splitMermaid } from "../services/mermaid-content";
+import { internalLinkTarget, tidyInternalLinks } from "../services/markdown-links";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { ComposerPopover, effortLabel } from "./composer-popover";
+import { ContextRing } from "./context-ring";
 import { conversationImages } from "../services/conversation-images";
 import { ConversationImageLightbox, referenceImageAttachment, showConversationImageMenu } from "./conversation-image";
 
@@ -26,8 +29,9 @@ interface Props {
   branch: { parentId: string; parentTitle: string; messageId: string } | null;
   onOpenParent: (id: string) => void; onForkMessage: (messageId: string) => void;
   imageTargetNote: TFile | null;
-  backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null;
+  backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number; focusVersion?: number;
+  addRequest?: { kind: AddKind; version: number }; addHotkeys?: Partial<Record<AddKind, string>>;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onEditMessage: () => void;
@@ -40,6 +44,11 @@ interface Props {
   onPickModel: (source: string, model: string) => void; onLoadModels: (source: string) => void; onManageModels: () => void;
   customPrompts: PromptTemplate[]; onManagePrompts: () => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
+  onPickFolder: (choose: (attachment: ChatAttachment) => void) => void;
+  /** Absent where pages cannot be read (mobile). */
+  onPickWebPage?: (choose: (attachment: ChatAttachment) => void) => void;
+  /** Web search state for the selected model; absent when it cannot search (local agents search on their own). */
+  webSearch?: boolean; onToggleWebSearch?: () => void;
   onValidateAttachments: (attachments: ChatAttachment[]) => void;
   onAppend: (text: string, daily: boolean) => void;
 }
@@ -56,10 +65,27 @@ function HostMarkdown({ text, sourcePath, app, parent }: { text: string; sourceP
     const staging = host.ownerDocument.createElement("div");
     staging.className = "qiaomu-agent__markdown";
     void MarkdownRenderer.render(app, text, staging, sourcePath, child).then(() => {
+      tidyInternalLinks(staging);
       if (active) host.replaceChildren(staging);
     }).catch(() => { if (active) host.textContent = text; });
     return () => { active = false; parent.removeChild(child); };
   }, [text, sourcePath, app, parent]);
+  // Rendered outside a note view, internal links get no host click handling; open them as a note would.
+  useEffect(() => {
+    const host = target.current;
+    if (!host) return;
+    const open = (event: MouseEvent) => {
+      if (event.type === "auxclick" && event.button !== 1) return;
+      const anchor = event.target instanceof Element ? event.target.closest("a.internal-link") : null;
+      const link = anchor && internalLinkTarget(anchor);
+      if (!link) return;
+      event.preventDefault();
+      void app.workspace.openLinkText(link, sourcePath, event.button === 1 ? "tab" : Keymap.isModEvent(event));
+    };
+    host.addEventListener("click", open);
+    host.addEventListener("auxclick", open);
+    return () => { host.removeEventListener("click", open); host.removeEventListener("auxclick", open); };
+  }, [app, sourcePath]);
   return <div className="qa-markdown-host" ref={target} />;
 }
 
@@ -99,6 +125,8 @@ export function ChatPanel(props: Props) {
   const [attachmentError, setAttachmentError] = useState("");
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
+  // The draft set aside when the add menu opens the prompt list; Escape brings it back.
+  const draftBeforePrompts = useRef<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const previousConversation = useRef(props.conversationId);
@@ -114,6 +142,10 @@ export function ChatPanel(props: Props) {
   const locked = useRef(false);
   const inputId = useId();
   const running = status === "submitted" || status === "streaming";
+  // While the reply has no text yet, its placeholder carries the status instead of the composer.
+  const lastMessage = messages.at(-1);
+  const waitingText = running && lastMessage?.role === "assistant" && !messageText(lastMessage);
+  const contextUsage = latestUsage(messages);
   const query = slashQuery(input);
   const promptChoices = [...props.prompts.map((body, i) => ({ id: `quick-${i}`, name: body, body })), ...props.customPrompts]
     .filter((p) => !query || `${p.name} ${p.body}`.toLocaleLowerCase().includes(query));
@@ -123,6 +155,7 @@ export function ChatPanel(props: Props) {
   const PermissionIcon = imageEditing ? Shield : props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
   const choosePrompt = (index: number) => {
     const prompt = promptChoices[index];
+    draftBeforePrompts.current = null;
     if (prompt) setInput(prompt.body); else { props.onManagePrompts(); setInput(""); }
     setMenuDismissed(true); textarea.current?.focus();
   };
@@ -149,6 +182,12 @@ export function ChatPanel(props: Props) {
     setInput(props.prefill); textarea.current?.focus();
   }, [props.prefill, props.prefillVersion]);
   useEffect(() => { if (props.focusVersion) textarea.current?.focus(); }, [props.focusVersion]);
+  const runAdd = (kind: AddKind) => {
+    if (kind === "upload") upload.current?.click();
+    else (kind === "file" ? props.onPickFile : props.onPickFolder)(addAttachment);
+  };
+  // Only a new request runs the action; re-renders with the same version do not.
+  useEffect(() => { if (props.addRequest?.version) runAdd(props.addRequest.kind); }, [props.addRequest?.version]);
   useEffect(() => {
     const el = textarea.current;
     if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
@@ -157,7 +196,7 @@ export function ChatPanel(props: Props) {
   const submit = async (text: string) => {
     if ((!text.trim() && !attachments.length) || reading || running || locked.current) return;
     if (imageEditing && !text.trim()) { setAttachmentError("请描述希望如何修改图片"); textarea.current?.focus(); return; }
-    try { props.onValidateAttachments(attachments); } catch (e) { setAttachmentError(String(e)); return; }
+    try { props.onValidateAttachments(attachments); } catch (e) { setAttachmentError(e instanceof Error ? e.message : String(e)); return; }
     locked.current = true; clearError(); setStopped(false); setInput("");
     const sent = attachments; setAttachments([]); setAttachmentError("");
     try { await sendMessage({ text: text.trim() || "请分析这些附件。", metadata: { createdAt: Date.now(), sourcePath: props.note?.path, attachments: sent } }); }
@@ -214,7 +253,6 @@ export function ChatPanel(props: Props) {
         {props.branch && <button type="button" className="qa-branch-parent" disabled={running} onClick={() => props.onOpenParent(props.branch!.parentId)}>
           <GitBranch size={12} /><span>返回原对话 · {props.branch.parentTitle}</span></button>}
       </div>
-      <button type="button" disabled={running} onClick={props.onConnection} aria-label="连接设置"><Settings2 size={17} /></button>
       <button type="button" disabled={running} onClick={(e) => props.onHistory(e.nativeEvent)}><History size={17} /><span className="qiaomu-agent__sr-only">历史对话</span></button>
       <button type="button" disabled={running} onClick={props.onNew}><SquarePen size={17} /><span className="qiaomu-agent__sr-only">新对话</span></button>
     </header>
@@ -229,18 +267,19 @@ export function ChatPanel(props: Props) {
         event.preventDefault(); showConversationImageMenu(props.app, imageFromElement(image, 0), event.nativeEvent, props.imageTargetNote, addReferenceImage);
       }}>
         {!messages.length && <div className="qa-empty">
-          <h3>从一个想法开始</h3><p>围绕笔记提问、整理，或协作修改。</p>
+          <h3>从一个想法开始</h3><p>围绕笔记提问、整理，或协作修改。输入 / 使用 Prompt，@ 引用库内文件。</p>
           <div className="qa-suggestions">{props.prompts.slice(0, 3).map((prompt) => <button key={prompt} type="button" onClick={() => { setInput(prompt); textarea.current?.focus(); }}>{prompt}</button>)}</div>
         </div>}
         {messages.filter((m) => m.role !== "system").map((message, index, visible) => {
           const text = messageText(message);
-          const active = running && index === visible.length - 1 && message.role === "assistant";
+          const latest = index === visible.length - 1;
+          const active = running && latest && message.role === "assistant";
           const activities = message.parts.filter((p) => p.type === "data-activity").map((p) => p.data);
           const approvals = message.parts.filter((p) => p.type === "data-approval").map((p) => p.data);
           const changes = message.parts.find((p) => p.type === "data-changes");
           const messageAttachments = new Map((message.metadata?.attachments ?? []).map((attachment) => [attachment.id, attachment]));
           for (const part of message.parts) if (part.type === "data-attachment") messageAttachments.set(part.data.id, part.data);
-          return <Message key={message.id} from={message.role} className={editingId === message.id ? "is-editing" : ""}>
+          return <Message key={message.id} from={message.role} className={`${editingId === message.id ? "is-editing" : ""}${latest ? " is-latest" : ""}`}>
             <MessageContent>
               <Attachments files={[...messageAttachments.values()]} variant={message.role === "assistant" ? "grid" : "inline"}
                 onOpenImage={openRenderedImage}
@@ -252,7 +291,7 @@ export function ChatPanel(props: Props) {
                 <textarea id={`${inputId}-edit-${message.id}`} value={editText} onChange={(event) => setEditText(event.currentTarget.value)} autoFocus rows={3}
                   onKeyDown={(event) => { if (Platform.isDesktopApp && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submitEdit(message); } }} />
                 <div className="qa-message-editor-actions"><button type="button" onClick={() => setEditingId(null)}>取消</button><button type="submit" className="mod-cta" disabled={!editText.trim()}>发送</button></div>
-              </form> : text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking">正在处理…</div> : <div className="qa-thinking">没有文本回复</div>}
+              </form> : text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking" role="status">{props.statusText || (activities.find((a) => a.status === "running")?.label ?? "正在思考…")}</div> : <div className="qa-thinking">没有文本回复</div>}
               {changes?.type === "data-changes" && changes.data.files.length > 0 && <ChangeSummary changes={changes.data} disabled={running}
                 onOpen={props.onOpenFile} onRevert={() => props.onRevertChanges(message.id)} />}
             </MessageContent>
@@ -282,7 +321,7 @@ export function ChatPanel(props: Props) {
         {promptChoices.map((p, index) => <button type="button" role="option" aria-selected={index === menuIndex} id={`${inputId}-option-${index}`} key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(index)}><Slash size={15} /><span>{p.name}</span></button>)}
         <button type="button" role="option" aria-selected={menuIndex === promptChoices.length} id={`${inputId}-option-${promptChoices.length}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(promptChoices.length)}><Plus size={15} /><span>管理自定义 Prompt…</span></button>
       </div>}
-      {running && props.statusText && <div className="qa-status" role="status">{props.statusText}</div>}
+      {running && props.statusText && waitingText === false && <div className="qa-status" role="status">{props.statusText}</div>}
       {attachmentError && <div className="qa-error" role="alert">{attachmentError}</div>}
       <PromptInput onSubmit={(event) => { event.preventDefault(); void submit(input); }} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); void addFiles(Array.from(e.dataTransfer.files)); } }}>
         <input type="file" multiple hidden ref={upload} onChange={(e) => { void addFiles(Array.from(e.currentTarget.files ?? [])); e.currentTarget.value = ""; }} />
@@ -301,26 +340,40 @@ export function ChatPanel(props: Props) {
           onKeyDown={(e) => {
             if (!menuOpen || e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setMenuIndex((n) => (n + (e.key === "ArrowDown" ? 1 : promptChoices.length)) % (promptChoices.length + 1)); }
-            if (e.key === "Escape") { e.preventDefault(); setMenuDismissed(true); }
+            if (e.key === "Escape") {
+              e.preventDefault(); setMenuDismissed(true);
+              if (draftBeforePrompts.current !== null) { setInput(draftBeforePrompts.current); draftBeforePrompts.current = null; }
+            }
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); choosePrompt(menuIndex); }
           }}
           onChange={(event) => {
             const value = event.currentTarget.value; const cursor = event.currentTarget.selectionStart;
             setInput(value); setMenuDismissed(false); setMenuIndex(0);
+            if (!value.startsWith("/")) draftBeforePrompts.current = null;
             if (startsFileMention(value, cursor) && !(event.nativeEvent as InputEvent).isComposing) props.onPickFile((file) => { addAttachment(file); setInput((current) => current === value ? value.slice(0, cursor - 1) + value.slice(cursor) : current); textarea.current?.focus(); });
           }}
           onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { if (!e.clipboardData.getData("text/plain")) e.preventDefault(); void addFiles(files); } }}
-          placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息，/ 选择 Prompt，@ 引用文件…"} />
+          placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息…"} />
         <PromptInputFooter><PromptInputTools>
           <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} disabled={running}>
-            {(close) => <>
-              <button type="button" onClick={() => { close(); upload.current?.click(); }}><Paperclip size={16} />上传附件</button>
-              <button type="button" onClick={() => { close(); props.onPickFile(addAttachment); }}><AtSign size={16} />选择库内文件</button>
-              {!props.note && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加当前笔记</button>}
-              <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
-            </>}
+            {(close) => <div className="qa-add-menu">
+              <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-add`}>
+                <div className="qa-add-heading" id={`${inputId}-add`}>添加</div>
+                <button type="button" aria-label="上传文件或图片" onClick={() => { close(); runAdd("upload"); }}><Paperclip size={16} /><span>文件或图片</span><span className="qa-add-hint">也可拖入</span><AddKey keys={props.addHotkeys?.upload} /></button>
+                <button type="button" aria-label="选择库内文件" onClick={() => { close(); runAdd("file"); }}><FileText size={16} /><span>库内文件</span><AddKey keys={props.addHotkeys?.file || "@"} /></button>
+                <button type="button" aria-label="选择库内文件夹" onClick={() => { close(); runAdd("folder"); }}><Folder size={16} /><span>库内文件夹</span><span className="qa-add-hint">附加其中的笔记</span><AddKey keys={props.addHotkeys?.folder} /></button>
+                {props.onPickWebPage && <button type="button" aria-label="添加网页" onClick={() => { close(); props.onPickWebPage!(addAttachment); }}><Link size={16} /><span>网页</span><span className="qa-add-hint">读取正文</span></button>}
+                {props.detachedNote && <button type="button" aria-label={`附加当前笔记「${props.detachedNote.basename}」`} onClick={() => { close(); props.onToggleNote(); }}><FilePlus size={16} /><span>当前笔记</span><span className="qa-add-hint">{props.detachedNote.basename}</span></button>}
+              </div>
+              <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-use`}>
+                <div className="qa-add-heading" id={`${inputId}-use`}>使用</div>
+                <button type="button" aria-label="使用 Prompt" onClick={() => { close(); if (input && draftBeforePrompts.current === null) draftBeforePrompts.current = input; setInput("/"); setMenuDismissed(false); setMenuIndex(0); textarea.current?.focus(); }}><Slash size={16} /><span>Prompt</span><AddKey keys="/" /></button>
+                <button type="button" aria-label={props.skillLabel === "技能" ? "选择技能" : `技能：${props.skillLabel}`} onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} /><span>技能</span><span className="qa-add-hint">{props.skillLabel === "技能" ? "选择要用的技能" : props.skillLabel}</span><ChevronRight size={14} /></button>
+                {props.webSearch !== undefined && <button type="button" aria-label="联网搜索" aria-pressed={props.webSearch} onClick={props.onToggleWebSearch}><Globe size={16} /><span>联网搜索</span><span className="qa-add-hint">{props.webSearch ? "需要时自动搜索" : "已关闭"}</span><span className="qa-add-switch" aria-hidden="true" /></button>}
+              </div>
+            </div>}
           </ComposerPopover>
-          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
+          {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}`} label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
             {(close) => <>
               <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
               <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
@@ -329,17 +382,32 @@ export function ChatPanel(props: Props) {
           </ComposerPopover>}
         </PromptInputTools>
         <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running}
-          trigger={<>{(() => { const source = props.sources.find((item) => item.key === props.selection?.source); return source ? <BrandIcon icon={source.icon} kind={source.kind} size={14} /> : null; })()}<span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && props.effort && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
+          trigger={<>{(() => { const source = props.sources.find((item) => item.key === props.selection?.source); return source ? <BrandIcon icon={source.icon} kind={source.kind} size={14} /> : null; })()}<span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <span className="qa-effort-label">推理 {effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
           {(close) => <ModelPicker sources={props.sources} current={props.selection} recent={props.recentModels}
             efforts={props.efforts} effort={props.effort} onEffort={props.onEffort}
             onSelect={(source, model) => { props.onPickModel(source, model); close(); }}
             onLoad={props.onLoadModels} onManage={() => { close(); props.onManageModels(); }} />}
         </ComposerPopover>
+        {contextUsage && <ContextRing usage={contextUsage} onNew={props.onNew} disabled={running} />}
         <PromptInputSubmit status={status} disabled={(!input.trim() && !attachments.length) || reading > 0 || props.modelLoading} onStop={() => { setStopped(true); void stop().then(props.onPersist); }} />
         </PromptInputFooter>
       </PromptInput>
     </div>
   </>;
+}
+
+/** The most recent reply's reported context usage; older replies describe a smaller window. */
+function latestUsage(messages: AgentMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const usage = messages[index]!.role === "assistant" ? messageUsage(messages[index]!) : undefined;
+    if (usage) return usage;
+  }
+  return undefined;
+}
+
+/** A shortcut shown at the end of an add-menu row, like a native menu's key column. */
+function AddKey({ keys }: { keys?: string }) {
+  return keys ? <kbd className="qa-add-key" aria-hidden="true">{keys}</kbd> : null;
 }
 
 /** Reading context from another plugin or view, shown as a removable composer chip. */

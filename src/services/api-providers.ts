@@ -54,6 +54,21 @@ export function permitsEmptyKey(connection: ApiConnection): boolean {
   catch { return false; }
 }
 
+/**
+ * The URL the SDK appends endpoint paths to. Anthropic-compatible services are often entered without
+ * their version segment (the Claude Code convention), which would send requests to `/messages`.
+ */
+export function apiBaseUrl(connection: ApiConnection): string {
+  const base = validateApiUrl(connection.baseUrl).replace(/(\/v1)+$/, "/v1");
+  const path = new URL(base).pathname.replace(/\/$/, "");
+  const versioned = /\/v\d+[a-z0-9]*$/i.test(path);
+  // Anthropic-compatible paths never carry the version (…/api/anthropic); OpenAI-compatible ones do
+  // unless a relay mounts its own prefix, so only a bare origin gets /v1 there (as CC Switch does).
+  if (apiProtocol(connection) === "anthropic") return versioned ? base : `${base}/v1`;
+  if (apiProtocol(connection) === "google") return base;
+  return !versioned && path === "" ? `${base}/v1` : base;
+}
+
 export function validateApiUrl(value: string): string {
   const url = new URL(value.trim());
   if (url.username || url.password || url.search || url.hash) throw new Error("API 地址不能包含账号、密钥或查询参数");

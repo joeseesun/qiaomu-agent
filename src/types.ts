@@ -22,8 +22,20 @@ export interface ProviderConfig extends ApiConnection {
   /** Hide this provider from the composer without deleting its credentials. */
   showInPicker?: boolean;
   /** Optional API request parameters, keyed by exact model ID. */
-  modelOptions?: Record<string, { temperature?: number; maxOutputTokens?: number }>;
+  modelOptions?: Record<string, ModelOptions>;
   fetchedAt?: number;
+}
+
+/** Per-model settings; an unset capability means "use what the vendor reports". */
+export interface ModelOptions {
+  temperature?: number;
+  maxOutputTokens?: number;
+  /** Context window in tokens. */
+  contextWindow?: number;
+  /** Whether the model thinks, i.e. offers reasoning effort levels. */
+  reasoning?: boolean;
+  /** Whether the model accepts image input. */
+  vision?: boolean;
 }
 
 export interface QiaomuSettings {
@@ -31,6 +43,10 @@ export interface QiaomuSettings {
   backendKind: BackendKind;
   preferredCli: string;
   permissionMode: PermissionMode;
+  /** Web search for API models; off only when the user turned it off in the add menu. */
+  webSearch?: boolean;
+  /** The user accepted the full-access warning once; it is not shown again. */
+  fullAccessAcknowledged?: boolean;
   api: ApiConnection;
   apiProfiles?: Record<string, ApiConnection>;
   /** Every configured model provider; `api` mirrors the active one. */
@@ -39,9 +55,12 @@ export interface QiaomuSettings {
   recentModels: Array<{ source: string; model: string }>;
   /** Local agents hidden from the composer model picker. */
   hiddenAgents: string[];
-  /** Explicit composer visibility overrides. Absent entries use the seven-agent default. */
+  /** Explicit composer visibility overrides. Discovered callable agents show by default. */
   agentVisibility: Record<string, boolean>;
-  chatFontFamily: "system" | "obsidian";
+  chatFontFamily: "system" | "obsidian" | "text" | "custom";
+  /** Family name used when chatFontFamily is "custom" (for example a font another plugin loads). */
+  chatFontCustom: string;
+  codeFontFamily: "system" | "obsidian";
   chatFontSize: number;
   codeFontSize: number;
   /** Model lists reported by local agents, so the picker can show them without starting each agent. */
@@ -65,7 +84,6 @@ export interface QiaomuSettings {
   conversations?: ConversationRecord[];
   modelSelections?: Record<string, { model: string; effort: string }>;
   customPrompts?: PromptTemplate[];
-  wechat: WechatPublishSettings;
 }
 
 export interface ConversationIdentity {
@@ -77,18 +95,6 @@ export interface ConversationIdentity {
 
 export interface ConversationRecord extends ConversationIdentity {
   messages: ChatMessage[];
-}
-
-export interface WechatPublishSettings {
-  /** qmblog WeChat bridge base URL; the bearer token lives in SecretStorage under `secretId`. */
-  bridgeUrl: string;
-  secretId: string;
-  defaultAccountId: string;
-  themeId: string;
-  author: string;
-  openComment: boolean;
-  /** Write wechat_media_id / wechat_draft_at back to the note after a draft is created. */
-  recordInNote: boolean;
 }
 
 export interface PromptTemplate { id: string; name: string; body: string; }
@@ -105,6 +111,14 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   activities?: ChatActivity[];
   changes?: TurnChanges;
+  /** Context window occupancy the backend reported after this reply. */
+  usage?: ContextUsage;
+}
+
+/** Tokens currently in the model's context window, as reported by the backend. */
+export interface ContextUsage {
+  used: number;
+  size: number;
 }
 
 /** One file an agent turn touched. `before`/`after` are null when the file did not exist. */
@@ -165,12 +179,16 @@ export interface ChatRequest {
   modelOptions?: { temperature?: number; maxOutputTokens?: number };
   attachments?: ChatAttachment[];
   permissionMode: PermissionMode;
+  /** false: attach no search tools this turn. Reading pages, vault and file tools are unaffected. */
+  webSearch?: boolean;
   activeFilePath?: string;
   activeFileContent?: string;
   /** Text selected in the editor when the message was sent. Lines are 1-based and inclusive. */
   selection?: EditorSelectionContext;
   /** What the user is reading in another plugin or view (Qiaomu Context Protocol). */
   reading?: ContextSnapshot;
+  /** Context window the provider reported for the selected API model. */
+  contextWindow?: number;
   skill?: AgentSkill;
   mcpConfig?: Record<string, unknown>;
   obsidianCli?: ObsidianCliConnection;
@@ -191,6 +209,7 @@ export interface ChatCallbacks {
   onStatus: (status: string) => void;
   onActivity?: (activity: ChatActivity) => void;
   onAttachment?: (attachment: GeneratedAttachment) => void | Promise<void>;
+  onUsage?: (usage: ContextUsage) => void;
   /** The agent is about to write these absolute paths; `before` is given when the agent reports it. */
   onFileIntent?: (paths: Array<{ path: string; before?: string | null; patch?: string; read?: boolean }>) => void;
   /** Ask the user; resolves with the chosen option id, or null when cancelled. */
@@ -223,6 +242,14 @@ export interface ModelChoice {
   name: string;
   efforts: string[];
   isDefault?: boolean;
+  /** Context window in tokens, when the provider reports it. */
+  contextWindow?: number;
+  /** Maximum output tokens in one response, when the provider reports it. */
+  maxOutputTokens?: number;
+  /** Image input, when the provider reports it. */
+  vision?: boolean;
+  /** Thinking support, when the provider reports it. */
+  reasoning?: boolean;
 }
 
 export interface ChatAttachment {

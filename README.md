@@ -1,62 +1,56 @@
 # 乔木 Agent for Obsidian
 
-一个克制、原生、面向知识库读写的 Obsidian AI 侧边栏。目标是让用户打开侧边栏就能开始对话，同时保留本地 Agent、模型 API、Skills 与 MCP 的扩展空间。
+Chat with your vault using local AI agents or model APIs. 在 Obsidian 侧边栏里和知识库对话：可以用本机已安装的 Agent（Codex、Claude Code、Gemini CLI 等），也可以接入自己的模型 API Key。
 
-> 当前阶段：`0.1.0` 首个社区发布候选。桌面端已做隔离库验证；移动端仍待真机验收。
+> 当前版本 `0.2.0`：首个提交到 Obsidian 社区目录的版本。桌面端（macOS）已在真实库中验证；移动端只做了平台分支模拟，尚未在 iOS / Android 真机上验收。
 
 ## 安装
 
-正式上架后，在 Obsidian 的「设置 → 第三方插件 → 浏览」搜索 **Qiaomu Agent**，安装并启用。审核期间可从 [GitHub Releases](https://github.com/joeseesun/qiaomu-agent/releases) 下载同一版本的 `main.js`、`manifest.json`、`styles.css`，放入仓库的 `.obsidian/plugins/qiaomu-agent/` 后重启 Obsidian。首次使用可选择本机已安装的 Agent，或配置自己的模型 API Key；本插件不提供模型账户或免费额度。
+上架后，在 Obsidian 的「设置 → 第三方插件 → 浏览」搜索 **Qiaomu Agent**，安装并启用。审核期间可从 [GitHub Releases](https://github.com/joeseesun/qiaomu-agent/releases) 下载同一版本的 `main.js`、`manifest.json`、`styles.css`，放进库的 `.obsidian/plugins/qiaomu-agent/`，然后重启 Obsidian。
 
-## 首版能力
+首次使用时，选择一个本机 Agent，或在「设置 → 模型」添加服务商并粘贴 API Key。本插件不提供模型账户或免费额度，云端模型按服务商规则计费。
 
-- 原生 `ItemView` 侧边栏，聊天界面使用 React、AI SDK 与适配后的 AI Elements
-- 使用 Obsidian `MarkdownRenderer` 增量呈现 Markdown、GFM 与 Mermaid
-- 自动附加当前 Markdown 笔记，支持自定义系统 Prompt 和快捷提问
-- 桌面端探测 Codex、Claude Code、Kimi Code、Qwen Code、Grok、OpenCode、Pi 与 Gemini CLI
-- Codex 使用长连接 App Server；Kimi、Qwen、Gemini 与 OpenCode 优先使用原生 ACP
-- 统一模型选择器：本地 Agent 与所有模型服务商在同一个列表里，按来源分组，可搜索、看最近使用、输入任意模型 ID；选中模型即切换来源
-- magpie 式模型设置：选厂商、贴密钥，自动拉取模型列表；可以勾选哪些模型出现在选择器中
-- “仅建议 / 允许修改”显式权限切换；本地 Agent 负责实际文件工具与审批
-- 支持 OpenAI、OpenRouter、Anthropic、Google、DeepSeek、xAI 和自定义兼容 API
-- API Key 保存到 Obsidian `SecretStorage`
-- 扫描库内与自定义目录中的 Agent Skills（`SKILL.md`）
-- 可把 MCP JSON 配置临时传给已支持该参数的本地 CLI
-- `isDesktopOnly: false`：移动端保留 API 对话、笔记上下文和库内 Skills
+## 能做什么
+
+- **对话**：流式回复，用 Obsidian 自带渲染器显示 Markdown、表格、Mermaid 和内部链接；回复可以复制、追加到今日日记或指定笔记。
+- **上下文**：自动附加当前笔记和编辑器选区；`@` 引用库内文件或文件夹，也可以附加网页和图片。
+- **模型**：输入框旁的一个菜单里选择所有来源的模型，包括本机 Agent 和二十多个云端服务商（OpenAI、Anthropic、Google、DeepSeek、Kimi、智谱、通义、OpenRouter、Ollama 等），也可以自定义 OpenAI / Anthropic 兼容地址。支持的模型可以调整思考强度。
+- **文件权限**：只读、可修改当前库、完全访问（仅桌面端）三档，在输入框里随时切换。每轮修改都有变更卡片和 diff，可以预检后撤销，删除会移到回收站。
+- **搜索与阅读**：模型自带联网搜索时直接使用；其他模型可连接你自己的 Brave Search Key。可以读取你给出的公开网页、RSS 和 JSON，以及搜索当前库中的笔记。
+- **技能与工具连接**：扫描库内和本机目录中的 Agent Skills（`SKILL.md`）；为本机 Agent 配置 MCP 工具连接。
+- **外观**：对话字体可跟随 Obsidian 界面或正文字体，也可以使用主题、插件提供的字体或已安装的中文系统字体；字号和代码字体可以单独设置。
 
 ## 能力边界
 
-| 能力 | 桌面端 | 移动端 | 当前状态 |
-| --- | --- | --- | --- |
-| 当前笔记读取 | 支持 | 支持 | 已实现 |
-| 本地 Agent CLI | 支持 | 不支持 | Codex App Server、ACP 与兼容 CLI 回退 |
-| 模型 API 对话 | 支持 | 支持，受服务商网络策略影响 | 已实现流式适配器 |
-| Markdown / GFM / Mermaid | 支持 | 待真机验收 | Markdown 与 Mermaid 都使用 Obsidian 内置渲染；图表以静态图片显示 |
-| Skills | 库内与外部目录 | 仅库内 | 已实现选择与注入 |
-| MCP | ACP 会话传入；Codex 使用本机配置；兼容 CLI 透传 | 尚未内置直连 | 已接入原生 Agent 会话 |
-| API 模式直接改库 | 尚未支持 | 尚未支持 | 后续使用受控工具层实现 |
-| 修改审阅与撤销 | 支持 | 不适用 | 本地 Agent 每轮给出变更摘要与 diff，撤销前预检；权限请求在对话中审批 |
-| Obsidian CLI | 支持自动检测与本地 Agent 引导 | 不可用 | 已接入，需在 Obsidian 中启用 |
-| 公众号草稿箱 | 支持 | 支持（未真机验收） | 通过自建 qmblog Bridge 发送，只进草稿箱 |
+| 能力 | 桌面端 | 移动端 |
+| --- | --- | --- |
+| 模型 API 对话、笔记上下文、库内技能 | 支持 | 支持（未真机验收；部分服务商的跨域策略可能阻止直连） |
+| 本机 Agent（Codex App Server、ACP、兼容 CLI） | 支持 | 不支持 |
+| API 模型修改当前库 | 支持 | 支持（未真机验收） |
+| 完全访问本机文件与命令行 | Codex 与 API 模型 | 不支持 |
+| MCP 工具连接 | 传给本机 Agent；API 模型不使用 | 不支持 |
+| Obsidian CLI（日记、属性等） | 需在 Obsidian 中启用命令行 | 不支持 |
 
-“检测到”只代表版本探测成功；“可调用”代表已有参数适配器；“实际执行了 Skill/MCP 工具”必须以运行事件为准。ZCode CLI 仅在本机安装且配置可用时才能调用，检测到桌面应用不代表 CLI 可用。
+“检测到”某个 CLI 只代表版本探测成功，不代表已登录或可调用；技能或 MCP 工具是否真的执行过，以对话中显示的运行记录为准。公众号排版与发布已拆分为独立插件 Qiaomu Publish（`qiaomu-publish`）。
 
-## 界面与移动端边界
+## 联网说明
 
-当前使用 React、AI SDK 与经宿主适配的 AI Elements 组件，来源与许可证见 `THIRD_PARTY_NOTICES.md`。Markdown 继续交给 Obsidian 渲染；模型和文件选择沿用宿主弹窗，避免引入第二套主题及焦点管理。
+本插件没有自己的服务器，不收集遥测数据。只有下面这些情况会联网，且都由你的配置或操作触发：
 
-手机打开同步仓库时，即使桌面选择了 CLI，也会在本设备使用 API，不自动改写桌面的连接偏好。API Key 需要在当前设备检查配置。手机以普通标签页打开对话，回车换行、按钮发送；触摸操作区至少 44px。
+- **模型服务商**：使用云端模型时，你的消息、附加的笔记、选区、图片、网页内容和所选技能正文，会发送到你选择的服务商 API 地址（或你填写的自定义地址），用于生成回复。在设置里拉取模型列表、验证 Key 时，也会请求该服务商。
+- **联网搜索**：模型自带搜索（OpenAI、Anthropic、Gemini、xAI、OpenRouter）由服务商执行，可能单独计费。连接 Brave Search 后，搜索词会发送到 `api.search.brave.com`；Brave Key 只保存在本机，不会交给模型。
+- **网页读取**：只读取你或模型在对话中给出的公开 HTTP/HTTPS 地址；本机和内网地址会被拒绝。
+- **本机 Agent**：对话内容交给你已安装的 CLI（Codex、Claude Code 等），它们是否以及如何联网由其自身配置决定。
+- **关于页**：打开「设置 → 关于」时，会从 `radio.qiaomu.ai` 加载作者公众号和打赏二维码图片。
 
-移动端兼容声明不是实机验收：当前覆盖平台分支模拟和桌面构建，iOS/Android 的网络、软键盘、文件选择和流式回复仍需真机测试。部分 API 的跨域策略可能阻止直连。手机可确认后追加回复到指定笔记；“今日日记”目前仍依赖桌面 CLI，移动端日记适配尚未完成。API 模式尚不执行 MCP 或文件修改工具；Skill 正文注入不等同于支持其脚本执行。
+API Key 保存在 Obsidian 的 SecretStorage 中，不写入插件数据文件。
 
-## 发布到公众号草稿箱
+## 访问库外文件（仅桌面端）
 
-命令面板「发布当前笔记到公众号草稿箱」，或在文件菜单选择「发布到公众号草稿箱」。弹窗里可以选公众号和排版主题，修改标题、作者、摘要，查看发布前检查和排版预览，然后发到草稿箱；也可以只复制公众号格式。
-
-- 排版复用乔木博客的公众号主题和规范化代码（`src/wechat/`），CSS 用浏览器 CSSOM 内联，不引入 juice。
-- 本地图片、公式（MathJax → MathML → PNG）和 Mermaid 图（Obsidian 内置 Mermaid → PNG）逐张上传到 Bridge，换成公众号图床地址。
-- 属性：`title/标题`、`author/作者`、`digest/摘要`、`cover/封面`、`wechat_account/公众号`、`wechat_theme/公众号主题`、`source_url/原文链接`。成功后写回 `wechat_media_id`、`wechat_draft_at`、`wechat_account`。
-- 需要在「设置 → 发布」填写 qmblog 公众号 Bridge 的地址和访问令牌（令牌存入 SecretStorage）。Bridge 需要包含 `POST /v1/wechat/images` 接口的版本。
+- 启动你安装的本机 Agent CLI，并在系统临时目录创建仅当前用户可读写的 MCP 配置文件，运行结束后删除。
+- 读取 `~/.agents/skills`、`~/.claude/skills` 等技能目录和你添加的其他目录；导入技能时把所选文件夹复制到个人技能目录。
+- 在工具连接里选择“保存到 Codex”时，通过 `codex mcp add` 写入 Codex 自己的全局配置。
+- 选择“完全访问”时，Agent 可以读写这台电脑上的文件并运行命令。读取凭据、改动启动项、大范围删除和高风险命令仍会被拦截或先询问；库外的修改同样记录并可撤销。默认权限是只读。
 
 ## 开发
 
@@ -77,7 +71,7 @@ npm run check
 - `manifest.json`
 - `styles.css`
 
-首次测试建议使用单独的测试库。若要验证写入，将权限从“仅建议”切换成“允许修改”，并先确认所选本地 Agent 自身的审批策略。
+首次测试建议使用单独的测试库。若要验证写入，把输入框里的文件权限从“只读”切到“可修改当前库”，并先确认所选本地 Agent 自身的审批策略。
 
 ## 架构
 
@@ -99,23 +93,6 @@ CLI 能力被放在动态加载边界之后，移动端不会静态导入 Node.j
 
 当前逐项验证结果见 [Local CLI compatibility](docs/cli-compatibility.md)。
 
-## 迭代路线
-
-1. 完成 Kimi、Qwen、Gemini 与 OpenCode 的 ACP 端到端兼容矩阵。
-2. 增加来源引用。（文件 diff、审批与撤销已完成）
-3. 引入独立的 MCP client 层，并完善权限请求 UI。
-4. 把 Obsidian CLI 扩展为 API 模式的受控工具调用。
-5. 完成移动端 API 兼容测试。
-
-## 隐私与安全
-
-- API Key 通过 Obsidian SecretStorage 保存。
-- 使用云模型时，用户发送的消息、所附笔记或阅读内容、选择的 Skill 内容会发送给所选模型服务商的 API 地址；模型服务商及自定义 API 地址由用户选择。使用本地 Agent 时，这些内容会交给用户已安装的本地 CLI；该 CLI 是否进一步联网由其自身配置决定。没有选择连接时不会发送对话。
-- 只有用户主动执行「发布当前笔记到公众号草稿箱」时，笔记正文和所需图片才会发送到用户配置的 qmblog Bridge 地址，再由该服务创建公众号草稿；此操作不直接公开发表。
-- 桌面端为了启动用户安装的 CLI、读取用户显式选择的仓库外 Skill 目录及创建临时 MCP 配置文件，会访问 Obsidian 仓库以外的文件系统。移动端不运行这些桌面能力。
-- MCP 配置可能包含敏感环境变量；临时文件以仅当前用户可读写的权限创建并在运行后删除。
-- 默认权限为“仅建议”。本插件不会把发现某个 CLI 或 MCP 服务等同于授权执行。
-
 ## License
 
-MIT
+MIT。第三方组件及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

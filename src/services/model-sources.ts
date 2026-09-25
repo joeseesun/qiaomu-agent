@@ -1,6 +1,7 @@
 import type { ApiConnection, ModelChoice, ProviderConfig, QiaomuSettings } from "../types";
 import { API_PROVIDERS, apiProtocol } from "./api-providers";
 import { recommendedModels } from "./key-detection";
+import { resolveModel } from "./model-capabilities";
 
 /** A place models come from: a local agent (`cli:<id>`) or a configured provider (`api:<providerId>`). */
 export interface ModelSource {
@@ -18,12 +19,12 @@ export interface ModelSource {
   canListModels?: boolean;
 }
 
-/** Keep first-run composer choices small. Every detected agent remains available in settings. */
+/** Keep the settings list scannable; discovery itself determines which agents can be shown. */
 export const DEFAULT_VISIBLE_AGENT_IDS = ["codex", "claude", "opencode", "pi", "cursor", "antigravity", "kimi"] as const;
 
 export function agentShown(settings: QiaomuSettings, id: string): boolean {
   if (settings.hiddenAgents.includes(id)) return false;
-  return settings.agentVisibility[id] ?? DEFAULT_VISIBLE_AGENT_IDS.includes(id as typeof DEFAULT_VISIBLE_AGENT_IDS[number]);
+  return settings.agentVisibility[id] ?? true;
 }
 
 export function visibleAgentModels(settings: QiaomuSettings, agentId: string, reported: ModelChoice[]): { models: ModelChoice[]; showDefault: boolean } {
@@ -60,8 +61,8 @@ export function maskKey(key: string): string {
 /** Models the picker offers: exactly the enabled ones (explicit list), plus the configured default. */
 export function exposedModels(provider: ProviderConfig): ModelChoice[] {
   const all = provider.models ?? [];
-  const list = (provider.enabledModels ?? []).map((id) => all.find((model) => model.id === id) ?? { id, name: id, efforts: [] });
-  return list;
+  // Efforts follow the per-model thinking setting, so a switch in settings shows up in the picker.
+  return (provider.enabledModels ?? []).map((id) => ({ ...(all.find((model) => model.id === id) ?? { id, name: id }), efforts: resolveModel(provider, id).efforts }));
 }
 
 export interface ConnectDeps {
@@ -89,6 +90,7 @@ export async function connectProvider(
     ? { ...existing, protocol: endpoint.protocol ?? existing.protocol, secretId: `qiaomu-agent-${existing.id}-${crypto.randomUUID()}` }
     : { ...fresh, baseUrl, ...(endpoint.protocol ? { protocol: endpoint.protocol } : {}), ...(endpoint.name ? { name: endpoint.name } : {}) };
   const models = await deps.listModels(draft, key.trim());
+  if (presetId === "ollama" && models.length === 0) throw new Error("Ollama 尚未安装对话模型。请先在 Ollama 中下载模型后重试。");
   deps.setSecret(draft.secretId, key.trim());
   const recommended = recommendedModels(presetId, models);
   const provider: ProviderConfig = {

@@ -6,7 +6,7 @@ import { diffLines, diffStats, hunks } from "../services/line-diff";
 const MAX_DIFF_LINES = 400;
 
 function changeKind(change: FileChange): string {
-  if (change.outside) return "库外";
+  if (change.outside && !change.tracked) return "库外";
   if (change.binary) return "文件";
   if (!change.tracked) return change.after === null ? "删除" : "修改";
   if (change.before === null) return "新建";
@@ -47,7 +47,7 @@ export function ChangeSummary({ changes, disabled, onOpen, onRevert }: { changes
     const stats = diffStats(diffLines(file.before, file.after));
     return { added: sum.added + stats.added, removed: sum.removed + stats.removed };
   }, { added: 0, removed: 0 }), [changes]);
-  const restorable = changes.files.some((file) => file.tracked && !file.binary && !file.outside && !file.reverted);
+  const restorable = changes.files.some((file) => file.tracked && !file.binary && !file.reverted);
   const partly = changes.files.some((file) => file.reverted);
   return <details className="qa-changes" open>
     <summary>

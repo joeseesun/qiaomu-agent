@@ -2,6 +2,7 @@ import type { ModelChoice, QiaomuSettings } from "./types";
 import { migrateProviders } from "./services/model-sources";
 import { recommendedModels } from "./services/key-detection";
 import { normalizeBranchTitle } from "./services/conversations";
+import { cleanFamily } from "./services/fonts";
 
 export const DEFAULT_SYSTEM_PROMPT = `你是用户 Obsidian 知识库中的协作助手。
 
@@ -37,20 +38,13 @@ export const DEFAULT_SETTINGS: QiaomuSettings = {
   hiddenAgents: [],
   agentVisibility: {},
   chatFontFamily: "system",
+  chatFontCustom: "",
+  codeFontFamily: "system",
   chatFontSize: 15,
   codeFontSize: 13,
   agentModelCache: {},
   agentEnabledModels: { pi: [""] },
   agentCustomModels: {},
-  wechat: {
-    bridgeUrl: "",
-    secretId: "qiaomu-agent-wechat-bridge-token",
-    defaultAccountId: "",
-    themeId: "qiaomu-podcast",
-    author: "",
-    openComment: true,
-    recordInNote: true,
-  },
 };
 
 export function normalizeSettings(raw: unknown): QiaomuSettings {
@@ -59,6 +53,7 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
 
   return {
     ...DEFAULT_SETTINGS,
+    // Unknown keys are kept on purpose: Qiaomu Publish imports the old `wechat` block from here.
     ...data,
     schemaVersion: 1,
     permissionMode: data.permissionMode === "edit" || data.permissionMode === "full" ? data.permissionMode : "plan",
@@ -80,20 +75,24 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
         modelOptions: Object.fromEntries(Object.entries(item.modelOptions ?? {}).filter(([id, value]) => typeof id === "string" && value && typeof value === "object")
           .map(([id, value]) => [id, {
             ...(typeof value.temperature === "number" && value.temperature >= 0 && value.temperature <= 2 ? { temperature: value.temperature } : {}),
-            ...(typeof value.maxOutputTokens === "number" && Number.isInteger(value.maxOutputTokens) && value.maxOutputTokens >= 1 && value.maxOutputTokens <= 65536 ? { maxOutputTokens: value.maxOutputTokens } : {}),
+            ...(typeof value.maxOutputTokens === "number" && Number.isInteger(value.maxOutputTokens) && value.maxOutputTokens >= 1 && value.maxOutputTokens <= 1_000_000 ? { maxOutputTokens: value.maxOutputTokens } : {}),
+            ...(typeof value.contextWindow === "number" && Number.isInteger(value.contextWindow) && value.contextWindow >= 1 && value.contextWindow <= 100_000_000 ? { contextWindow: value.contextWindow } : {}),
+            ...(typeof value.reasoning === "boolean" ? { reasoning: value.reasoning } : {}),
+            ...(typeof value.vision === "boolean" ? { vision: value.vision } : {}),
           }])),
       })),
     recentModels: Array.isArray(data.recentModels) ? data.recentModels.filter((item) => item && typeof item.source === "string" && typeof item.model === "string").slice(0, 8) : [],
     hiddenAgents: Array.isArray(data.hiddenAgents) ? data.hiddenAgents.filter((id): id is string => typeof id === "string") : [],
     agentVisibility: data.agentVisibility && typeof data.agentVisibility === "object" && !Array.isArray(data.agentVisibility)
       ? Object.fromEntries(Object.entries(data.agentVisibility).filter(([id, value]) => id.length > 0 && typeof value === "boolean")) : {},
-    chatFontFamily: data.chatFontFamily === "obsidian" ? "obsidian" : "system",
+    chatFontFamily: data.chatFontFamily === "obsidian" || data.chatFontFamily === "text" || data.chatFontFamily === "custom" && typeof data.chatFontCustom === "string" && cleanFamily(data.chatFontCustom) ? data.chatFontFamily : "system",
+    chatFontCustom: typeof data.chatFontCustom === "string" ? cleanFamily(data.chatFontCustom) : "",
+    codeFontFamily: data.codeFontFamily === "obsidian" ? "obsidian" : "system",
     chatFontSize: typeof data.chatFontSize === "number" && Number.isInteger(data.chatFontSize) && data.chatFontSize >= 13 && data.chatFontSize <= 20 ? data.chatFontSize : 15,
     codeFontSize: typeof data.codeFontSize === "number" && Number.isInteger(data.codeFontSize) && data.codeFontSize >= 12 && data.codeFontSize <= 18 ? data.codeFontSize : 13,
     agentModelCache: normalizeModelCache(data.agentModelCache),
     agentEnabledModels: { pi: [""], ...normalizeAgentIds(data.agentEnabledModels) },
     agentCustomModels: normalizeAgentIds(data.agentCustomModels, false),
-    wechat: normalizeWechatSettings(data.wechat),
     quickPrompts: Array.isArray(data.quickPrompts)
       ? data.quickPrompts.filter((item): item is string => typeof item === "string").slice(0, 8)
       : [...DEFAULT_SETTINGS.quickPrompts],
@@ -117,22 +116,6 @@ function normalizeAgentIds(raw: unknown, allowDefault = true): Record<string, st
     .map(([agent, value]) => [agent, [...new Set((value as unknown[])
       .filter((id): id is string => typeof id === "string" && (allowDefault || Boolean(id.trim())))
       .map((id) => id.trim()))].slice(0, 200)]));
-}
-
-function normalizeWechatSettings(raw: unknown): QiaomuSettings["wechat"] {
-  const data = raw && typeof raw === "object" ? (raw as Partial<QiaomuSettings["wechat"]>) : {};
-  const text = (value: unknown, fallback: string) => (typeof value === "string" ? value : fallback);
-  const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
-  const defaults = DEFAULT_SETTINGS.wechat;
-  return {
-    bridgeUrl: text(data.bridgeUrl, defaults.bridgeUrl).trim(),
-    secretId: text(data.secretId, defaults.secretId) || defaults.secretId,
-    defaultAccountId: text(data.defaultAccountId, defaults.defaultAccountId),
-    themeId: text(data.themeId, defaults.themeId) || defaults.themeId,
-    author: text(data.author, defaults.author),
-    openComment: flag(data.openComment, defaults.openComment),
-    recordInNote: flag(data.recordInNote, defaults.recordInNote),
-  };
 }
 
 function normalizeModelCache(raw: unknown): QiaomuSettings["agentModelCache"] {

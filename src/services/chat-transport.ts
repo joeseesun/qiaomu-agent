@@ -1,9 +1,9 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
-import type { ApprovalRequest, ApprovalState, ChatActivity, ChatAttachment, ChatBackend, ChatCallbacks, ChatMessage, ChatRequest, FileChange, GeneratedAttachment, TurnChanges } from "../types";
+import type { ApprovalRequest, ApprovalState, ChatActivity, ChatAttachment, ChatBackend, ChatCallbacks, ChatMessage, ChatRequest, ContextUsage, FileChange, GeneratedAttachment, TurnChanges } from "../types";
 
 export type AgentMessage = UIMessage<
   { createdAt: number; backend?: string; sourcePath?: string; attachments?: import("../types").ChatAttachment[] },
-  { activity: ChatActivity; status: string; attachment: ChatAttachment; changes: TurnChanges; approval: ApprovalState }
+  { activity: ChatActivity; status: string; attachment: ChatAttachment; changes: TurnChanges; approval: ApprovalState; usage: ContextUsage }
 >;
 
 /** Per-turn host services: change tracking, file access and approvals. */
@@ -31,6 +31,12 @@ export function storableChanges(changes: TurnChanges): TurnChanges {
     }),
   };
 }
+/** Context usage reported for this reply; reports share one id, so the part is updated in place. */
+export function messageUsage(message: AgentMessage): ContextUsage | undefined {
+  const part = message.parts.find((p) => p.type === "data-usage");
+  return part?.type === "data-usage" ? part.data : undefined;
+}
+
 export const messageText = (message: AgentMessage): string => message.parts
   .filter((part) => part.type === "text").map((part) => part.text).join("");
 
@@ -45,6 +51,7 @@ export function toStoredMessage(message: AgentMessage): ChatMessage {
     attachments: [...attachments.values()].map((attachment) => attachment.vaultPath ? { ...attachment, url: undefined } : attachment),
     activities: message.parts.filter((p) => p.type === "data-activity").map((p) => p.data),
     changes: (() => { const part = message.parts.find((p) => p.type === "data-changes"); return part && part.type === "data-changes" ? storableChanges(part.data) : undefined; })(),
+    usage: messageUsage(message),
   };
 }
 export function fromStoredMessage(message: ChatMessage, resolveAttachment: (attachment: ChatAttachment) => ChatAttachment = (value) => value): AgentMessage {
@@ -55,6 +62,7 @@ export function fromStoredMessage(message: ChatMessage, resolveAttachment: (atta
     parts: [ { type: "text", text: message.content },
       ...(message.activities ?? []).map((data) => ({ type: "data-activity" as const, id: data.id, data })),
       ...(message.changes?.files.length ? [{ type: "data-changes" as const, id: "changes", data: message.changes }] : []),
+      ...(message.usage ? [{ type: "data-usage" as const, id: "usage", data: message.usage }] : []),
       ...(message.role === "assistant" ? attachments.flatMap((data) => [
         { type: "file" as const, url: data.url ?? "", mediaType: data.mediaType, filename: data.name },
         { type: "data-attachment" as const, id: data.id, data },
@@ -114,6 +122,7 @@ export class AgentTransport implements ChatTransport<AgentMessage> {
                 emit({ type: "file", url: attachment.url, mediaType: attachment.mediaType });
                 emit({ type: "data-attachment", id: attachment.id, data: attachment });
               },
+              onUsage: (data) => emit({ type: "data-usage", id: "usage", data }),
               onFileIntent: hooks?.onFileIntent,
               host: hooks?.host,
               requestApproval: hooks?.awaitApproval ? async (approval) => {
