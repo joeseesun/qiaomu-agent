@@ -1,4 +1,5 @@
 import { activeNoteBlock, selectionBlock } from "./agent-prompt";
+import { readingBlock } from "../integrations/reading-prompt";
 import { streamText, type ModelMessage } from "ai";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -14,6 +15,8 @@ export function buildApiMessages(request: ChatRequest): ModelMessage[] {
   if (note) sections.push(note);
   const selection = selectionBlock(request);
   if (selection) sections.push(selection);
+  const reading = readingBlock(request.reading);
+  if (reading) sections.push(reading);
   sections.push(request.prompt);
   sections.push(attachmentContext(request));
   return [

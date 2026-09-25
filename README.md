@@ -2,11 +2,15 @@
 
 一个克制、原生、面向知识库读写的 Obsidian AI 侧边栏。目标是让用户打开侧边栏就能开始对话，同时保留本地 Agent、模型 API、Skills 与 MCP 的扩展空间。
 
-> 当前阶段：`0.1.0` 可构建原型。适合开发验证，尚未发布到 Obsidian 社区插件市场。
+> 当前阶段：`0.1.0` 首个社区发布候选。桌面端已做隔离库验证；移动端仍待真机验收。
+
+## 安装
+
+正式上架后，在 Obsidian 的「设置 → 第三方插件 → 浏览」搜索 **Qiaomu Agent**，安装并启用。审核期间可从 [GitHub Releases](https://github.com/joeseesun/qiaomu-agent/releases) 下载同一版本的 `main.js`、`manifest.json`、`styles.css`，放入仓库的 `.obsidian/plugins/qiaomu-agent/` 后重启 Obsidian。首次使用可选择本机已安装的 Agent，或配置自己的模型 API Key；本插件不提供模型账户或免费额度。
 
 ## 首版能力
 
-- 原生 `ItemView` 侧边栏，不引入 React 与第二套设计系统
+- 原生 `ItemView` 侧边栏，聊天界面使用 React、AI SDK 与适配后的 AI Elements
 - 使用 Obsidian `MarkdownRenderer` 增量呈现 Markdown、GFM 与 Mermaid
 - 自动附加当前 Markdown 笔记，支持自定义系统 Prompt 和快捷提问
 - 桌面端探测 Codex、Claude Code、Kimi Code、Qwen Code、Grok、OpenCode、Pi 与 Gemini CLI
@@ -35,7 +39,7 @@
 | Obsidian CLI | 支持自动检测与本地 Agent 引导 | 不可用 | 已接入，需在 Obsidian 中启用 |
 | 公众号草稿箱 | 支持 | 支持（未真机验收） | 通过自建 qmblog Bridge 发送，只进草稿箱 |
 
-“检测到”只代表版本探测成功；“可调用”代表已有参数适配器；“实际执行了 Skill/MCP 工具”必须以运行事件为准。ZCode 目前只检测桌面应用，不把它显示为可调用 CLI。
+“检测到”只代表版本探测成功；“可调用”代表已有参数适配器；“实际执行了 Skill/MCP 工具”必须以运行事件为准。ZCode CLI 仅在本机安装且配置可用时才能调用，检测到桌面应用不代表 CLI 可用。
 
 ## 界面与移动端边界
 
@@ -101,12 +105,14 @@ CLI 能力被放在动态加载边界之后，移动端不会静态导入 Node.j
 2. 增加来源引用。（文件 diff、审批与撤销已完成）
 3. 引入独立的 MCP client 层，并完善权限请求 UI。
 4. 把 Obsidian CLI 扩展为 API 模式的受控工具调用。
-5. 完成移动端 API 兼容测试和社区插件发布材料。
+5. 完成移动端 API 兼容测试。
 
 ## 隐私与安全
 
 - API Key 通过 Obsidian SecretStorage 保存。
-- 当前笔记、历史消息、Skill 内容会按所选连接发送给本地 Agent 或模型 API。
+- 使用云模型时，用户发送的消息、所附笔记或阅读内容、选择的 Skill 内容会发送给所选模型服务商的 API 地址；模型服务商及自定义 API 地址由用户选择。使用本地 Agent 时，这些内容会交给用户已安装的本地 CLI；该 CLI 是否进一步联网由其自身配置决定。没有选择连接时不会发送对话。
+- 只有用户主动执行「发布当前笔记到公众号草稿箱」时，笔记正文和所需图片才会发送到用户配置的 qmblog Bridge 地址，再由该服务创建公众号草稿；此操作不直接公开发表。
+- 桌面端为了启动用户安装的 CLI、读取用户显式选择的仓库外 Skill 目录及创建临时 MCP 配置文件，会访问 Obsidian 仓库以外的文件系统。移动端不运行这些桌面能力。
 - MCP 配置可能包含敏感环境变量；临时文件以仅当前用户可读写的权限创建并在运行后删除。
 - 默认权限为“仅建议”。本插件不会把发现某个 CLI 或 MCP 服务等同于授权执行。
 

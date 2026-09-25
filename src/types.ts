@@ -1,3 +1,4 @@
+import type { ContextSnapshot } from "./integrations/qiaomu-context";
 export type PermissionMode = "plan" | "edit" | "full";
 
 export type BackendKind = "auto" | "cli" | "api";
@@ -181,6 +182,8 @@ export interface ChatRequest {
   activeFileContent?: string;
   /** Text selected in the editor when the message was sent. Lines are 1-based and inclusive. */
   selection?: EditorSelectionContext;
+  /** What the user is reading in another plugin or view (Qiaomu Context Protocol). */
+  reading?: ContextSnapshot;
   skill?: AgentSkill;
   mcpConfig?: Record<string, unknown>;
   obsidianCli?: ObsidianCliConnection;

@@ -1,4 +1,5 @@
 import { activeNoteBlock, selectionBlock } from "./agent-prompt";
+import { readingBlock } from "../integrations/reading-prompt";
 import type { ChatRequest, CliProfile } from "../types";
 import { attachmentContext } from "./attachments";
 
@@ -26,6 +27,8 @@ export function promptWithContext(request: ChatRequest): string {
   if (note) sections.push(note);
   const selection = selectionBlock(request);
   if (selection) sections.push(selection);
+  const reading = readingBlock(request.reading);
+  if (reading) sections.push(reading);
   sections.push(request.prompt);
   const attached = attachmentContext(request);
   if (attached) sections.push(attached);
