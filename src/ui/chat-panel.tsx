@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, Keymap, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Settings, TreeDeciduous, Globe, Newspaper, Shapes } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -32,7 +32,7 @@ interface Props {
   backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number; focusVersion?: number;
   addRequest?: { kind: AddKind; version: number }; addHotkeys?: Partial<Record<AddKind, string>>;
-  onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
+  onConnection: () => void; onNew: () => void; onOpenSettings: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onEditMessage: () => void;
   onToggleNote: () => void; onPersist: () => Promise<void>;
@@ -249,12 +249,14 @@ export function ChatPanel(props: Props) {
   };
   return <>
     <header className="qa-header">
-      <div className="qa-title-wrap"><div className="qa-title">{props.conversationTitle || (title ? messageText(title).split("\n")[0]?.slice(0, 60) : "新对话")}</div>
+      <div className="qa-title-wrap"><div className="qa-title"><TreeDeciduous className="qa-brand-icon" size={16} aria-hidden="true" /><span className="qa-brand">Agent</span>
+          <span className="qa-conversation-title">{props.conversationTitle || (title ? messageText(title).split("\n")[0]?.slice(0, 60) : "新对话")}</span></div>
         {props.branch && <button type="button" className="qa-branch-parent" disabled={running} onClick={() => props.onOpenParent(props.branch!.parentId)}>
           <GitBranch size={12} /><span>返回原对话 · {props.branch.parentTitle}</span></button>}
       </div>
       <button type="button" disabled={running} onClick={(e) => props.onHistory(e.nativeEvent)}><History size={17} /><span className="qiaomu-agent__sr-only">历史对话</span></button>
       <button type="button" disabled={running} onClick={props.onNew}><SquarePen size={17} /><span className="qiaomu-agent__sr-only">新对话</span></button>
+      <button type="button" onClick={props.onOpenSettings}><Settings size={17} /><span className="qiaomu-agent__sr-only">设置</span></button>
     </header>
     <Conversation>
       <ConversationContent onClick={(event) => {
