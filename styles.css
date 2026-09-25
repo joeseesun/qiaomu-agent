@@ -697,16 +697,9 @@
 .qiaomu-wechat-preview-status { color: var(--text-muted); font-size: var(--font-ui-small); padding: 8px 12px; }
 .qiaomu-wechat-preview-status:empty { display: none; }
 .qiaomu-wechat-preview-frame { flex: 1; min-height: 0; box-sizing: border-box; overflow: auto; padding: 16px; background: var(--background-secondary); }
-.qiaomu-wechat-preview-frame.is-phone { display: flex; align-items: center; justify-content: center; overflow: hidden; container-type: size; }
-.qiaomu-wechat-preview-device { width: 100%; margin: 0 auto; background: #fff; }
-/* Generic frame; outer ratio follows Apple's published iPhone 18 Pro body dimensions (71.9 x 150 mm). */
-.qiaomu-wechat-preview-frame.is-phone .qiaomu-wechat-preview-device { display: flex; flex-direction: column; width: min(390px, 100cqw, calc(100cqh * 71.9 / 150)); height: auto; aspect-ratio: 71.9 / 150; box-sizing: border-box; flex: none; padding: 8px; border: 1px solid #444; border-radius: 34px; background: #242424; box-shadow: 0 12px 28px rgba(0, 0, 0, .12); }
-.qiaomu-wechat-preview-device-top, .qiaomu-wechat-preview-device-bottom { display: none; }
-.qiaomu-wechat-preview-frame.is-phone .qiaomu-wechat-preview-device-top { display: block; flex: none; width: 54px; height: 5px; margin: 3px auto 9px; border-radius: 5px; background: #555; }
-.qiaomu-wechat-preview-frame.is-phone .qiaomu-wechat-preview-device-bottom { display: block; flex: none; width: 92px; height: 4px; margin: 10px auto 3px; border-radius: 4px; background: #aaa; }
-.qiaomu-wechat-preview-screen { overflow: hidden; background: #fff; }
-.qiaomu-wechat-preview-frame.is-phone .qiaomu-wechat-preview-screen { flex: 1; min-height: 0; overflow: auto; border-radius: 25px; }
-.qiaomu-wechat-preview-frame.is-dark .qiaomu-wechat-preview-screen { filter: invert(1) hue-rotate(180deg); }
+.qiaomu-wechat-preview-paper { box-sizing: border-box; width: 100%; max-width: 677px; min-height: 100%; margin: 0 auto; background: #fff; box-shadow: 0 2px 16px rgba(0, 0, 0, .06); }
+.qiaomu-wechat-preview-frame.is-phone .qiaomu-wechat-preview-paper { max-width: 390px; }
+.qiaomu-wechat-preview-frame.is-dark .qiaomu-wechat-preview-paper { filter: invert(1) hue-rotate(180deg); }
 .qiaomu-wechat-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .qiaomu-wechat-status { color: var(--text-muted); font-size: var(--font-ui-small); min-height: 1.5em; flex: 1 1 200px; }
 .qiaomu-wechat-actions { display: flex; gap: 8px; flex-wrap: wrap; }

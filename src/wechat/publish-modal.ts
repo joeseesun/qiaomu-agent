@@ -3,19 +3,11 @@ import type { WechatPublishSettings } from "../types";
 import type { WechatAccount } from "./bridge-client";
 import { WechatTransportRouter } from "./transport-router";
 import { buildWechatHtml, listWechatThemes, resolveWechatTheme } from "./export-html";
-import { type DraftMeta, imageMime, metaFromFrontmatter, preflight, publishDraft, recordDraft, resolveCover } from "./publisher";
+import { type DraftMeta, metaFromFrontmatter, preflight, publishDraft, recordDraft, resolveCover } from "./publisher";
 import { renderNoteForWechat, type ArticleImage, type RenderedNote } from "./render-note";
+import { copyWechatHtml } from "./copy-html";
 
 const PREVIEW_CSS = `:host{display:block}.frame{max-width:677px;margin:0 auto;padding:16px 12px;background:#fff;color:#1a1a1a}img{max-width:100%}`;
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
-    reader.readAsDataURL(blob);
-  });
-}
 
 export class WechatPublishModal extends Modal {
   private readonly component = new Component();
@@ -187,18 +179,7 @@ export class WechatPublishModal extends Modal {
     if (!this.note || !this.wechatHtml) return;
     this.setBusy(true, "正在准备复制…");
     try {
-      const doc = new DOMParser().parseFromString(this.wechatHtml, "text/html");
-      for (const image of Array.from(doc.querySelectorAll("img[data-qm-image]"))) {
-        const source = this.note.images.find((item) => item.id === image.getAttribute("data-qm-image"));
-        if (source?.kind === "generated") image.setAttribute("src", await blobToDataUrl(source.blob));
-        if (source?.kind === "vault") image.setAttribute("src", await blobToDataUrl(new Blob([await this.app.vault.readBinary(source.file)], { type: imageMime(source.file.name) ?? "image/png" })));
-        image.removeAttribute("data-qm-image");
-      }
-      const html = doc.body.innerHTML;
-      await navigator.clipboard.write([new ClipboardItem({
-        "text/html": new Blob([html], { type: "text/html" }),
-        "text/plain": new Blob([doc.body.textContent ?? ""], { type: "text/plain" }),
-      })]);
+      await copyWechatHtml(this.app, this.wechatHtml, this.note.images);
       this.setBusy(false, "已复制，可粘贴到公众号编辑器。");
     } catch (error) {
       this.setBusy(false, `复制失败：${error instanceof Error ? error.message : String(error)}`);
