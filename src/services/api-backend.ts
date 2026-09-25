@@ -1,222 +1,111 @@
-import type { ApiConnection, ChatBackend, ChatCallbacks, ChatMessage, ChatRequest } from "../types";
+import { activeNoteBlock, selectionBlock } from "./agent-prompt";
+import { readingBlock } from "../integrations/reading-prompt";
+import { streamText, type ModelMessage } from "ai";
+import { createOpenAI, openai } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import type { ApiConnection, ChatBackend, ChatCallbacks, ChatRequest, ModelChoice } from "../types";
+import { attachmentContext } from "./attachments";
+import { apiProtocol, permitsEmptyKey, validateApiUrl } from "./api-providers";
 
-function trimSlash(value: string): string {
-  return value.replace(/\/+$/, "");
-}
-
-function historyMessages(history: ChatMessage[]): Array<{ role: "user" | "assistant"; content: string }> {
-  return history
-    .filter((message): message is ChatMessage & { role: "user" | "assistant" } =>
-      message.role === "user" || message.role === "assistant"
-    )
-    .slice(-20)
-    .map((message) => ({ role: message.role, content: message.content }));
-}
-
-function buildUserPrompt(request: ChatRequest): string {
+export function buildApiMessages(request: ChatRequest): ModelMessage[] {
   const sections: string[] = [];
-  if (request.skill) {
-    sections.push(
-      `<active_skill name="${request.skill.name}" path="${request.skill.path}">\n${request.skill.body}\n</active_skill>`
-    );
-  }
-  if (request.activeFilePath && request.activeFileContent) {
-    sections.push(
-      `<active_note path="${request.activeFilePath}">\n${request.activeFileContent}\n</active_note>`
-    );
-  }
+  if (request.skill) sections.push(`<active_skill name="${request.skill.name}">\n${request.skill.body}\n</active_skill>`);
+  const note = activeNoteBlock(request);
+  if (note) sections.push(note);
+  const selection = selectionBlock(request);
+  if (selection) sections.push(selection);
+  const reading = readingBlock(request.reading);
+  if (reading) sections.push(reading);
   sections.push(request.prompt);
-  return sections.join("\n\n");
-}
-
-async function consumeSse(
-  response: Response,
-  extract: (value: Record<string, unknown>) => string,
-  onText: (text: string) => void,
-  signal: AbortSignal
-): Promise<void> {
-  if (!response.ok) {
-    throw new Error(`模型 API 返回 ${response.status}: ${(await response.text()).slice(0, 500)}`);
-  }
-  if (!response.body) throw new Error("模型 API 没有返回可读取的数据流");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") continue;
-      try {
-        const parsed: unknown = JSON.parse(data);
-        if (parsed && typeof parsed === "object") {
-          const text = extract(parsed as Record<string, unknown>);
-          if (text) onText(text);
-        }
-      } catch {
-        // Ignore non-JSON heartbeat events.
-      }
-    }
-  }
+  sections.push(attachmentContext(request));
+  return [
+    ...request.history.filter((m) => m.role === "user" || m.role === "assistant").slice(-20)
+      .map((m): ModelMessage => m.role === "assistant" ? { role: "assistant", content: m.content } : { role: "user", content: [
+        { type: "text", text: `${m.content}\n\n${attachmentContext({ ...request, attachments: m.attachments })}` },
+        ...(m.attachments ?? []).filter((a) => a.url).map((a) => ({ type: "file" as const, data: a.url!, mediaType: a.mediaType, filename: a.name })),
+      ] }),
+    { role: "user", content: [
+      { type: "text", text: sections.join("\n\n") },
+      ...(request.attachments ?? []).filter((a) => a.url).map((a) => ({ type: "file" as const, data: a.url!, mediaType: a.mediaType, filename: a.name })),
+    ] },
+  ];
 }
 
 export class ApiBackend implements ChatBackend {
   readonly id = "api";
   readonly label: string;
-
-  constructor(
-    private readonly connection: ApiConnection,
-    private readonly apiKey: string
-  ) {
+  constructor(private readonly connection: ApiConnection, private readonly apiKey: string) {
+    this.connection = { ...connection };
     this.label = connection.model || "Model API";
   }
-
+  async listModels(): Promise<ModelChoice[]> {
+    if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("请先配置 API Key");
+    const base = validateApiUrl(this.connection.baseUrl);
+    const provider = this.connection.provider;
+    const protocol = apiProtocol(this.connection);
+    const headers: Record<string, string> = protocol === "anthropic"
+      ? { "x-api-key": this.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }
+      : protocol === "google" ? { "x-goog-api-key": this.apiKey } : this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+    const response = await fetch(`${base}/models`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`无法获取模型列表（${response.status}），可继续使用已配置模型`);
+    const body = await response.json() as { data?: { id: string; display_name?: string }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
+    const models = body.data?.map((m) => ({ id: m.id, name: m.display_name || m.id }))
+      ?? body.models?.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => ({ id: m.name.replace(/^models\//, ""), name: m.displayName || m.name })) ?? [];
+    return models.map((m) => ({ ...m, efforts: apiEfforts(provider, m.id), isDefault: m.id === this.connection.model }));
+  }
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
-    callbacks.onStatus(`正在连接 ${this.connection.model}…`);
-    if (!this.apiKey) throw new Error("尚未配置 API Key");
-    if (!this.connection.model.trim()) throw new Error("尚未选择模型");
-
-    if (this.connection.provider === "anthropic") {
-      await this.sendAnthropic(request, callbacks, signal);
-      return;
+    if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("尚未配置 API Key，请打开连接设置");
+    if (!(request.model || this.connection.model).trim()) throw new Error("尚未选择模型");
+    signal.throwIfAborted();
+    const protocol = apiProtocol(this.connection);
+    const options = { apiKey: this.apiKey || "local", baseURL: validateApiUrl(this.connection.baseUrl), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, redirect: "error" }) };
+    const modelId = request.model || this.connection.model;
+    const editingImage = request.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
+    const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
+    if (editingImage && this.connection.provider !== "openai" && !(protocol === "google" && googleImageModel)) {
+      throw new Error("当前模型尚未接入图片编辑；请切换 Codex、OpenAI 或 Gemini 图片模型");
     }
-    if (this.connection.provider === "google") {
-      await this.sendGoogle(request, callbacks, signal);
-      return;
+    const model = protocol === "anthropic"
+      ? createAnthropic({ ...options, headers: { "anthropic-dangerous-direct-browser-access": "true" } })(modelId)
+      : protocol === "google"
+        ? createGoogleGenerativeAI(options)(modelId)
+        : protocol === "openai-responses" || (editingImage && this.connection.provider === "openai") ? createOpenAI(options).responses(modelId) : createOpenAI(options).chat(modelId);
+    const effort = request.reasoningEffort;
+    if (effort && !apiEfforts(this.connection.provider, modelId).includes(effort)) throw new Error("此模型未配置所选推理强度，请改为默认");
+    callbacks.onStatus(`正在连接 ${this.label}…`);
+    const result = streamText({
+      model, system: request.systemPrompt, messages: buildApiMessages(request),
+      abortSignal: signal, maxRetries: 0,
+      ...(editingImage && this.connection.provider === "openai" ? { tools: { image_generation: openai.tools.imageGeneration({ action: "edit", model: "gpt-image-2.5-sunburst" }) }, toolChoice: { type: "tool" as const, toolName: "image_generation" } } : {}),
+      ...(request.modelOptions?.temperature !== undefined ? { temperature: request.modelOptions.temperature } : {}),
+      ...(request.modelOptions?.maxOutputTokens !== undefined ? { maxOutputTokens: request.modelOptions.maxOutputTokens } : {}),
+      ...((effort || (editingImage && protocol === "google")) ? { providerOptions: this.connection.provider === "google"
+        ? { google: { ...(effort ? { thinkingConfig: { thinkingLevel: effort } } : {}), ...(editingImage ? { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } : {}) } }
+        : { openai: { reasoningEffort: effort } } } : {}),
+    });
+    for await (const part of result.fullStream) {
+      if (part.type === "text-delta") callbacks.onText(part.text);
+      if (part.type === "file") await callbacks.onAttachment?.({
+        id: crypto.randomUUID(),
+        name: `generated-${Date.now()}.${part.file.mediaType.split("/")[1] || "bin"}`,
+        mediaType: part.file.mediaType,
+        size: part.file.uint8Array.byteLength,
+        base64: part.file.base64,
+      });
+      if (part.type === "tool-result" && part.toolName === "image_generation") {
+        const output = part.output as { result?: string };
+        if (output.result) await callbacks.onAttachment?.({ id: crypto.randomUUID(), name: `edited-${Date.now()}.png`, mediaType: "image/png", size: Math.floor(output.result.length * 0.75), base64: output.result });
+      }
+      if (part.type === "error") throw part.error;
     }
-    await this.sendOpenAiCompatible(request, callbacks, signal);
+    signal.throwIfAborted();
   }
+}
 
-  private async sendOpenAiCompatible(
-    request: ChatRequest,
-    callbacks: ChatCallbacks,
-    signal: AbortSignal
-  ): Promise<void> {
-    const response = await fetch(`${trimSlash(this.connection.baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.connection.model,
-        stream: true,
-        messages: [
-          { role: "system", content: request.systemPrompt },
-          ...historyMessages(request.history),
-          { role: "user", content: buildUserPrompt(request) },
-        ],
-      }),
-      signal,
-    });
-
-    await consumeSse(
-      response,
-      (event) => {
-        const choices = event.choices;
-        if (!Array.isArray(choices)) return "";
-        const first = choices[0];
-        if (!first || typeof first !== "object") return "";
-        const delta = (first as Record<string, unknown>).delta;
-        return delta && typeof delta === "object" && typeof (delta as Record<string, unknown>).content === "string"
-          ? ((delta as Record<string, unknown>).content as string)
-          : "";
-      },
-      callbacks.onText,
-      signal
-    );
-  }
-
-  private async sendAnthropic(
-    request: ChatRequest,
-    callbacks: ChatCallbacks,
-    signal: AbortSignal
-  ): Promise<void> {
-    const response = await fetch(`${trimSlash(this.connection.baseUrl)}/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: this.connection.model,
-        max_tokens: 4096,
-        stream: true,
-        system: request.systemPrompt,
-        messages: [
-          ...historyMessages(request.history),
-          { role: "user", content: buildUserPrompt(request) },
-        ],
-      }),
-      signal,
-    });
-
-    await consumeSse(
-      response,
-      (event) => {
-        if (event.type !== "content_block_delta") return "";
-        const delta = event.delta;
-        return delta && typeof delta === "object" && typeof (delta as Record<string, unknown>).text === "string"
-          ? ((delta as Record<string, unknown>).text as string)
-          : "";
-      },
-      callbacks.onText,
-      signal
-    );
-  }
-
-  private async sendGoogle(
-    request: ChatRequest,
-    callbacks: ChatCallbacks,
-    signal: AbortSignal
-  ): Promise<void> {
-    const model = encodeURIComponent(this.connection.model);
-    const url = `${trimSlash(this.connection.baseUrl)}/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: request.systemPrompt }] },
-        contents: [
-          ...historyMessages(request.history).map((message) => ({
-            role: message.role === "assistant" ? "model" : "user",
-            parts: [{ text: message.content }],
-          })),
-          { role: "user", parts: [{ text: buildUserPrompt(request) }] },
-        ],
-      }),
-      signal,
-    });
-
-    await consumeSse(
-      response,
-      (event) => {
-        const candidates = event.candidates;
-        if (!Array.isArray(candidates)) return "";
-        const first = candidates[0];
-        if (!first || typeof first !== "object") return "";
-        const content = (first as Record<string, unknown>).content;
-        if (!content || typeof content !== "object") return "";
-        const parts = (content as Record<string, unknown>).parts;
-        if (!Array.isArray(parts)) return "";
-        return parts
-          .map((part) =>
-            part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string"
-              ? ((part as Record<string, unknown>).text as string)
-              : ""
-          )
-          .join("");
-      },
-      callbacks.onText,
-      signal
-    );
-  }
+// Conservative provider-specific controls; never send a universal effort knob to all APIs.
+export function apiEfforts(provider: ApiConnection["provider"], model: string): string[] {
+  if (provider === "openai" && /^(gpt-5|o[134])/.test(model)) return ["low", "medium", "high"];
+  if (provider === "google" && /^gemini-3/.test(model)) return ["low", "high"];
+  return [];
 }

@@ -1,0 +1,14 @@
+{
+  "id": "A",
+  "label": "A: Codex 静流",
+  "name": "Codex 静流",
+  "notes": "",
+  "dials": {
+    "variance": 5,
+    "motion": 3,
+    "density": 6
+  },
+  "adjustments": "",
+  "source": "click",
+  "receivedAt": "2026-09-20T08:12:37.603Z"
+}

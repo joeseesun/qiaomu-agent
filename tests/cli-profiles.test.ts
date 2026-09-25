@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getCliProfile } from "../src/services/cli-profiles";
 import type { ChatRequest } from "../src/types";
 
-function request(permissionMode: "plan" | "edit"): ChatRequest {
+function request(permissionMode: "plan" | "edit" | "full"): ChatRequest {
   return {
     prompt: "Hello",
     systemPrompt: "System",
@@ -28,3 +28,6 @@ describe("CLI profiles", () => {
   });
 });
 
+it("maps Codex full access to its explicit full-filesystem sandbox", () => {
+  expect(getCliProfile("codex")?.buildArgs(request("full"))).toEqual(expect.arrayContaining(["--sandbox", "danger-full-access"]));
+});

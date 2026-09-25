@@ -74,9 +74,16 @@ export function parseSkillFrontmatter(markdown: string): { name: string; descrip
   const header = markdown.slice(3, closing).trim();
   const body = markdown.slice(closing + 4).trim();
   const values = new Map<string, string>();
-  for (const line of header.split(/\r?\n/)) {
-    const match = line.match(/^([a-zA-Z0-9_-]+):\s*["']?(.*?)["']?\s*$/);
-    if (match?.[1] && match[2] !== undefined) values.set(match[1], match[2]);
+  const lines = header.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index]?.match(/^([a-zA-Z0-9_-]+):\s*(.*?)\s*$/);
+    if (!match?.[1] || match[2] === undefined) continue;
+    const [, key, raw] = match;
+    if (/^[>|][-+]?\s*$/.test(raw)) {
+      const chunks: string[] = [];
+      while (index + 1 < lines.length && /^\s+\S/.test(lines[index + 1] ?? "")) chunks.push(lines[++index]!.trim());
+      values.set(key, raw.startsWith(">") ? chunks.join(" ") : chunks.join("\n"));
+    } else values.set(key, raw.replace(/^(["'])(.*)\1$/, "$2"));
   }
   const name = values.get("name")?.trim();
   const description = values.get("description")?.trim();

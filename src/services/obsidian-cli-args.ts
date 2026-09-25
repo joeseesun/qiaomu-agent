@@ -1,4 +1,6 @@
 export type ObsidianCliOperation =
+  | { type: "daily-path" }
+  | { type: "daily-open" }
   | { type: "read"; path: string }
   | { type: "search"; query: string; folder?: string; limit?: number }
   | { type: "append"; path: string; content: string; inline?: boolean }
@@ -16,6 +18,8 @@ function safeVaultPath(value: string): string {
 
 export function buildObsidianCliArgs(operation: ObsidianCliOperation): string[] {
   switch (operation.type) {
+    case "daily-path": return ["daily:path"];
+    case "daily-open": return ["daily"];
     case "read":
       return ["read", `path=${safeVaultPath(operation.path)}`];
     case "search": {
@@ -33,11 +37,10 @@ export function buildObsidianCliArgs(operation: ObsidianCliOperation): string[] 
     case "property-set":
       return [
         "property:set",
-        `path=${safeVaultPath(operation.path)}`,
         `name=${operation.name}`,
         `value=${operation.value}`,
         ...(operation.propertyType ? [`type=${operation.propertyType}`] : []),
+        `path=${safeVaultPath(operation.path)}`,
       ];
   }
 }
-

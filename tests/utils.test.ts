@@ -15,6 +15,11 @@ describe("parseSkillFrontmatter", () => {
   it("rejects incomplete frontmatter", () => {
     expect(parseSkillFrontmatter("---\nname: missing-description\n---\nBody")).toBeNull();
   });
+
+  it("reads folded multiline skill descriptions", () => {
+    expect(parseSkillFrontmatter("---\nname: design\ndescription: >\n  Design interfaces.\n  Review layouts.\nmetadata:\n  author: Joe\n---\nUse this skill.")?.description)
+      .toBe("Design interfaces. Review layouts.");
+  });
 });
 
 describe("stream helpers", () => {
@@ -31,4 +36,3 @@ describe("stream helpers", () => {
     expect(truncateMiddle("abcdefghijkl", 8)).toBe("abc…jkl");
   });
 });
-

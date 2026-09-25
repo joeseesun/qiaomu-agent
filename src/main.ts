@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { Menu, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo, type MarkdownView } from "obsidian";
 import { ChatView, VIEW_TYPE_QIAOMU_AGENT } from "./chat-view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./defaults";
 import { BackendService } from "./services/backend-service";
@@ -7,20 +7,42 @@ import { SkillService } from "./services/skill-service";
 import { ObsidianCliService } from "./services/obsidian-cli";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
+import { WechatPublishModal } from "./wechat/publish-modal";
+import { InlineEditModal } from "./ui/inline-edit-modal";
+import { CapabilitiesModal } from "./ui/capabilities-modal";
+import { ReadingContextService } from "./integrations/reading-context";
+import { createAgentApi } from "./integrations/agent-api";
+import type { AgentApi } from "./integrations/qiaomu-context";
 
 export default class QiaomuAgentPlugin extends Plugin {
   override settings: QiaomuSettings = { ...DEFAULT_SETTINGS, api: { ...DEFAULT_SETTINGS.api } };
   backendService!: BackendService;
   skillService!: SkillService;
   obsidianCliService!: ObsidianCliService;
+  /** What the user is reading in other plugins and views. */
+  reading!: ReadingContextService;
+  /** Found by other plugins at `app.plugins.plugins["qiaomu-agent"].api` (Qiaomu Context Protocol). */
+  api!: AgentApi;
+  private lastMarkdownFile: TFile | null = null;
 
   override async onload(): Promise<void> {
     this.settings = normalizeSettings(await this.loadData());
+    // A lone default connection is only kept as a provider when a key was actually saved for it.
+    const api = this.settings.api;
+    if (!this.settings.providers.some((p) => p.secretId === api.secretId) && this.app.secretStorage.getSecret(api.secretId)) {
+      this.settings.providers.push({ ...api, id: this.settings.providers.some((p) => p.id === api.provider) ? `${api.provider}-legacy` : api.provider });
+    }
     this.backendService = new BackendService(this.app, () => this.settings);
     this.skillService = new SkillService(this.app);
     this.obsidianCliService = new ObsidianCliService();
+    this.rememberActiveMarkdownFile();
 
     this.registerView(VIEW_TYPE_QIAOMU_AGENT, (leaf) => new ChatView(leaf, this));
+    this.reading = this.addChild(new ReadingContextService(this.app, VIEW_TYPE_QIAOMU_AGENT, () => this.eachView((view) => view.refreshReading())));
+    this.api = createAgentApi({
+      pin: (snapshot) => this.reading.pin(snapshot),
+      open: (prompt) => this.activateView(prompt, true),
+    });
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
 
     this.addRibbonIcon("sparkles", "打开乔木 Agent", () => void this.activateView());
@@ -35,6 +57,11 @@ export default class QiaomuAgentPlugin extends Plugin {
       callback: () => this.eachView((view) => view.newConversation()),
     });
     this.addCommand({
+      id: "manage-capabilities",
+      name: "管理技能与工具连接",
+      callback: () => new CapabilitiesModal(this.app, this).open(),
+    });
+    this.addCommand({
       id: "ask-about-selection",
       name: "询问选中的文本",
       editorCallback: (editor) => {
@@ -42,13 +69,72 @@ export default class QiaomuAgentPlugin extends Plugin {
         void this.activateView(selection ? `请分析这段内容：\n\n${selection}` : undefined);
       },
     });
+    this.addCommand({
+      id: "rewrite-selection-inline",
+      name: "改写选中内容（预览后替换）",
+      editorCheckCallback: (checking, editor, ctx) => {
+        if (!editor.getSelection().trim() || !ctx.file) return false;
+        if (!checking) this.openInlineEdit(editor, ctx);
+        return true;
+      },
+    });
+    this.registerEvent(this.app.workspace.on("editor-menu", (menu: Menu, editor, ctx) => {
+      if (!editor.getSelection().trim() || !ctx.file) return;
+      menu.addItem((item) => item.setTitle("用乔木 Agent 改写选中内容…").setIcon("pencil-line")
+        .setSection("action").onClick(() => this.openInlineEdit(editor, ctx)));
+    }));
+
+    this.addCommand({
+      id: "publish-wechat-draft",
+      name: "发布当前笔记到公众号草稿箱",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (file?.extension !== "md") return false;
+        if (!checking) this.openWechatPublish(file);
+        return true;
+      },
+    });
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
+        if (!(file instanceof TFile) || file.extension !== "md") return;
+        menu.addItem((item) => item.setTitle("发布到公众号草稿箱").setIcon("send").setSection("action").onClick(() => this.openWechatPublish(file)));
+      })
+    );
 
     this.app.workspace.onLayoutReady(() => {
+      this.rememberActiveMarkdownFile();
+      this.eachView((view) => void view.ensureReady());
       void this.refreshIntegrations();
     });
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => this.eachView((view) => view.refreshControls()))
+      this.app.workspace.on("layout-change", () => {
+        this.eachView((view) => void view.ensureReady());
+      })
     );
+    // Focus back in a note: its own selection is visible again, so drop our mirror highlight.
+    this.registerDomEvent(document, "focusin", (event) => {
+      if ((event.target as HTMLElement | null)?.closest?.(".cm-editor")) (globalThis as unknown as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights?.delete("qiaomu-selection");
+    });
+    // CodeMirror changes the editor selection before the chat composer receives focus.
+    this.registerDomEvent(document, "selectionchange", () => {
+      this.eachView((view) => view.refreshSelection());
+    });
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.rememberActiveMarkdownFile();
+        this.eachView((view) => view.refreshControls());
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (file?.extension === "md") this.lastMarkdownFile = file;
+        this.eachView((view) => view.refreshControls());
+      })
+    );
+  }
+
+  override onunload(): void {
+    void this.backendService?.shutdown();
   }
 
   async saveSettings(): Promise<void> {
@@ -67,10 +153,11 @@ export default class QiaomuAgentPlugin extends Plugin {
     if (skills.length > 0) console.debug(`Qiaomu Agent: loaded ${skills.length} skills`);
   }
 
-  async activateView(prefill?: string): Promise<void> {
+  async activateView(prefill?: string, focus = false): Promise<void> {
+    this.rememberActiveMarkdownFile();
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_QIAOMU_AGENT)[0];
     if (!leaf) {
-      leaf = this.app.workspace.getRightLeaf(false) ?? undefined;
+      leaf = Platform.isDesktopApp ? this.app.workspace.getRightLeaf(false) ?? undefined : this.app.workspace.getLeaf("tab");
       await leaf?.setViewState({ type: VIEW_TYPE_QIAOMU_AGENT, active: true });
     }
     if (!leaf) {
@@ -79,12 +166,46 @@ export default class QiaomuAgentPlugin extends Plugin {
     }
     await this.app.workspace.revealLeaf(leaf);
     const view = leaf.view;
-    if (view instanceof ChatView && prefill) view.setComposer(prefill);
+    if (view instanceof ChatView) {
+      await view.ensureReady();
+      if (prefill) view.setComposer(prefill);
+      else if (focus) view.focusComposer();
+    }
+  }
+
+  openWechatPublish(file: TFile): void {
+    new WechatPublishModal(this.app, file, this.settings.wechat).open();
+  }
+
+  private openInlineEdit(editor: Editor, ctx: MarkdownView | MarkdownFileInfo): void {
+    const original = editor.getSelection();
+    if (!original.trim() || !ctx.file) { new Notice("请先在笔记中选中要改写的文字"); return; }
+    new InlineEditModal(this.app, this, {
+      editor, path: ctx.file.path, from: editor.getCursor("from"), to: editor.getCursor("to"),
+      original, document: editor.getValue(),
+    }).open();
   }
 
   getActiveMarkdownFile(): TFile | null {
     const file = this.app.workspace.getActiveFile();
-    return file?.extension === "md" ? file : null;
+    if (file?.extension === "md") this.lastMarkdownFile = file;
+    return this.lastMarkdownFile;
+  }
+
+  private rememberActiveMarkdownFile(): void {
+    const file = this.app.workspace.getActiveFile();
+    if (file?.extension === "md") {
+      this.lastMarkdownFile = file;
+      return;
+    }
+    if (this.lastMarkdownFile) return;
+    for (const path of this.app.workspace.getLastOpenFiles()) {
+      const recent = this.app.vault.getAbstractFileByPath(path);
+      if (recent instanceof TFile && recent.extension === "md") {
+        this.lastMarkdownFile = recent;
+        return;
+      }
+    }
   }
 
   private eachView(callback: (view: ChatView) => void): void {

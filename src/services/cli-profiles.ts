@@ -1,14 +1,19 @@
+import { activeNoteBlock, selectionBlock } from "./agent-prompt";
+import { readingBlock } from "../integrations/reading-prompt";
 import type { ChatRequest, CliProfile } from "../types";
+import { attachmentContext } from "./attachments";
 
-function promptWithContext(request: ChatRequest): string {
+export function promptWithContext(request: ChatRequest): string {
   const sections: string[] = [];
   if (request.obsidianCli?.state === "ready") {
     const executable = JSON.stringify(request.obsidianCli.path);
     sections.push(
       `<obsidian_cli executable=${executable}>\n` +
         `The official Obsidian CLI is connected to the running app. Prefer it for vault-aware reads, search, properties, links, tasks, and link-safe moves. ` +
-        (request.permissionMode === "edit"
-          ? "Writes are allowed for this turn, but inspect the target first and do not use permanent deletion."
+        (request.permissionMode !== "plan"
+          ? request.permissionMode === "full"
+            ? "Full filesystem access is explicitly enabled for this turn. Inspect targets first and do not use permanent deletion."
+            : "Writes inside the current workspace are allowed for this turn, but inspect the target first and do not use permanent deletion."
           : "This turn is read-only: use only read, search, listing, and inspection commands; do not modify files or properties.") +
         `\nRun the executable from the vault working directory. CLI parameters use key=value syntax.\n</obsidian_cli>`
     );
@@ -18,12 +23,15 @@ function promptWithContext(request: ChatRequest): string {
       `<active_skill name="${request.skill.name}" path="${request.skill.path}">\n${request.skill.body}\n</active_skill>`
     );
   }
-  if (request.activeFilePath && request.activeFileContent) {
-    sections.push(
-      `<active_note path="${request.activeFilePath}">\n${request.activeFileContent}\n</active_note>`
-    );
-  }
+  const note = activeNoteBlock(request);
+  if (note) sections.push(note);
+  const selection = selectionBlock(request);
+  if (selection) sections.push(selection);
+  const reading = readingBlock(request.reading);
+  if (reading) sections.push(reading);
   sections.push(request.prompt);
+  const attached = attachmentContext(request);
+  if (attached) sections.push(attached);
   return sections.join("\n\n");
 }
 
@@ -43,7 +51,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "--json",
       "--skip-git-repo-check",
       "--sandbox",
-      request.permissionMode === "edit" ? "workspace-write" : "read-only",
+      request.permissionMode === "full" ? "danger-full-access" : request.permissionMode === "edit" ? "workspace-write" : "read-only",
       ...modelArgs(request, "--model"),
       `${request.systemPrompt}\n\n${promptWithContext(request)}`,
     ],
@@ -61,7 +69,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "--output-format",
       "stream-json",
       "--permission-mode",
-      request.permissionMode === "edit" ? "acceptEdits" : "plan",
+      request.permissionMode !== "plan" ? "acceptEdits" : "plan",
       "--append-system-prompt",
       request.systemPrompt,
       ...modelArgs(request),
@@ -99,7 +107,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "--output-format",
       "stream-json",
       "--approval-mode",
-      request.permissionMode === "edit" ? "auto-edit" : "plan",
+      request.permissionMode !== "plan" ? "auto-edit" : "plan",
       "--system-prompt",
       request.systemPrompt,
       ...modelArgs(request),
@@ -120,7 +128,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "streaming-messages-json",
       "--include-partial-messages",
       "--permission-mode",
-      request.permissionMode === "edit" ? "acceptEdits" : "plan",
+      request.permissionMode !== "plan" ? "acceptEdits" : "plan",
       "--system-prompt",
       request.systemPrompt,
       ...modelArgs(request),
@@ -136,7 +144,7 @@ export const CLI_PROFILES: CliProfile[] = [
       "run",
       "--format",
       "json",
-      ...(request.permissionMode === "edit" ? ["--auto"] : []),
+      ...(request.permissionMode !== "plan" ? ["--auto"] : []),
       ...modelArgs(request),
       `${request.systemPrompt}\n\n${promptWithContext(request)}`,
     ],
@@ -173,10 +181,36 @@ export const CLI_PROFILES: CliProfile[] = [
       "stream-json",
       "--skip-trust",
       "--approval-mode",
-      request.permissionMode === "edit" ? "auto_edit" : "plan",
+      request.permissionMode !== "plan" ? "auto_edit" : "plan",
       ...modelArgs(request),
     ],
   },
+  {
+    id: "antigravity",
+    label: "Antigravity CLI",
+    commands: ["agy"],
+    versionArgs: ["--version"],
+    supportsMcpFile: false,
+    buildArgs: (request) => [
+      "-p", `${request.systemPrompt}\n\n${promptWithContext(request)}`,
+      "--output-format", "stream-json",
+      ...(request.model ? ["--model", request.model] : []),
+    ],
+  },
+  ...([[
+    "cursor", "Cursor CLI", ["cursor-agent", "agent"],
+  ], [
+    "cline", "Cline CLI", ["cline"],
+  ], [
+    "auggie", "Auggie CLI", ["auggie"],
+  ], [
+    "hermes", "Hermes Agent", ["hermes"],
+  ], [
+    "openclaw", "OpenClaw", ["openclaw"],
+  ]] as const).map(([id, label, commands]): CliProfile => ({
+    id, label, commands: [...commands], versionArgs: ["--version"], supportsMcpFile: false,
+    buildArgs: () => [], // These agents are launched through ACP, not the generic CLI backend.
+  })),
 ];
 
 export function getCliProfile(id: string): CliProfile | undefined {

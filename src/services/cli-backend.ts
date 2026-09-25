@@ -1,10 +1,11 @@
-import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, CliProfile } from "../types";
+import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, CliProfile, ModelChoice } from "../types";
 import { stripAnsi } from "../utils";
-import { getRuntimeRequire } from "./cli-discovery";
+import { getRuntimeRequire } from "./runtime-require";
 import { getCliProfile } from "./cli-profiles";
 import { parseCliOutputLine } from "./cli-output";
 
 interface ChildProcessModule {
+  execFile: (file: string, args: string[], options: { timeout: number; windowsHide: boolean; maxBuffer: number }, callback: (error: Error | null, stdout: string, stderr: string) => void) => void;
   spawn: (
     command: string,
     args: string[],
@@ -46,6 +47,23 @@ export class CliBackend implements ChatBackend {
     this.label = profile.label;
   }
 
+  async listModels(): Promise<ModelChoice[]> {
+    if (!(["antigravity", "pi"] as string[]).includes(this.detection.id) || !this.detection.path) return [];
+    const require = getRuntimeRequire();
+    if (!require) throw new Error("本机模型列表只支持桌面版 Obsidian");
+    const childProcess = require("child_process") as ChildProcessModule;
+    const isPi = this.detection.id === "pi";
+    return await new Promise((resolve, reject) => childProcess.execFile(this.detection.path!, isPi ? ["--list-models"] : ["models"],
+      { timeout: 15_000, windowsHide: true, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
+        if (error) { reject(new Error(stripAnsi(stderr || stdout).trim() || "请先在 Antigravity CLI 中登录")); return; }
+        const models = isPi
+          ? stdout.split(/\r?\n/).slice(1).map((line) => line.trim().split(/\s+/)).filter((parts) => parts.length >= 2 && parts[0] && parts[1]).map(([provider, model]) => ({ id: `${provider}/${model}`, name: `${provider}/${model}`, efforts: [] }))
+          : stdout.split(/\r?\n/).map((line) => line.trim().match(/^([^\s]+)\s{2,}(.+)$/)).filter((m): m is RegExpMatchArray => Boolean(m))
+            .map((match) => ({ id: match[1]!, name: match[2]!, efforts: [] }));
+        resolve(models);
+      }));
+  }
+
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
     const require = getRuntimeRequire();
     if (!require || !this.detection.path) throw new Error("本地 CLI 只支持桌面版 Obsidian");
@@ -81,7 +99,7 @@ export class CliBackend implements ChatBackend {
           for (const line of lines) {
             const event = parseCliOutputLine(line);
             if (event.error) reportedError = event.error;
-            if (event.text && event.text !== lastText) {
+            if (event.text && !(this.detection.id === "antigravity" && emitted && /"event"\s*:\s*"result"/.test(line)) && event.text !== lastText) {
               emitted = true;
               lastText = event.text;
               callbacks.onText(event.text);
@@ -102,7 +120,7 @@ export class CliBackend implements ChatBackend {
           if (stdoutBuffer.trim()) {
             const event = parseCliOutputLine(stdoutBuffer);
             if (event.error) reportedError = event.error;
-            if (event.text && event.text !== lastText) {
+            if (event.text && !(this.detection.id === "antigravity" && emitted && /"event"\s*:\s*"result"/.test(stdoutBuffer)) && event.text !== lastText) {
               emitted = true;
               callbacks.onText(event.text);
             }
