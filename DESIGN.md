@@ -62,6 +62,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - Quiet input: a stable neutral 1px border, 20px radius, no hover background/ring or focus-within border jump. Keyboard-visible textarea focus has a restrained outline.
 - The left plus opens attachment/note/Skill actions; its adjacent shield opens access scope; the right model chip opens a compact non-modal popover containing model selection and supported discrete effort levels. Escape restores focus; outside click and Tab departure dismiss. No hover-only controls.
 - User messages have a restrained neutral 18px bubble capped at 90% width; assistant Markdown remains flat with 28px inter-message spacing. Preserve Chinese system fonts and host theme variables.
+- Reply typography: 15px body at 1.75 line height (Chinese needs more leading than Latin, per W3C clreq), paragraph gaps near half a line, headings capped at 1.3em, 1.4em list indent, CJK–Latin autospace, no fake italic for Chinese. Links keep neutral ink with a faint 1px underline; internal links show the note name, open in place (Cmd/Ctrl or middle click opens a new tab), and unresolved ones use a dashed underline. Quotes use a quiet surface instead of a side rule.
 
 ### Reply actions and persistence
 
