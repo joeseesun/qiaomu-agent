@@ -9,6 +9,7 @@ import type { ComponentProps, ReactNode } from "react";
 vi.mock("obsidian", () => ({
   Component: class {}, Notice: class {}, Modal: class {}, MarkdownView: class {}, Menu: class {}, Setting: class {}, TFile: class {}, requestUrl: vi.fn(),
   Platform: { isDesktopApp: true },
+  Keymap: { isModEvent: () => false },
   MarkdownRenderer: { render: async (_: unknown, text: string, target: HTMLElement) => { target.textContent = text; } },
 }));
 vi.mock("../src/components/ai-elements/conversation", () => ({

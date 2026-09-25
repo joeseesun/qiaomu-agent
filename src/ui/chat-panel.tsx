@@ -1,5 +1,5 @@
 import { useChat, type Chat } from "@ai-sdk/react";
-import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
+import { Component, Keymap, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
 import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
@@ -16,6 +16,7 @@ import { Conversation, ConversationContent, ConversationScrollButton } from "../
 import { Message, MessageContent, MessageAction, MessageActions } from "../components/ai-elements/message";
 import { PromptInput, PromptInputFooter, PromptInputHeader, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "../components/ai-elements/prompt-input";
 import { splitMermaid } from "../services/mermaid-content";
+import { internalLinkTarget, tidyInternalLinks } from "../services/markdown-links";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { ComposerPopover, effortLabel } from "./composer-popover";
 import { ContextRing } from "./context-ring";
@@ -64,10 +65,27 @@ function HostMarkdown({ text, sourcePath, app, parent }: { text: string; sourceP
     const staging = host.ownerDocument.createElement("div");
     staging.className = "qiaomu-agent__markdown";
     void MarkdownRenderer.render(app, text, staging, sourcePath, child).then(() => {
+      tidyInternalLinks(staging);
       if (active) host.replaceChildren(staging);
     }).catch(() => { if (active) host.textContent = text; });
     return () => { active = false; parent.removeChild(child); };
   }, [text, sourcePath, app, parent]);
+  // Rendered outside a note view, internal links get no host click handling; open them as a note would.
+  useEffect(() => {
+    const host = target.current;
+    if (!host) return;
+    const open = (event: MouseEvent) => {
+      if (event.type === "auxclick" && event.button !== 1) return;
+      const anchor = event.target instanceof Element ? event.target.closest("a.internal-link") : null;
+      const link = anchor && internalLinkTarget(anchor);
+      if (!link) return;
+      event.preventDefault();
+      void app.workspace.openLinkText(link, sourcePath, event.button === 1 ? "tab" : Keymap.isModEvent(event));
+    };
+    host.addEventListener("click", open);
+    host.addEventListener("auxclick", open);
+    return () => { host.removeEventListener("click", open); host.removeEventListener("auxclick", open); };
+  }, [app, sourcePath]);
   return <div className="qa-markdown-host" ref={target} />;
 }
 

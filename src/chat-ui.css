@@ -18,7 +18,7 @@
 .qiaomu-agent--react .qa-empty p { font-size: 14px; line-height: 1.7; color: var(--text-muted); }
 .qiaomu-agent--react .qa-suggestions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 20px; }
 .qiaomu-agent--react .qa-suggestions button { height: auto; white-space: normal; padding: 8px 12px; background: transparent; border: 1px solid var(--background-modifier-border); border-radius: 10px; text-align: left; font-size: 13px; }
-.qiaomu-agent--react .qa-message { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-family: var(--qa-chat-font); font-size: var(--qa-chat-font-size, 15px); line-height: 1.64; letter-spacing: .003em; }
+.qiaomu-agent--react .qa-message { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-family: var(--qa-chat-font); font-size: var(--qa-chat-font-size, 15px); line-height: 1.75; letter-spacing: .01em; }
 .qiaomu-agent--react .qa-message.is-user { align-self: flex-end; max-width: 90%; }
 .qiaomu-agent--react .qa-message.is-user.is-editing { width: 100%; max-width: 100%; }
 .qiaomu-agent--react .is-user .qa-message-content { padding: 12px 16px; background: var(--background-secondary); border-radius: 18px; }
@@ -104,6 +104,38 @@
 .qiaomu-agent--react .qa-markdown-host pre, .qiaomu-agent--react .qa-markdown-host table { max-width: 100%; overflow: auto; }
 .qiaomu-agent--react .qa-markdown-host p:first-child { margin-top: 0; }
 .qiaomu-agent--react .qa-markdown-host p:last-child { margin-bottom: 0; }
+/* Reply typography. Chinese has no ascenders or descenders, so it needs more leading than Latin (W3C clreq; ~1.75 for body text).
+   Paragraph gaps sit near half a line, headings stay close to body size in a narrow sidebar, and links keep the neutral ink. */
+.qiaomu-agent--react .qa-markdown-host { text-autospace: normal; hanging-punctuation: allow-end; font-kerning: normal; }
+.qiaomu-agent--react .qa-markdown-host p { margin-block: .8em; }
+.qiaomu-agent--react .qa-markdown-host :is(h1, h2, h3, h4, h5, h6) { margin: 1.5em 0 .55em; color: var(--text-normal); font-family: inherit; font-weight: 600; line-height: 1.45; letter-spacing: 0; }
+.qiaomu-agent--react .qa-markdown-host h1 { font-size: 1.3em; }
+.qiaomu-agent--react .qa-markdown-host h2 { font-size: 1.18em; }
+.qiaomu-agent--react .qa-markdown-host h3 { font-size: 1.06em; }
+.qiaomu-agent--react .qa-markdown-host :is(h4, h5, h6) { font-size: 1em; }
+.qiaomu-agent--react .qa-markdown-host :is(ul, ol) { margin-block: .6em; padding-inline-start: 1.4em; }
+.qiaomu-agent--react .qa-markdown-host li { margin-block: .3em; }
+.qiaomu-agent--react .qa-markdown-host li :is(ul, ol) { margin-block: .25em; }
+.qiaomu-agent--react .qa-markdown-host li::marker { color: var(--text-muted); }
+.qiaomu-agent--react .qa-markdown-host strong { font-weight: 600; }
+/* Chinese fonts ship no italic; a slanted fake reads as a rendering bug, so only real italic faces slant. */
+.qiaomu-agent--react .qa-markdown-host em { font-synthesis-style: none; }
+.qiaomu-agent--react .qa-markdown-host a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--text-faint); text-decoration-thickness: 1px; text-underline-offset: .25em; cursor: pointer; }
+.qiaomu-agent--react .qa-markdown-host a:hover { text-decoration-color: var(--text-normal); }
+.qiaomu-agent--react .qa-markdown-host a.is-unresolved { text-decoration-style: dashed; color: var(--text-muted); }
+.qiaomu-agent--react .qa-markdown-host a:focus-visible { outline: 2px solid var(--text-normal); outline-offset: 2px; border-radius: 3px; }
+.qiaomu-agent--react .qa-markdown-host :not(pre) > code { padding: .12em .36em; border-radius: 5px; background: var(--background-secondary); color: var(--text-normal); }
+.qiaomu-agent--react .qa-markdown-host pre { margin-block: .8em; padding: .8em 1em; border-radius: 10px; background: var(--background-secondary); line-height: 1.55; }
+/* No side rule on quotes (house style): a quiet surface marks them instead. */
+.qiaomu-agent--react .qa-markdown-host blockquote { margin: .8em 0; padding: .55em .9em; border: 0; border-radius: 8px; background: var(--background-secondary); color: var(--text-muted); }
+.qiaomu-agent--react .qa-markdown-host blockquote > :is(p, ul, ol) { margin-block: .3em; }
+.qiaomu-agent--react .qa-markdown-host hr { margin: 1.4em 0; border: 0; border-top: 1px solid var(--background-modifier-border); }
+.qiaomu-agent--react .qa-markdown-host table { margin-block: .8em; font-size: .93em; line-height: 1.55; }
+.qiaomu-agent--react .qa-markdown-host :is(th, td) { padding: .45em .7em; border: 1px solid var(--background-modifier-border); vertical-align: top; }
+.qiaomu-agent--react .qa-markdown-host th { background: var(--background-secondary); font-weight: 600; text-align: start; }
+.qiaomu-agent--react .qa-markdown-host img { border-radius: 8px; }
+.qiaomu-agent--react .qa-markdown-host .qiaomu-agent__markdown > :first-child { margin-top: 0; }
+.qiaomu-agent--react .qa-markdown-host .qiaomu-agent__markdown > :last-child { margin-bottom: 0; }
 @media (prefers-reduced-motion: reduce) { .qiaomu-agent--react * { scroll-behavior: auto; animation: none; transition: none; } }
 
 /* Touch controls must not depend on hover or inherit desktop-sized hit targets. */
