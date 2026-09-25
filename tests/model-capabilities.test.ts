@@ -79,3 +79,14 @@ describe("OpenRouter thinking", () => {
     expect(withBodyExtras("not json", { a: 1 })).toBe("not json");
   });
 });
+
+describe("API base URL", () => {
+  it("adds the version segment Anthropic-compatible services are often entered without", async () => {
+    const { apiBaseUrl } = await import("../src/services/api-providers");
+    const anthropic = { provider: "custom", protocol: "anthropic" as const, model: "m", secretId: "s" };
+    expect(apiBaseUrl({ ...anthropic, baseUrl: "https://relay.example.com/" })).toBe("https://relay.example.com/v1");
+    expect(apiBaseUrl({ ...anthropic, baseUrl: "https://api.anthropic.com/v1" })).toBe("https://api.anthropic.com/v1");
+    expect(apiBaseUrl({ ...anthropic, baseUrl: "https://relay.example.com/claude/v1" })).toBe("https://relay.example.com/claude/v1");
+    expect(apiBaseUrl({ ...anthropic, protocol: "openai-chat", baseUrl: "https://relay.example.com" })).toBe("https://relay.example.com");
+  });
+});

@@ -1,12 +1,12 @@
 import { activeNoteBlock, selectionBlock } from "./agent-prompt";
 import { readingBlock } from "../integrations/reading-prompt";
-import { streamText, type ModelMessage } from "ai";
+import { NoOutputGeneratedError, streamText, type ModelMessage } from "ai";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { ApiConnection, ChatBackend, ChatCallbacks, ChatRequest, ModelChoice } from "../types";
 import { attachmentContext } from "./attachments";
-import { apiProtocol, permitsEmptyKey, validateApiUrl } from "./api-providers";
+import { apiBaseUrl, apiProtocol, permitsEmptyKey } from "./api-providers";
 import { apiContextUsage } from "./context-usage";
 import { reportedCapabilities, resolveModel } from "./model-capabilities";
 
@@ -43,7 +43,7 @@ export class ApiBackend implements ChatBackend {
   }
   async listModels(): Promise<ModelChoice[]> {
     if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("请先配置 API Key");
-    const base = validateApiUrl(this.connection.baseUrl);
+    const base = apiBaseUrl(this.connection);
     const provider = this.connection.provider;
     const protocol = apiProtocol(this.connection);
     const headers: Record<string, string> = protocol === "anthropic"
@@ -63,7 +63,7 @@ export class ApiBackend implements ChatBackend {
     const protocol = apiProtocol(this.connection);
     const effort = request.reasoningEffort as "low" | "medium" | "high" | undefined;
     const bodyExtras = openRouterReasoning(this.connection.provider, protocol, effort);
-    const options = { apiKey: this.apiKey || "local", baseURL: validateApiUrl(this.connection.baseUrl), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, body: withBodyExtras(init?.body, bodyExtras), redirect: "error" }) };
+    const options = { apiKey: this.apiKey || "local", baseURL: apiBaseUrl(this.connection), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, body: withBodyExtras(init?.body, bodyExtras), redirect: "error" }) };
     const modelId = request.model || this.connection.model;
     const editingImage = request.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
     const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
@@ -86,7 +86,17 @@ export class ApiBackend implements ChatBackend {
       ...(effort ? { reasoning: effort } : {}),
       ...(editingImage && protocol === "google" ? { providerOptions: { google: { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } } } : {}),
     });
-    for await (const part of result.fullStream) {
+    try { await this.consume(result.fullStream, request, callbacks); }
+    catch (error) {
+      // An HTML page or an empty body instead of a model stream usually means a wrong endpoint.
+      if (NoOutputGeneratedError.isInstance(error)) throw new Error(`${this.label} 没有返回模型回复。请检查接口地址和接口类型是否正确`);
+      throw error;
+    }
+    signal.throwIfAborted();
+  }
+
+  private async consume(stream: ReturnType<typeof streamText>["fullStream"], request: ChatRequest, callbacks: ChatCallbacks): Promise<void> {
+    for await (const part of stream) {
       if (part.type === "text-delta") callbacks.onText(part.text);
       if (part.type === "file") await callbacks.onAttachment?.({
         id: crypto.randomUUID(),
@@ -105,7 +115,6 @@ export class ApiBackend implements ChatBackend {
       }
       if (part.type === "error") throw part.error;
     }
-    signal.throwIfAborted();
   }
 }
 
