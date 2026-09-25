@@ -26,7 +26,7 @@ function setup() {
     backendLabel: "Mock", skillLabel: "技能", permission: "plan", fileAccessAvailable: true, fullAccessAvailable: true, note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
     sources: [{ key: "api:mock", kind: "api", label: "Mock 服务商", models: [{ id: "mock", name: "Mock model", efforts: ["low", "high"] }, { id: "other", name: "Other model", efforts: [] }], loaded: true }],
     selection: { source: "api:mock", model: "mock" }, recentModels: [], onPickModel: vi.fn(), onLoadModels: vi.fn(), onManageModels: vi.fn(),
-    onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {}, onApprove: vi.fn(), onRevertChanges: vi.fn(), onOpenFile: vi.fn(), editorSelection: null, onDismissSelection: vi.fn(), onComposerFocus: vi.fn(),
+    onConnection: vi.fn(), onNew: vi.fn(), onOpenSettings: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {}, onApprove: vi.fn(), onRevertChanges: vi.fn(), onOpenFile: vi.fn(), editorSelection: null, onDismissSelection: vi.fn(), onComposerFocus: vi.fn(),
     efforts: ["low", "high"], effort: "high", modelLoading: false, onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onPickFolder: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
   };
   const result = render(<ChatPanel {...props} />);
@@ -280,4 +280,10 @@ it("shows the context ring only after a reported usage, warning near the limit",
   expect(screen.getByText("170K / 200K tokens")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
   expect(props.onNew).toHaveBeenCalledOnce();
+});
+it("header shows the brand and opens plugin settings", () => {
+  const { props } = setup();
+  expect(screen.getByText("Agent")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  expect(props.onOpenSettings).toHaveBeenCalled();
 });

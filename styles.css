@@ -193,7 +193,10 @@
 .qiaomu-agent--react .qa-header { display: flex; align-items: center; gap: 6px; padding: 10px 14px; min-height: 48px; }
 .qiaomu-agent--react .qa-header button { flex: 0 0 30px; }
 .qiaomu-agent--react .qa-title-wrap { flex: 1; min-width: 0; }
-.qiaomu-agent--react .qa-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.qiaomu-agent--react .qa-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; white-space: nowrap; }
+.qiaomu-agent--react .qa-brand-icon { flex: none; color: var(--text-normal); }
+.qiaomu-agent--react .qa-brand { flex: none; font-weight: 600; }
+.qiaomu-agent--react .qa-conversation-title { min-width: 0; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 13px; }
 .qiaomu-agent--react .qa-header button.qa-branch-parent { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 4px; width: 100%; max-width: 100%; min-height: 22px; padding: 2px 0; color: var(--text-muted); font-size: 11px; text-align: left; }
 .qiaomu-agent--react .qa-branch-parent span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qiaomu-agent--react .qa-branch-parent:hover { color: var(--text-normal); }
