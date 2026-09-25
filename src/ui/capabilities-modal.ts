@@ -119,7 +119,7 @@ export class CapabilitiesModal extends Modal {
 
   private skillRow(list: HTMLElement, count: HTMLElement, skill: AgentSkill): void {
     const shown = !this.settings.disabledSkillPaths.includes(skill.path);
-    const row = list.createDiv({ cls: `qa-cap-row${shown ? "" : " is-off"}`, attr: { title: skill.path } });
+    const row = list.createDiv({ cls: `qa-cap-row${shown ? "" : " is-off"}` });
     const copy = row.createDiv({ cls: "qa-cap-row-text" });
     copy.createDiv({ cls: "qa-ms-row-name", text: skill.name });
     if (skill.description) copy.createDiv({ cls: "qa-cap-row-desc", text: skill.description });
@@ -250,7 +250,7 @@ export class CapabilitiesModal extends Modal {
     setIcon(row.createSpan({ cls: "qa-ms-row-icon", attr: { "aria-hidden": "true" } }), server.kind === "http" ? "globe" : "terminal");
     const copy = row.createDiv({ cls: "qa-cap-row-text" });
     copy.createDiv({ cls: "qa-ms-row-name", text: server.name });
-    copy.createDiv({ cls: "qa-cap-row-desc is-mono", text: `${server.kind === "http" ? "远程" : "本机程序"} · ${server.target}`, attr: { title: server.target } });
+    copy.createDiv({ cls: "qa-cap-row-desc is-mono", text: `${server.kind === "http" ? "远程" : "本机程序"} · ${server.target}` });
     if (this.confirmRemove === server.name) {
       const confirm = row.createDiv({ cls: "qa-cap-confirm" });
       actionButton(confirm, "x", "取消").addEventListener("click", () => { this.confirmRemove = ""; this.render(); });

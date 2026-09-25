@@ -234,6 +234,7 @@ details[open] > .qa-disclosure .qa-disclosure-chevron { transform: rotate(90deg)
 @media (prefers-reduced-motion: reduce) { .qa-ms-button.is-busy .qa-ms-button-icon svg { animation: none; } }
 
 .qa-ms-list { display: flex; flex-direction: column; border: 1px solid var(--qa-line); border-radius: 10px; background: var(--qa-surface); overflow: hidden; }
+.qa-ms-list > * { flex-shrink: 0; }
 .qa-ms-list > * + * { border-top: 1px solid var(--qa-line); }
 .qa-ms-row { display: flex; align-items: center; min-width: 0; }
 .qa-models button.qa-ms-row-main { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; height: auto; min-height: 60px; padding: 10px 8px 10px 16px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--qa-ink); text-align: left; cursor: pointer; }
