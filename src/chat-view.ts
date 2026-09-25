@@ -525,6 +525,11 @@ export class ChatView extends ItemView {
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
       prefill: this.prefill, prefillVersion: this.prefillVersion, focusVersion: this.focusVersion,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
+      onWechatPreview: () => {
+        const current = this.plugin.getActiveMarkdownFile();
+        if (current) void this.plugin.openWechatPreview(current);
+        else new Notice("请先打开一篇 Markdown 笔记");
+      },
       onHistory: (event: MouseEvent) => this.openHistory(event),
       branch: this.plugin.settings.activeConversation?.fork ?? null,
       onOpenParent: (id: string) => this.openConversation(id),

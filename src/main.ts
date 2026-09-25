@@ -109,6 +109,7 @@ export default class QiaomuAgentPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
         if (!(file instanceof TFile) || file.extension !== "md") return;
+        menu.addItem((item) => item.setTitle("预览公众号排版").setIcon("smartphone").setSection("action").onClick(() => void this.openWechatPreview(file)));
         menu.addItem((item) => item.setTitle("发布到公众号草稿箱").setIcon("send").setSection("action").onClick(() => this.openWechatPublish(file)));
       })
     );
@@ -189,10 +190,10 @@ export default class QiaomuAgentPlugin extends Plugin {
     new WechatPublishModal(this.app, file, this.settings.wechat).open();
   }
 
-  private async openWechatPreview(file: TFile): Promise<void> {
+  async openWechatPreview(file: TFile): Promise<void> {
     let leaf = this.app.workspace.getLeavesOfType(WECHAT_PREVIEW_VIEW)[0];
     if (!leaf) {
-      leaf = Platform.isDesktopApp ? this.app.workspace.getRightLeaf(true) ?? undefined : this.app.workspace.getLeaf("tab");
+      leaf = Platform.isDesktopApp ? this.app.workspace.getRightLeaf(false) ?? undefined : this.app.workspace.getLeaf("tab");
       await leaf?.setViewState({ type: WECHAT_PREVIEW_VIEW, active: true });
     }
     if (!leaf) { new Notice("无法打开公众号预览"); return; }

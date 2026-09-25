@@ -289,7 +289,6 @@ export function buildWechatExportCss(tokens: WechatExportStyleTokens, theme?: We
   margin: 1.45em 0;
   padding: 0.9em 1em;
   border: 1px solid ${tokens.lineColor};
-  border-left: 4px solid ${tokens.accentColor};
   border-radius: 10px;
   background: rgba(201, 100, 66, 0.08);
   color: ${tokens.articleQuoteColor};
@@ -319,28 +318,23 @@ export function buildWechatExportCss(tokens: WechatExportStyleTokens, theme?: We
 
 .wechat-export-content .wechat-callout-info,
 .wechat-export-content .wechat-callout-note {
-  border-left-color: #576b95;
   background: rgba(87, 107, 149, 0.08);
 }
 
 .wechat-export-content .wechat-callout-tip,
 .wechat-export-content .wechat-callout-success {
-  border-left-color: #1f9d55;
   background: rgba(31, 157, 85, 0.08);
 }
 
 .wechat-export-content .wechat-callout-warning {
-  border-left-color: #d28a00;
   background: rgba(210, 138, 0, 0.1);
 }
 
 .wechat-export-content .wechat-callout-danger {
-  border-left-color: #d64545;
   background: rgba(214, 69, 69, 0.08);
 }
 
 .wechat-export-content .wechat-callout-conclusion {
-  border-left-color: ${tokens.accentColor};
   background: ${tokens.quoteBackground};
 }
 
@@ -1396,8 +1390,6 @@ ${buildKatexSizingCss()}
   display: block !important;
   margin: 1.45em 0 !important;
   padding: 0.9em 1em !important;
-  border-left-width: 4px !important;
-  border-left-style: solid !important;
   border-radius: 10px !important;
 }
 
@@ -1548,7 +1540,19 @@ ${buildKatexSizingCss()}
 }
 `.trim()
 
+  // Themes may color a single left edge; use complete outlines or no edge instead.
+  const noSideAccentCss = `
+.wechat-export-content h1,
+.wechat-export-content h2,
+.wechat-export-content h3,
+.wechat-export-content h4,
+.wechat-export-content h5,
+.wechat-export-content h6 { border-left: 0 !important; }
+.wechat-export-content blockquote,
+.wechat-export-content .wechat-callout { border: 1px solid ${tokens.lineColor} !important; }
+`.trim()
+
   return themeCss
-    ? `${baseCss}\n\n${themeCss}\n\n${compatCss}`
-    : `${baseCss}\n\n${defaultOnlyCss}\n\n${compatCss}`
+    ? `${baseCss}\n\n${themeCss}\n\n${compatCss}\n\n${noSideAccentCss}`
+    : `${baseCss}\n\n${defaultOnlyCss}\n\n${compatCss}\n\n${noSideAccentCss}`
 }

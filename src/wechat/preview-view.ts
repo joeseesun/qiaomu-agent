@@ -25,6 +25,9 @@ export class WechatPreviewView extends ItemView {
   override async onOpen(): Promise<void> {
     const root = this.contentEl.createDiv({ cls: "qiaomu-wechat-live-preview" });
     const toolbar = root.createDiv({ cls: "qiaomu-wechat-preview-toolbar" });
+    const agentButton = toolbar.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "返回乔木 Agent" } });
+    setIcon(agentButton, "sparkles");
+    agentButton.onclick = () => void this.plugin.activateView();
     const phoneButton = toolbar.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "切换手机宽度预览" } });
     setIcon(phoneButton, "smartphone");
     phoneButton.onclick = () => { this.phone = !this.phone; this.frame.toggleClass("is-phone", this.phone); phoneButton.setAttribute("aria-pressed", String(this.phone)); };
@@ -38,7 +41,10 @@ export class WechatPreviewView extends ItemView {
     sendButton.onclick = () => { if (this.file) this.plugin.openWechatPublish(this.file); };
     this.status = root.createDiv({ cls: "qiaomu-wechat-preview-status", attr: { role: "status" } });
     this.frame = root.createDiv({ cls: "qiaomu-wechat-preview-frame is-phone" });
-    this.shadow = this.frame.attachShadow({ mode: "open" });
+    const device = this.frame.createDiv({ cls: "qiaomu-wechat-preview-device" });
+    device.createDiv({ cls: "qiaomu-wechat-preview-device-top", attr: { "aria-hidden": "true" } });
+    this.shadow = device.createDiv({ cls: "qiaomu-wechat-preview-screen" }).attachShadow({ mode: "open" });
+    device.createDiv({ cls: "qiaomu-wechat-preview-device-bottom", attr: { "aria-hidden": "true" } });
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.followActiveFile()));
     this.registerEvent(this.app.vault.on("modify", (file) => { if (file.path === this.file?.path) this.schedule(); }));
     this.followActiveFile();
@@ -77,11 +83,15 @@ export class WechatPreviewView extends ItemView {
       this.note = note;
       this.shadow.innerHTML = "";
       const style = document.createElement("style");
-      style.textContent = ":host{display:block}.article{box-sizing:border-box;padding:18px 14px;background:#fff;color:#1a1a1a;min-height:100%}.article img{max-width:100%}";
+      style.textContent = ":host{display:block}.article{box-sizing:border-box;padding:22px 18px 36px;background:#fff;color:#1a1a1a;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}.article-header{margin:0 0 30px}.article-title{font-size:23px;line-height:1.42;font-weight:650;letter-spacing:.01em}.article-author{margin-top:12px;color:#777;font-size:13px}.article img{max-width:100%}";
       this.shadow.append(style);
       const article = document.createElement("div");
       article.className = "article";
-      article.innerHTML = html;
+      const heading = article.createDiv({ cls: "article-header" });
+      heading.createDiv({ cls: "article-title", text: note.title });
+      const author = note.frontmatter.author ?? note.frontmatter["作者"] ?? this.plugin.settings.wechat.author;
+      if (typeof author === "string" && author.trim()) heading.createDiv({ cls: "article-author", text: author.trim() });
+      article.createDiv({ cls: "article-content" }).innerHTML = html;
       this.shadow.append(article);
       this.status.setText(note.warnings.length ? `预览完成 · ${note.warnings.length} 条排版提醒 · 深色模式为模拟` : "预览完成 · 深色模式为模拟");
     } catch (error) { if (generation === this.generation) this.status.setText(`预览失败：${error instanceof Error ? error.message : String(error)}`); }
