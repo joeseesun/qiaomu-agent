@@ -20,7 +20,7 @@ interface Props {
 
 type Row =
   | { type: "header"; key: string; label: string }
-  | { type: "model"; key: string; source: ModelSource; id: string; name: string; showSource: boolean }
+  | { type: "model"; key: string; source: ModelSource; id: string; name: string; showSource: boolean; meta?: string }
   | { type: "load"; key: string; source: ModelSource }
   | { type: "note"; key: string; text: string }
   | { type: "custom"; key: string; source: ModelSource; id: string };
@@ -46,6 +46,8 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
 
   const bySource = useMemo(() => new Map(sources.map((source) => [source.key, source])), [sources]);
   const q = query.trim().toLowerCase();
+  // Filtering by source only pays off once the list is long; a few sources read fine as one list.
+  const showRail = rail !== ALL || sources.reduce((total, source) => total + source.models.length + (source.kind === "agent" ? 1 : 0), 0) > 12;
 
   const rows = useMemo<Row[]>(() => {
     const result: Row[] = [];
@@ -71,9 +73,17 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
       }
       for (const model of models) group.push({ type: "model", key: `${source.key}:${model.id}`, source, id: model.id, name: model.name || model.id, showSource: false });
       // Listing an agent's models starts its process, so only offer it when that agent is in focus.
-      if (source.kind === "agent" && source.canListModels && !source.loaded && !q && rail === source.key) group.push({ type: "load", key: `${source.key}:load`, source });
+      // In the full list that is the agent in use; other agents stay one row until picked.
+      const focused = rail === source.key || (rail === ALL && current?.source === source.key);
+      if (source.kind === "agent" && source.canListModels && !source.loaded && !q && focused) group.push({ type: "load", key: `${source.key}:load`, source });
       if (source.error && !q && rail === source.key) group.push({ type: "note", key: `${source.key}:error`, text: source.error });
       if (!group.length) continue;
+      // A source offering only its default model is one row, not a heading over a lone "默认模型".
+      const [only] = group;
+      if (visible.length > 1 && group.length === 1 && only?.type === "model" && only.id === "") {
+        result.push({ ...only, name: source.label, meta: "默认模型" });
+        continue;
+      }
       if (visible.length > 1) result.push({ type: "header", key: `${source.key}:header`, label: source.label });
       result.push(...group);
     }
@@ -128,13 +138,13 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
         }} />
     </label>
     <div className="qa-picker-body">
-      <div className="qa-picker-rail" role="toolbar" aria-labelledby={sourceLabelId} aria-orientation="vertical">
+      {showRail && <div className="qa-picker-rail" role="toolbar" aria-labelledby={sourceLabelId} aria-orientation="vertical">
         <span id={sourceLabelId} className="qiaomu-agent__sr-only">模型来源</span>
         {railButton(ALL, "全部模型", <LayoutGrid size={15} />)}
         {recent.length > 0 && railButton(RECENT, "最近使用", <Clock size={15} />)}
         {sources.length > 0 && <span className="qa-picker-rail-sep" aria-hidden="true" />}
         {sources.map((source) => railButton(source.key, source.label, <BrandIcon icon={source.icon} kind={source.kind} size={16} />))}
-      </div>
+      </div>}
       <div ref={list} className="qa-picker-list" onKeyDown={onListKey}>
         {rail !== ALL && rail !== RECENT && <div className="qa-picker-active-source">{bySource.get(rail)?.label}</div>}
         {rows.map((row) => {
@@ -152,7 +162,7 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
           return <button key={row.key} type="button" className="qa-picker-item" aria-pressed={selected} onClick={() => choose(row)}>
             <BrandIcon icon={row.source.icon} kind={row.source.kind} />
             <span className="qa-picker-name">{row.name}</span>
-            {row.showSource && <span className="qa-picker-meta">{row.source.label}</span>}
+            {(row.meta || row.showSource) && <span className="qa-picker-meta">{row.meta ?? row.source.label}</span>}
             {selected && <Check size={14} className="qa-picker-check" aria-hidden="true" />}
           </button>;
         })}
@@ -163,7 +173,7 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
       {["", ...efforts].map((value) => <button key={value || "default"} type="button" role="radio" aria-checked={effort === value} onClick={() => onEffort(value)}>{effortLabel(value)}</button>)}
     </div>}
     <div className="qa-picker-footer">
-      <button type="button" onClick={onManage}><Settings2 size={14} />管理模型服务商</button>
+      <button type="button" onClick={onManage}><Settings2 size={14} />模型设置</button>
     </div>
   </div>;
 }

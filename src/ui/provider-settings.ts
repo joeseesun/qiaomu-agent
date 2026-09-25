@@ -1,4 +1,4 @@
-import { Modal, Notice, Platform, setIcon, type App } from "obsidian";
+import { Modal, Notice, Platform, setIcon, ToggleComponent, type App } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
 import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ProviderConfig } from "../types";
 import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl } from "../services/api-providers";
@@ -76,7 +76,6 @@ export class ProviderSettings {
 
   render(container: HTMLElement): void {
     container.addClass("qa-models");
-    this.renderCurrent(container);
     if (Platform.isDesktopApp) {
       const tabs = container.createDiv({ cls: "qa-model-tabs", attr: { role: "tablist" } });
       for (const [index, id, label] of [[0, "agents", "本机 Agent"], [1, "api", "API 模型"]] as const) {
@@ -103,27 +102,6 @@ export class ProviderSettings {
       this.rerender();
       scrollArea?.scrollTo({ top: 0 });
       if (focus) scrollArea?.querySelector<HTMLElement>(`[role=tab][aria-selected=true]`)?.focus();
-    }
-  }
-
-  private renderCurrent(container: HTMLElement): void {
-    const current = container.createDiv({ cls: "qa-current" });
-    const copy = current.createDiv();
-    copy.createDiv({ cls: "qa-eyebrow", text: "当前对话" });
-    const settings = this.settings;
-    if (settings.backendKind === "api") {
-      const provider = settings.providers.find((item) => item.secretId === settings.api.secretId);
-      copy.createDiv({ cls: "qa-current-name", text: provider ? (provider.models?.find((item) => item.id === settings.api.model)?.name || settings.api.model || "尚未选择模型") : "尚未连接模型" });
-      copy.createDiv({ cls: "qa-current-detail", text: provider ? `${providerLabel(provider)} · 在对话输入框中切换模型` : "请先添加模型服务商" });
-    } else if (settings.backendKind === "cli") {
-      const agent = this.plugin.backendService.getDetections().find((item) => item.id === settings.preferredCli);
-      const selected = settings.modelSelections?.[`cli:${settings.preferredCli}`]?.model || "";
-      const modelName = settings.agentModelCache[settings.preferredCli]?.models.find((item) => item.id === selected)?.name || selected;
-      copy.createDiv({ cls: "qa-current-name", text: modelName || agent?.label || settings.preferredCli || "本机 Agent" });
-      copy.createDiv({ cls: "qa-current-detail", text: `${agent?.label || "本机 Agent"} · 在对话输入框中切换模型` });
-    } else {
-      copy.createDiv({ cls: "qa-current-name", text: "自动选择" });
-      copy.createDiv({ cls: "qa-current-detail", text: "在对话输入框中选择具体模型" });
     }
   }
 
@@ -271,14 +249,12 @@ export class ProviderSettings {
   private renderApi(container: HTMLElement): void {
     const providers = this.settings.providers;
     this.renderAddCard(container);
-    const { body } = card(container, "已接入的服务商", providers.length ? "在这里管理聊天时可选的模型。" : "连接后会显示在这里。");
-    const list = body.createDiv({ cls: "qa-list" });
-    if (!providers.length) list.createDiv({ cls: "qa-list-empty", text: "还没有接入服务商。粘贴上方的 API Key 即可开始。" });
-    for (const provider of providers) {
+    const list = providers.length ? card(container, "已接入的服务商").body.createDiv({ cls: "qa-list" }) : null;
+    for (const provider of list ? providers : []) {
       const key = this.secret(provider);
       const ok = Boolean(key) || permitsEmptyKey(provider);
       const enabled = new Set(provider.enabledModels ?? []).size;
-      this.row(list, providerIcon(provider), "boxes", providerLabel(provider), `${enabled} 个模型可选`, ok ? "ok" : "error", ok ? "已配置" : "需要密钥",
+      this.row(list!, providerIcon(provider), "boxes", providerLabel(provider), `${enabled} 个模型可选`, "error", ok ? "" : "需要密钥",
         () => new ProviderModal(this.app, this.plugin, provider.id, this.rerender).open(), provider.showInPicker !== false,
         async (shown) => { upsertProvider(this.settings, { ...provider, showInPicker: shown }); await this.plugin.saveSettings(); this.rerender(); });
     }
@@ -323,7 +299,7 @@ export class ProviderSettings {
 
   private agentRow(list: HTMLElement, agent: CliDetection): void {
     const count = this.settings.agentModelCache[agent.id]?.models.length ?? 0;
-    this.row(list, agentIconKey(agent.id), "bot", agent.label, count ? `已读取 ${count} 个模型` : "已找到本机程序", "ok", "",
+    this.row(list, agentIconKey(agent.id), "bot", agent.label, count ? `${count} 个模型` : "", "ok", "",
       () => new AgentModal(this.app, this.plugin, agent, this.rerender).open(), agentShown(this.settings, agent.id),
       async (shown) => { this.settings.agentVisibility[agent.id] = shown; this.settings.hiddenAgents = this.settings.hiddenAgents.filter((id) => id !== agent.id); await this.plugin.saveSettings(); this.rerender(); });
   }
@@ -344,14 +320,14 @@ export class ProviderSettings {
     brand(row, icon, fallback);
     const text = row.createDiv({ cls: "qa-list-text" });
     text.createDiv({ cls: "qa-list-name", text: name });
-    text.createDiv({ cls: "qa-list-sub", text: sub });
+    if (sub) text.createDiv({ cls: "qa-list-sub", text: sub });
     if (statusText) row.createSpan({ cls: `qa-source-status is-${state}`, text: statusText });
     setIcon(row.createSpan({ cls: "qa-list-chevron" }), "chevron-right");
     row.addEventListener("click", open);
-    const visibility = entry.createEl("button", { cls: "qa-visibility-action", text: shown ? "显示中" : "已隐藏" });
-    visibility.createSpan({ cls: "qiaomu-agent__sr-only", text: ` ${name}的模型` });
-    visibility.setAttribute("aria-pressed", String(shown));
-    visibility.addEventListener("click", () => onShown(!shown));
+    // A host switch, not a button whose label reads like a status.
+    const visibility = new ToggleComponent(entry).setValue(shown).setTooltip("在对话中显示").onChange(onShown);
+    visibility.toggleEl.addClass("qa-visibility-toggle");
+    visibility.toggleEl.querySelector("input")?.setAttribute("aria-label", `在对话中显示 ${name}`);
   }
 }
 
