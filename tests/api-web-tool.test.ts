@@ -36,6 +36,20 @@ describe("API webpage tool", () => {
     expect(JSON.stringify(JSON.parse(fetcher.mock.calls[0]![1].body).tools)).toContain(toolType);
     errorLog.mockRestore();
   });
+  it.each([
+    ["openai", "openai-chat"], ["anthropic", "anthropic"], ["openrouter", "openai-chat"], ["deepseek", "openai-chat"],
+  ])("sends no search tool for %s when web search is off", async (provider, protocol) => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetcher = vi.fn().mockResolvedValue(new Response("request rejected", { status: 400 }));
+    vi.stubGlobal("fetch", fetcher);
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider, protocol: protocol as "openai-chat" | "anthropic", model: "test" }, "fake", "brave-key")
+      .send({ prompt: "搜索最新消息", systemPrompt: "", cwd: null, permissionMode: "plan", webSearch: false, history: [] }, { onText: vi.fn(), onStatus: vi.fn() }, new AbortController().signal)
+      .catch(() => {});
+    const body = JSON.stringify(JSON.parse(fetcher.mock.calls[0]![1].body));
+    expect(body).not.toMatch(/web_search|search_web|openrouter:web/);
+    expect(body).toContain("用户已关闭联网搜索");
+    errorLog.mockRestore();
+  });
   it("uses OpenRouter's server search without another search key", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const fetcher = vi.fn().mockResolvedValue(new Response("request rejected", { status: 400 }));

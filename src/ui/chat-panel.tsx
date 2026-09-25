@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -9,6 +9,7 @@ import { BrandIcon } from "./brand-icon";
 import { ApprovalCard, ChangeSummary } from "./turn-review";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
 import { slashQuery, startsFileMention } from "../services/composer";
+import type { AddKind } from "../services/hotkeys";
 import { Attachments } from "../components/ai-elements/attachments";
 import { type AgentMessage, messageText, messageUsage } from "../services/chat-transport";
 import { Conversation, ConversationContent, ConversationScrollButton } from "../components/ai-elements/conversation";
@@ -29,6 +30,7 @@ interface Props {
   imageTargetNote: TFile | null;
   backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number; focusVersion?: number;
+  addRequest?: { kind: AddKind; version: number }; addHotkeys?: Partial<Record<AddKind, string>>;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
   onEditMessage: () => void;
@@ -41,6 +43,11 @@ interface Props {
   onPickModel: (source: string, model: string) => void; onLoadModels: (source: string) => void; onManageModels: () => void;
   customPrompts: PromptTemplate[]; onManagePrompts: () => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
+  onPickFolder: (choose: (attachment: ChatAttachment) => void) => void;
+  /** Absent where pages cannot be read (mobile). */
+  onPickWebPage?: (choose: (attachment: ChatAttachment) => void) => void;
+  /** Web search state for the selected model; absent when it cannot search (local agents search on their own). */
+  webSearch?: boolean; onToggleWebSearch?: () => void;
   onValidateAttachments: (attachments: ChatAttachment[]) => void;
   onAppend: (text: string, daily: boolean) => void;
 }
@@ -100,6 +107,8 @@ export function ChatPanel(props: Props) {
   const [attachmentError, setAttachmentError] = useState("");
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
+  // The draft set aside when the add menu opens the prompt list; Escape brings it back.
+  const draftBeforePrompts = useRef<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const previousConversation = useRef(props.conversationId);
@@ -128,6 +137,7 @@ export function ChatPanel(props: Props) {
   const PermissionIcon = imageEditing ? Shield : props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
   const choosePrompt = (index: number) => {
     const prompt = promptChoices[index];
+    draftBeforePrompts.current = null;
     if (prompt) setInput(prompt.body); else { props.onManagePrompts(); setInput(""); }
     setMenuDismissed(true); textarea.current?.focus();
   };
@@ -154,6 +164,12 @@ export function ChatPanel(props: Props) {
     setInput(props.prefill); textarea.current?.focus();
   }, [props.prefill, props.prefillVersion]);
   useEffect(() => { if (props.focusVersion) textarea.current?.focus(); }, [props.focusVersion]);
+  const runAdd = (kind: AddKind) => {
+    if (kind === "upload") upload.current?.click();
+    else (kind === "file" ? props.onPickFile : props.onPickFolder)(addAttachment);
+  };
+  // Only a new request runs the action; re-renders with the same version do not.
+  useEffect(() => { if (props.addRequest?.version) runAdd(props.addRequest.kind); }, [props.addRequest?.version]);
   useEffect(() => {
     const el = textarea.current;
     if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
@@ -306,24 +322,38 @@ export function ChatPanel(props: Props) {
           onKeyDown={(e) => {
             if (!menuOpen || e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setMenuIndex((n) => (n + (e.key === "ArrowDown" ? 1 : promptChoices.length)) % (promptChoices.length + 1)); }
-            if (e.key === "Escape") { e.preventDefault(); setMenuDismissed(true); }
+            if (e.key === "Escape") {
+              e.preventDefault(); setMenuDismissed(true);
+              if (draftBeforePrompts.current !== null) { setInput(draftBeforePrompts.current); draftBeforePrompts.current = null; }
+            }
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); choosePrompt(menuIndex); }
           }}
           onChange={(event) => {
             const value = event.currentTarget.value; const cursor = event.currentTarget.selectionStart;
             setInput(value); setMenuDismissed(false); setMenuIndex(0);
+            if (!value.startsWith("/")) draftBeforePrompts.current = null;
             if (startsFileMention(value, cursor) && !(event.nativeEvent as InputEvent).isComposing) props.onPickFile((file) => { addAttachment(file); setInput((current) => current === value ? value.slice(0, cursor - 1) + value.slice(cursor) : current); textarea.current?.focus(); });
           }}
           onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { if (!e.clipboardData.getData("text/plain")) e.preventDefault(); void addFiles(files); } }}
           placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息…"} />
         <PromptInputFooter><PromptInputTools>
           <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} disabled={running}>
-            {(close) => <>
-              <button type="button" onClick={() => { close(); upload.current?.click(); }}><Paperclip size={16} />上传附件</button>
-              <button type="button" onClick={() => { close(); props.onPickFile(addAttachment); }}><AtSign size={16} />选择库内文件</button>
-              {props.detachedNote && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加「{props.detachedNote.basename}」</button>}
-              <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
-            </>}
+            {(close) => <div className="qa-add-menu">
+              <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-add`}>
+                <div className="qa-add-heading" id={`${inputId}-add`}>添加</div>
+                <button type="button" aria-label="上传文件或图片" onClick={() => { close(); runAdd("upload"); }}><Paperclip size={16} /><span>文件或图片</span><span className="qa-add-hint">也可拖入</span><AddKey keys={props.addHotkeys?.upload} /></button>
+                <button type="button" aria-label="选择库内文件" onClick={() => { close(); runAdd("file"); }}><FileText size={16} /><span>库内文件</span><AddKey keys={props.addHotkeys?.file || "@"} /></button>
+                <button type="button" aria-label="选择库内文件夹" onClick={() => { close(); runAdd("folder"); }}><Folder size={16} /><span>库内文件夹</span><span className="qa-add-hint">附加其中的笔记</span><AddKey keys={props.addHotkeys?.folder} /></button>
+                {props.onPickWebPage && <button type="button" aria-label="添加网页" onClick={() => { close(); props.onPickWebPage!(addAttachment); }}><Link size={16} /><span>网页</span><span className="qa-add-hint">读取正文</span></button>}
+                {props.detachedNote && <button type="button" aria-label={`附加当前笔记「${props.detachedNote.basename}」`} onClick={() => { close(); props.onToggleNote(); }}><FilePlus size={16} /><span>当前笔记</span><span className="qa-add-hint">{props.detachedNote.basename}</span></button>}
+              </div>
+              <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-use`}>
+                <div className="qa-add-heading" id={`${inputId}-use`}>使用</div>
+                <button type="button" aria-label="使用 Prompt" onClick={() => { close(); if (input && draftBeforePrompts.current === null) draftBeforePrompts.current = input; setInput("/"); setMenuDismissed(false); setMenuIndex(0); textarea.current?.focus(); }}><Slash size={16} /><span>Prompt</span><AddKey keys="/" /></button>
+                <button type="button" aria-label={props.skillLabel === "技能" ? "选择技能" : `技能：${props.skillLabel}`} onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} /><span>技能</span><span className="qa-add-hint">{props.skillLabel === "技能" ? "选择要用的技能" : props.skillLabel}</span><ChevronRight size={14} /></button>
+                {props.webSearch !== undefined && <button type="button" aria-label="联网搜索" aria-pressed={props.webSearch} onClick={props.onToggleWebSearch}><Globe size={16} /><span>联网搜索</span><span className="qa-add-hint">{props.webSearch ? "需要时自动搜索" : "已关闭"}</span><span className="qa-add-switch" aria-hidden="true" /></button>}
+              </div>
+            </div>}
           </ComposerPopover>
           {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}`} label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
             {(close) => <>
@@ -355,6 +385,11 @@ function latestUsage(messages: AgentMessage[]) {
     if (usage) return usage;
   }
   return undefined;
+}
+
+/** A shortcut shown at the end of an add-menu row, like a native menu's key column. */
+function AddKey({ keys }: { keys?: string }) {
+  return keys ? <kbd className="qa-add-key" aria-hidden="true">{keys}</kbd> : null;
 }
 
 /** Reading context from another plugin or view, shown as a removable composer chip. */

@@ -26,7 +26,7 @@ function setup() {
     sources: [{ key: "api:mock", kind: "api", label: "Mock 服务商", models: [{ id: "mock", name: "Mock model", efforts: ["low", "high"] }, { id: "other", name: "Other model", efforts: [] }], loaded: true }],
     selection: { source: "api:mock", model: "mock" }, recentModels: [], onPickModel: vi.fn(), onLoadModels: vi.fn(), onManageModels: vi.fn(),
     onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {}, onApprove: vi.fn(), onRevertChanges: vi.fn(), onOpenFile: vi.fn(), editorSelection: null, onDismissSelection: vi.fn(), onComposerFocus: vi.fn(),
-    efforts: ["low", "high"], effort: "high", modelLoading: false, onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
+    efforts: ["low", "high"], effort: "high", modelLoading: false, onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onPickFolder: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
   };
   const result = render(<ChatPanel {...props} />);
   return { ...result, props, send, chat, input: screen.getByLabelText("给 Agent 的消息") };
@@ -104,14 +104,53 @@ it("composer popovers close with Escape, outside click and focus departure witho
   fireEvent.change(input, { target: { value: "保留草稿" } });
   const trigger = screen.getByRole("button", { name: "添加附件与工具" });
   fireEvent.click(trigger);
-  expect(screen.getByRole("button", { name: "上传附件" })).toBe(document.activeElement);
+  expect(screen.getByRole("button", { name: "上传文件或图片" })).toBe(document.activeElement);
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   expect(screen.queryByRole("dialog")).toBeNull(); expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger); fireEvent.pointerDown(input); expect(screen.queryByRole("dialog")).toBeNull();
   fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "选择库内文件" }));
   expect(props.onPickFile).toHaveBeenCalledOnce(); expect(screen.queryByRole("dialog")).toBeNull();
-  fireEvent.click(trigger); fireEvent.blur(screen.getByRole("button", { name: "上传附件" }), { relatedTarget: input });
+  fireEvent.click(trigger); fireEvent.blur(screen.getByRole("button", { name: "上传文件或图片" }), { relatedTarget: input });
   expect(screen.queryByRole("dialog")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
+});
+
+it("add menu opens the prompt list and folder picker, keeping the draft on Escape", () => {
+  const { input, props } = setup();
+  fireEvent.change(input, { target: { value: "保留草稿" } });
+  const trigger = screen.getByRole("button", { name: "添加附件与工具" });
+  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "选择库内文件夹" }));
+  expect(props.onPickFolder).toHaveBeenCalledOnce();
+  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "使用 Prompt" }));
+  expect((input as HTMLTextAreaElement).value).toBe("/");
+  expect(screen.getByRole("listbox", { name: "Prompt 菜单" })).toBeTruthy();
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
+});
+
+it("runs add commands once per request and shows bound hotkeys", () => {
+  const { props, rerender } = setup();
+  rerender(<ChatPanel {...props} addRequest={{ kind: "folder", version: 1 }} addHotkeys={{ folder: "⇧⌘F" }} />);
+  rerender(<ChatPanel {...props} addRequest={{ kind: "folder", version: 1 }} addHotkeys={{ folder: "⇧⌘F" }} />);
+  expect(props.onPickFolder).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  expect(screen.getByRole("button", { name: "选择库内文件夹" }).textContent).toContain("⇧⌘F");
+});
+
+it("shows web page and web search only where they work", () => {
+  const { props, rerender } = setup();
+  const trigger = screen.getByRole("button", { name: "添加附件与工具" });
+  fireEvent.click(trigger);
+  expect(screen.queryByRole("button", { name: "添加网页" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "联网搜索" })).toBeNull();
+  const onPickWebPage = vi.fn(); const onToggleWebSearch = vi.fn();
+  rerender(<ChatPanel {...props} onPickWebPage={onPickWebPage} webSearch={true} onToggleWebSearch={onToggleWebSearch} />);
+  const search = screen.getByRole("button", { name: "联网搜索" });
+  expect(search.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(search);
+  expect(onToggleWebSearch).toHaveBeenCalledOnce();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "添加网页" }));
+  expect(onPickWebPage).toHaveBeenCalledOnce();
 });
 
 it("offers scoped and full access from a dedicated icon control", () => {

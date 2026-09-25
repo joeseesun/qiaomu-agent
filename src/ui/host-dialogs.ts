@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, Modal, Setting, Notice, TFile } from "obsidian";
+import { App, ButtonComponent, FuzzySuggestModal, Modal, Setting, Notice, TFile, TFolder } from "obsidian";
 import type { PromptTemplate } from "../types";
 import { appendReply, undoReply } from "../services/note-actions";
 
@@ -7,6 +7,12 @@ export class FilePicker extends FuzzySuggestModal<TFile> {
   getItems(): TFile[] { return this.markdownOnly ? this.app.vault.getMarkdownFiles() : this.app.vault.getFiles(); }
   getItemText(file: TFile): string { return file.path; }
   onChooseItem(file: TFile): void { this.choose(file); }
+}
+export class FolderPicker extends FuzzySuggestModal<TFolder> {
+  constructor(app: App, private readonly choose: (folder: TFolder) => void) { super(app); this.setPlaceholder("搜索文件夹…"); }
+  getItems(): TFolder[] { return this.app.vault.getAllLoadedFiles().filter((item): item is TFolder => item instanceof TFolder && !item.isRoot()); }
+  getItemText(folder: TFolder): string { return folder.path; }
+  onChooseItem(folder: TFolder): void { this.choose(folder); }
 }
 export class PromptManager extends Modal {
   constructor(app: App, private readonly prompts: PromptTemplate[], private readonly save: (prompts: PromptTemplate[]) => Promise<void>) { super(app); }
@@ -85,4 +91,33 @@ export class FullAccessDialog extends Modal {
       .addButton((button) => button.setButtonText("开启完全访问").setWarning().onClick(() => { this.close(); this.accept(); }));
   }
   override onClose(): void { this.contentEl.empty(); }
+}
+/** Asks for a web address; `read` resolves once the page is attached, or rejects with a reason to show. */
+export class WebPageDialog extends Modal {
+  constructor(app: App, private readonly read: (url: string, signal: AbortSignal) => Promise<void>) { super(app); }
+  private controller: AbortController | null = null;
+  override onOpen(): void {
+    this.setTitle("添加网页");
+    const input = this.contentEl.createEl("input", { cls: "qa-web-page-input", type: "url", attr: { placeholder: "https://", "aria-label": "网页地址" } });
+    const status = this.contentEl.createEl("p", { cls: "qa-web-page-status", attr: { role: "status" } });
+    let submit: ButtonComponent | null = null;
+    const start = () => {
+      const url = input.value.trim();
+      if (!url || this.controller) return;
+      this.controller = new AbortController();
+      status.setText("正在读取网页…"); submit?.setDisabled(true); input.disabled = true;
+      void this.read(url, this.controller.signal).then(() => this.close()).catch((error) => {
+        if (this.controller?.signal.aborted) return;
+        this.controller = null;
+        status.setText(error instanceof Error ? error.message : String(error));
+        submit?.setDisabled(false); input.disabled = false; input.focus();
+      });
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); start(); } });
+    new Setting(this.contentEl)
+      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()))
+      .addButton((button) => { submit = button; button.setButtonText("读取").setCta().onClick(start); });
+    window.setTimeout(() => input.focus());
+  }
+  override onClose(): void { this.controller?.abort(); this.contentEl.empty(); }
 }

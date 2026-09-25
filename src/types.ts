@@ -43,6 +43,8 @@ export interface QiaomuSettings {
   backendKind: BackendKind;
   preferredCli: string;
   permissionMode: PermissionMode;
+  /** Web search for API models; off only when the user turned it off in the add menu. */
+  webSearch?: boolean;
   /** The user accepted the full-access warning once; it is not shown again. */
   fullAccessAcknowledged?: boolean;
   api: ApiConnection;
@@ -177,6 +179,8 @@ export interface ChatRequest {
   modelOptions?: { temperature?: number; maxOutputTokens?: number };
   attachments?: ChatAttachment[];
   permissionMode: PermissionMode;
+  /** false: attach no search tools this turn. Reading pages, vault and file tools are unaffected. */
+  webSearch?: boolean;
   activeFilePath?: string;
   activeFileContent?: string;
   /** Text selected in the editor when the message was sent. Lines are 1-based and inclusive. */
