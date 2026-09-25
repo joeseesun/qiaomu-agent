@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Globe, Newspaper, Shapes } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -44,6 +44,10 @@ interface Props {
   customPrompts: PromptTemplate[]; onManagePrompts: () => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
   onPickFolder: (choose: (attachment: ChatAttachment) => void) => void;
+  /** Absent where pages cannot be read (mobile). */
+  onPickWebPage?: (choose: (attachment: ChatAttachment) => void) => void;
+  /** Web search state for the selected model; absent when it cannot search (local agents search on their own). */
+  webSearch?: boolean; onToggleWebSearch?: () => void;
   onValidateAttachments: (attachments: ChatAttachment[]) => void;
   onAppend: (text: string, daily: boolean) => void;
 }
@@ -340,12 +344,14 @@ export function ChatPanel(props: Props) {
                 <button type="button" aria-label="上传文件或图片" onClick={() => { close(); runAdd("upload"); }}><Paperclip size={16} /><span>文件或图片</span><span className="qa-add-hint">也可拖入</span><AddKey keys={props.addHotkeys?.upload} /></button>
                 <button type="button" aria-label="选择库内文件" onClick={() => { close(); runAdd("file"); }}><FileText size={16} /><span>库内文件</span><AddKey keys={props.addHotkeys?.file || "@"} /></button>
                 <button type="button" aria-label="选择库内文件夹" onClick={() => { close(); runAdd("folder"); }}><Folder size={16} /><span>库内文件夹</span><span className="qa-add-hint">附加其中的笔记</span><AddKey keys={props.addHotkeys?.folder} /></button>
+                {props.onPickWebPage && <button type="button" aria-label="添加网页" onClick={() => { close(); props.onPickWebPage!(addAttachment); }}><Link size={16} /><span>网页</span><span className="qa-add-hint">读取正文</span></button>}
                 {props.detachedNote && <button type="button" aria-label={`附加当前笔记「${props.detachedNote.basename}」`} onClick={() => { close(); props.onToggleNote(); }}><FilePlus size={16} /><span>当前笔记</span><span className="qa-add-hint">{props.detachedNote.basename}</span></button>}
               </div>
               <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-use`}>
                 <div className="qa-add-heading" id={`${inputId}-use`}>使用</div>
                 <button type="button" aria-label="使用 Prompt" onClick={() => { close(); if (input && draftBeforePrompts.current === null) draftBeforePrompts.current = input; setInput("/"); setMenuDismissed(false); setMenuIndex(0); textarea.current?.focus(); }}><Slash size={16} /><span>Prompt</span><AddKey keys="/" /></button>
                 <button type="button" aria-label={props.skillLabel === "技能" ? "选择技能" : `技能：${props.skillLabel}`} onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} /><span>技能</span><span className="qa-add-hint">{props.skillLabel === "技能" ? "选择要用的技能" : props.skillLabel}</span><ChevronRight size={14} /></button>
+                {props.webSearch !== undefined && <button type="button" aria-label="联网搜索" aria-pressed={props.webSearch} onClick={props.onToggleWebSearch}><Globe size={16} /><span>联网搜索</span><span className="qa-add-hint">{props.webSearch ? "需要时自动搜索" : "已关闭"}</span><span className="qa-add-switch" aria-hidden="true" /></button>}
               </div>
             </div>}
           </ComposerPopover>

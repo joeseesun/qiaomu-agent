@@ -59,3 +59,9 @@ export function folderAttachment(folder: string, notes: { path: string; text: st
   const name = folder.split("/").pop() || folder;
   return { id: crypto.randomUUID(), name: `${name}/`, mediaType: "text/plain", size: new TextEncoder().encode(text).length, text, vaultPath: folder };
 }
+/** A read web page as a text attachment; the address stays in the text so the model can cite it. */
+export function webPageAttachment(page: { url: string; title: string; text: string }): ChatAttachment {
+  const text = `来源：${page.url}\n\n${page.text}`;
+  const name = page.title.trim().slice(0, 80) || new URL(page.url).hostname;
+  return { id: crypto.randomUUID(), name, mediaType: "text/plain", size: new TextEncoder().encode(text).length, text, vaultPath: page.url };
+}

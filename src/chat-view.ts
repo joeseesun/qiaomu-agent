@@ -9,8 +9,8 @@ import { Chat } from "@ai-sdk/react";
 import type QiaomuAgentPlugin from "./main";
 import type { AgentSkill, PermissionMode, ChatAttachment, ChatMessage, ChatRequest, EditorSelectionContext, GeneratedAttachment, ModelChoice } from "./types";
 import { ADD_COMMANDS, commandHotkey, type AddKind } from "./services/hotkeys";
-import { FilePicker, FolderPicker, PromptManager, AppendDialog, FullAccessDialog } from "./ui/host-dialogs";
-import { folderAttachment, readAttachment, validateAttachments, FOLDER_NOTE_LIMIT, MAX_ATTACHMENT_BYTES } from "./services/attachments";
+import { FilePicker, FolderPicker, PromptManager, AppendDialog, FullAccessDialog, WebPageDialog } from "./ui/host-dialogs";
+import { folderAttachment, webPageAttachment, readAttachment, validateAttachments, FOLDER_NOTE_LIMIT, MAX_ATTACHMENT_BYTES } from "./services/attachments";
 import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage, type TurnHooks } from "./services/chat-transport";
 import { TurnChangeTracker, toVaultPath } from "./services/change-tracker";
 import { RevertDialog } from "./ui/revert-dialog";
@@ -20,8 +20,10 @@ import { ModelManagerModal } from "./settings-tab";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
 import { enabledMcpConfig } from "./services/mcp-config";
 import { getRuntimeRequire } from "./services/runtime-require";
-import { ApiBackend } from "./services/api-backend";
-import { permitsEmptyKey } from "./services/api-providers";
+import { ApiBackend, nativeWebSearchProvider } from "./services/api-backend";
+import { readWebPage } from "./services/web-page";
+import { WEB_SEARCH_SECRET_ID } from "./services/web-search";
+import { apiProtocol, permitsEmptyKey } from "./services/api-providers";
 import { checkImageInput, resolveModel } from "./services/model-capabilities";
 import { activeProvider, agentShown, chooseModel, exposedModels, findProvider, providerIcon, providerLabel, visibleAgentModels, type ModelSource } from "./services/model-sources";
 import { nativeTransportFor } from "./services/native-agent-backend";
@@ -106,7 +108,7 @@ export class ChatView extends ItemView {
           contextWindow,
           reasoningEffort: effort,
           attachments: last.metadata?.attachments,
-          permissionMode, skill: this.selectedSkill && !settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill : undefined,
+          permissionMode, webSearch: settings.webSearch !== false, skill: this.selectedSkill && !settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill : undefined,
           activeFilePath: file?.path,
           mcpConfig: parsed as Record<string, unknown>,
           obsidianCli: settings.useObsidianCli ? this.plugin.obsidianCliService.getConnection() : undefined,
@@ -240,6 +242,15 @@ export class ChatView extends ItemView {
       void Promise.all(sorted.map(async (file, index) => ({ path: file.path, text: index < FOLDER_NOTE_LIMIT ? await this.app.vault.cachedRead(file) : "" })))
         .then((notes) => choose(folderAttachment(folder.path, notes))).catch((e) => new Notice(String(e)));
     }).open();
+  }
+  private chooseWebPage(choose: (attachment: ChatAttachment) => void): void {
+    new WebPageDialog(this.app, async (url, signal) => choose(webPageAttachment(await readWebPage(url, signal)))).open();
+  }
+  /** Whether the selected API model can search the web at all; local agents search on their own. */
+  private webSearchAvailable(key: string): boolean {
+    if (!key.startsWith("api:")) return false;
+    const provider = activeProvider(this.plugin.settings);
+    return Boolean(provider && nativeWebSearchProvider(provider.provider, apiProtocol(provider))) || Boolean(this.app.secretStorage.getSecret(WEB_SEARCH_SECRET_ID));
   }
   private async append(text: string, daily: boolean): Promise<void> {
     if (!daily) { new FilePicker(this.app, (file) => new AppendDialog(this.app, file.path, text).open(), true).open(); return; }
@@ -543,6 +554,9 @@ export class ChatView extends ItemView {
       onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
       onPickFolder: (choose: (attachment: ChatAttachment) => void) => this.chooseFolder(choose),
+      onPickWebPage: getRuntimeRequire() ? (choose: (attachment: ChatAttachment) => void) => this.chooseWebPage(choose) : undefined,
+      webSearch: this.webSearchAvailable(key) ? this.plugin.settings.webSearch !== false : undefined,
+      onToggleWebSearch: () => { this.plugin.settings.webSearch = this.plugin.settings.webSearch === false; void this.plugin.saveSettings(); this.render(); },
       onValidateAttachments: (attachments: ChatAttachment[]) => {
         const backendId = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner).id;
         validateAttachments(attachments, backendId);

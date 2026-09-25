@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderAttachment, FOLDER_NOTE_LIMIT, FOLDER_TEXT_LIMIT } from "../src/services/attachments";
+import { folderAttachment, webPageAttachment, FOLDER_NOTE_LIMIT, FOLDER_TEXT_LIMIT } from "../src/services/attachments";
 
 describe("folderAttachment", () => {
   it("joins notes under their paths, sorted", () => {
@@ -20,5 +20,14 @@ describe("folderAttachment", () => {
   });
   it("says so when the folder has no notes", () => {
     expect(folderAttachment("empty", []).text).toContain("没有 Markdown 笔记");
+  });
+});
+
+describe("webPageAttachment", () => {
+  it("keeps the address in the text and falls back to the host name", () => {
+    const a = webPageAttachment({ url: "https://example.com/a", title: " ", text: "正文" });
+    expect(a.name).toBe("example.com");
+    expect(a.text).toBe("来源：https://example.com/a\n\n正文");
+    expect(webPageAttachment({ url: "https://example.com/a", title: "标题", text: "x" }).name).toBe("标题");
   });
 });

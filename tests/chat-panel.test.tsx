@@ -136,6 +136,23 @@ it("runs add commands once per request and shows bound hotkeys", () => {
   expect(screen.getByRole("button", { name: "选择库内文件夹" }).textContent).toContain("⇧⌘F");
 });
 
+it("shows web page and web search only where they work", () => {
+  const { props, rerender } = setup();
+  const trigger = screen.getByRole("button", { name: "添加附件与工具" });
+  fireEvent.click(trigger);
+  expect(screen.queryByRole("button", { name: "添加网页" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "联网搜索" })).toBeNull();
+  const onPickWebPage = vi.fn(); const onToggleWebSearch = vi.fn();
+  rerender(<ChatPanel {...props} onPickWebPage={onPickWebPage} webSearch={true} onToggleWebSearch={onToggleWebSearch} />);
+  const search = screen.getByRole("button", { name: "联网搜索" });
+  expect(search.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(search);
+  expect(onToggleWebSearch).toHaveBeenCalledOnce();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "添加网页" }));
+  expect(onPickWebPage).toHaveBeenCalledOnce();
+});
+
 it("offers scoped and full access from a dedicated icon control", () => {
   const { props, rerender, container } = setup();
   fireEvent.click(screen.getByRole("button", { name: "访问权限：只读" }));
