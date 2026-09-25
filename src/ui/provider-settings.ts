@@ -3,7 +3,7 @@ import type QiaomuAgentPlugin from "../main";
 import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ModelOptions, ProviderConfig } from "../types";
 import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl } from "../services/api-providers";
 import { ApiBackend } from "../services/api-backend";
-import { builtinEfforts, compactTokens, resolveModel } from "../services/model-capabilities";
+import { compactTokens, resolveModel } from "../services/model-capabilities";
 import { detectKey, recommendedModels } from "../services/key-detection";
 import { agentShown, connectProvider, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, removeProvider, upsertProvider } from "../services/model-sources";
 import { nativeTransportFor, nativeTransportLabel } from "../services/native-agent-backend";
@@ -374,9 +374,9 @@ class ProviderModal extends Modal {
       preset.addEventListener("click", () => void save({ contextWindow: options.contextWindow === value ? undefined : value }));
     }
 
-    const reportedThinking = builtinEfforts(provider.provider, id).length > 0 || model?.reasoning;
-    this.tristate(panel, "思考模式", options.reasoning, reportedThinking === undefined ? "未知" : reportedThinking ? "支持" : "不支持", ["开启", "关闭"], (value) => void save({ reasoning: value }));
-    this.tristate(panel, "图片输入", options.vision, model?.vision === undefined ? "未知" : model.vision ? "支持" : "不支持", ["支持", "不支持"], (value) => void save({ vision: value }));
+    const detected = (value: boolean | undefined) => value === undefined ? "未知" : value ? "支持" : "不支持";
+    this.tristate(panel, "思考模式", options.reasoning, detected(auto.thinking), ["开启", "关闭"], (value) => void save({ reasoning: value }));
+    this.tristate(panel, "图片输入", options.vision, detected(auto.vision), ["支持", "不支持"], (value) => void save({ vision: value }));
 
     const addNumber = (label: string, value: number | undefined, min: number, max: number, step: string, field: "temperature" | "maxOutputTokens") => {
       const wrapper = panel.createEl("label", { cls: "qa-model-option" });

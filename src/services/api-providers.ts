@@ -59,8 +59,14 @@ export function permitsEmptyKey(connection: ApiConnection): boolean {
  * their version segment (the Claude Code convention), which would send requests to `/messages`.
  */
 export function apiBaseUrl(connection: ApiConnection): string {
-  const base = validateApiUrl(connection.baseUrl);
-  return apiProtocol(connection) === "anthropic" && !/\/v\d+[a-z0-9]*$/i.test(new URL(base).pathname) ? `${base}/v1` : base;
+  const base = validateApiUrl(connection.baseUrl).replace(/(\/v1)+$/, "/v1");
+  const path = new URL(base).pathname.replace(/\/$/, "");
+  const versioned = /\/v\d+[a-z0-9]*$/i.test(path);
+  // Anthropic-compatible paths never carry the version (…/api/anthropic); OpenAI-compatible ones do
+  // unless a relay mounts its own prefix, so only a bare origin gets /v1 there (as CC Switch does).
+  if (apiProtocol(connection) === "anthropic") return versioned ? base : `${base}/v1`;
+  if (apiProtocol(connection) === "google") return base;
+  return !versioned && path === "" ? `${base}/v1` : base;
 }
 
 export function validateApiUrl(value: string): string {

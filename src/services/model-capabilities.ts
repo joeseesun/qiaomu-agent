@@ -1,4 +1,5 @@
 import type { ChatAttachment, ModelChoice, ModelOptions, ProviderConfig } from "../types";
+import { knownTextOnly, knownToThink } from "./thinking";
 
 /** Levels offered when a model thinks but its vendor has no narrower list of its own. */
 export const DEFAULT_EFFORTS = ["low", "medium", "high"];
@@ -46,6 +47,8 @@ export interface ResolvedModel {
   contextWindow?: number;
   /** false only when known not to accept images; undefined means unknown, so images are sent. */
   vision?: boolean;
+  /** Whether the model thinks; undefined means unknown. */
+  thinking?: boolean;
   efforts: string[];
 }
 
@@ -54,11 +57,12 @@ export function resolveModel(provider: Pick<ProviderConfig, "provider" | "models
   const reported = provider.models?.find((model) => model.id === id);
   const options: ModelOptions = provider.modelOptions?.[id] ?? {};
   const builtin = builtinEfforts(provider.provider, id);
-  const thinks = options.reasoning ?? (builtin.length ? true : reported?.reasoning);
+  const thinking = options.reasoning ?? (builtin.length ? true : reported?.reasoning ?? (knownToThink(id) || undefined));
   return {
     contextWindow: options.contextWindow ?? reported?.contextWindow,
-    vision: options.vision ?? reported?.vision,
-    efforts: thinks ? builtin.length ? builtin : DEFAULT_EFFORTS : [],
+    vision: options.vision ?? reported?.vision ?? (knownTextOnly(id) ? false : undefined),
+    thinking,
+    efforts: thinking ? builtin.length ? builtin : DEFAULT_EFFORTS : [],
   };
 }
 

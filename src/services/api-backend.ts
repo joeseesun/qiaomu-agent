@@ -9,6 +9,7 @@ import { attachmentContext } from "./attachments";
 import { apiBaseUrl, apiProtocol, permitsEmptyKey } from "./api-providers";
 import { apiContextUsage } from "./context-usage";
 import { reportedCapabilities, resolveModel } from "./model-capabilities";
+import { thinkingRequest } from "./thinking";
 
 export function buildApiMessages(request: ChatRequest): ModelMessage[] {
   const sections: string[] = [];
@@ -47,7 +48,7 @@ export class ApiBackend implements ChatBackend {
     const provider = this.connection.provider;
     const protocol = apiProtocol(this.connection);
     const headers: Record<string, string> = protocol === "anthropic"
-      ? { "x-api-key": this.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }
+      ? { "x-api-key": this.apiKey, "anthropic-version": "2023-06-01", ...anthropicHeaders(provider, this.apiKey) }
       : protocol === "google" ? { "x-goog-api-key": this.apiKey } : this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
     const response = await fetch(`${base}/models`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`无法获取模型列表（${response.status}），可继续使用已配置模型`);
@@ -61,17 +62,16 @@ export class ApiBackend implements ChatBackend {
     if (!(request.model || this.connection.model).trim()) throw new Error("尚未选择模型");
     signal.throwIfAborted();
     const protocol = apiProtocol(this.connection);
-    const effort = request.reasoningEffort as "low" | "medium" | "high" | undefined;
-    const bodyExtras = openRouterReasoning(this.connection.provider, protocol, effort);
-    const options = { apiKey: this.apiKey || "local", baseURL: apiBaseUrl(this.connection), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, body: withBodyExtras(init?.body, bodyExtras), redirect: "error" }) };
     const modelId = request.model || this.connection.model;
+    const thinking = thinkingRequest(this.connection, protocol, modelId, request.reasoningEffort);
+    const options = { apiKey: this.apiKey || "local", baseURL: apiBaseUrl(this.connection), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, body: withBodyExtras(init?.body, thinking.body ?? null), redirect: "error" }) };
     const editingImage = request.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
     const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
     if (editingImage && this.connection.provider !== "openai" && !(protocol === "google" && googleImageModel)) {
       throw new Error("当前模型尚未接入图片编辑；请切换 Codex、OpenAI 或 Gemini 图片模型");
     }
     const model = protocol === "anthropic"
-      ? createAnthropic({ ...options, headers: { "anthropic-dangerous-direct-browser-access": "true" } })(modelId)
+      ? createAnthropic({ ...options, headers: anthropicHeaders(this.connection.provider, this.apiKey) })(modelId)
       : protocol === "google"
         ? createGoogleGenerativeAI(options)(modelId)
         : protocol === "openai-responses" || (editingImage && this.connection.provider === "openai") ? createOpenAI(options).responses(modelId) : createOpenAI(options).chat(modelId);
@@ -82,9 +82,11 @@ export class ApiBackend implements ChatBackend {
       ...(editingImage && this.connection.provider === "openai" ? { tools: { image_generation: openai.tools.imageGeneration({ action: "edit", model: "gpt-image-2.5-sunburst" }) }, toolChoice: { type: "tool" as const, toolName: "image_generation" } } : {}),
       ...(request.modelOptions?.temperature !== undefined ? { temperature: request.modelOptions.temperature } : {}),
       ...(request.modelOptions?.maxOutputTokens !== undefined ? { maxOutputTokens: request.modelOptions.maxOutputTokens } : {}),
-      // The SDK maps one reasoning level to each vendor's own switch (OpenAI effort, Claude thinking, Gemini thinking level).
-      ...(effort ? { reasoning: effort } : {}),
-      ...(editingImage && protocol === "google" ? { providerOptions: { google: { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } } } : {}),
+      ...(thinking.reasoning ? { reasoning: thinking.reasoning } : {}),
+      ...(thinking.providerOptions || (editingImage && protocol === "google") ? { providerOptions: {
+        ...thinking.providerOptions,
+        ...(editingImage && protocol === "google" ? { google: { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } } : {}),
+      } as Parameters<typeof streamText>[0]["providerOptions"] } : {}),
     });
     try { await this.consume(result.fullStream, request, callbacks); }
     catch (error) {
@@ -118,9 +120,15 @@ export class ApiBackend implements ChatBackend {
   }
 }
 
-/** OpenRouter turns thinking on through its own `reasoning` object rather than OpenAI's `reasoning_effort`. */
-export function openRouterReasoning(provider: string, protocol: string, effort: string | undefined): Record<string, unknown> | null {
-  return provider === "openrouter" && protocol === "openai-chat" && effort ? { reasoning: { effort } } : null;
+/**
+ * Claude relays mostly authenticate the Claude Code way (`Authorization: Bearer`, ANTHROPIC_AUTH_TOKEN),
+ * a few by `x-api-key`; relays get both. Anthropic itself keeps `x-api-key` alone.
+ */
+export function anthropicHeaders(provider: string, apiKey: string): Record<string, string> {
+  return {
+    "anthropic-dangerous-direct-browser-access": "true",
+    ...(provider !== "anthropic" && apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+  };
 }
 
 export function withBodyExtras(body: BodyInit | null | undefined, extras: Record<string, unknown> | null): BodyInit | null | undefined {
