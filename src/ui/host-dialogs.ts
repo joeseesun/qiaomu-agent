@@ -59,7 +59,7 @@ export class PromptManager extends Modal {
   private edit(item: PromptTemplate): void {
     this.contentEl.empty(); this.titleEl.setText(item.name ? "编辑 Prompt" : "新建 Prompt"); let name = item.name; let body = item.body;
     new Setting(this.contentEl).setName("名称").addText((t) => t.setValue(name).onChange((v) => name = v));
-    new Setting(this.contentEl).setName("内容").addTextArea((t) => { t.setValue(body).onChange((v) => body = v); t.inputEl.rows = 8; t.inputEl.style.width = "100%"; });
+    new Setting(this.contentEl).setName("内容").addTextArea((t) => { t.setValue(body).onChange((v) => body = v); t.inputEl.rows = 8; t.inputEl.addClass("qa-prompt-manager-body"); });
     new Setting(this.contentEl).addButton((b) => b.setButtonText("取消").onClick(() => this.draw())).addButton((b) => b.setButtonText("保存").setCta().onClick(async () => {
       if (!name.trim() || !body.trim()) { new Notice("请填写名称和内容"); return; }
       const updated = { ...item, name: name.trim(), body: body.trim() };
@@ -77,7 +77,7 @@ export class AppendDialog extends Modal {
   override onOpen(): void {
     this.titleEl.setText("追加回复");
     this.contentEl.createEl("p", { text: this.path });
-    const preview = this.contentEl.createEl("pre", { text: this.text }); preview.style.maxHeight = "240px"; preview.style.overflow = "auto"; preview.style.whiteSpace = "pre-wrap";
+    this.contentEl.createEl("pre", { cls: "qa-append-preview", text: this.text });
     new Setting(this.contentEl).addButton((b) => b.setButtonText("取消").onClick(() => this.close())).addButton((b) => b.setButtonText("追加到文件末尾").setCta().onClick(async () => {
       b.setDisabled(true);
       try {

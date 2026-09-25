@@ -199,7 +199,7 @@ export function ChatPanel(props: Props) {
   useEffect(() => { if (props.addRequest?.version) runAdd(props.addRequest.kind); }, [props.addRequest?.version]);
   useEffect(() => {
     const el = textarea.current;
-    if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
+    if (el) { el.style.removeProperty("height"); el.style.setProperty("height", `${Math.min(el.scrollHeight, 180)}px`); }
   }, [input]);
 
   const submit = async (text: string) => {

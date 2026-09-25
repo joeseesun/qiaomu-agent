@@ -1,8 +1,18 @@
-# 乔木 Agent for Obsidian
+# Qiaomu Agent
 
 Chat with your vault using local AI agents or model APIs. 在 Obsidian 侧边栏里和知识库对话：可以用本机已安装的 Agent（Codex、Claude Code、Gemini CLI 等），也可以接入自己的模型 API Key。
 
-> 当前版本 `0.2.0`：首个提交到 Obsidian 社区目录的版本。桌面端（macOS）已在真实库中验证；移动端只做了平台分支模拟，尚未在 iOS / Android 真机上验收。
+## English overview
+
+Qiaomu Agent adds an AI chat sidebar to your Obsidian vault. Choose a supported local agent on desktop, or connect your own model provider with an API key. Replies can cite notes in your vault, render Markdown, and be copied or appended to a note. You can attach the active note, an editor selection, other vault files, images, and public web pages when they are relevant to a conversation.
+
+To install a release manually, download `main.js`, `manifest.json`, and `styles.css` from the [GitHub Releases page](https://github.com/joeseesun/qiaomu-agent/releases). Place them together in your vault's `.obsidian/plugins/qiaomu-agent/` folder, restart Obsidian, and enable Qiaomu Agent under Community plugins. Once the community listing is approved, you can install it from Obsidian instead.
+
+The plugin does not include a model account or free API quota. API keys are stored in Obsidian SecretStorage. Cloud model requests send your message and the context you attach to the provider you select. The plugin also offers read-only, vault-write, and full-access permission modes. Full access is available only on desktop; review a change before accepting it. Local agents may have their own network and permission settings.
+
+Desktop use has been checked on macOS. Mobile API chat follows a separate platform path, but iOS and Android have not yet been tested on real devices. Local agent CLIs and MCP connections require desktop Obsidian. See the Chinese sections below for the full feature list, network disclosure, and access outside the vault.
+
+> 当前版本 `0.2.1`：桌面端（macOS）已在真实库中验证；移动端只做了平台分支模拟，尚未在 iOS / Android 真机上验收。
 
 ## 安装
 
@@ -31,7 +41,7 @@ Chat with your vault using local AI agents or model APIs. 在 Obsidian 侧边栏
 | MCP 工具连接 | 传给本机 Agent；API 模型不使用 | 不支持 |
 | Obsidian CLI（日记、属性等） | 需在 Obsidian 中启用命令行 | 不支持 |
 
-“检测到”某个 CLI 只代表版本探测成功，不代表已登录或可调用；技能或 MCP 工具是否真的执行过，以对话中显示的运行记录为准。公众号排版与发布已拆分为独立插件 Qiaomu Publish（`qiaomu-publish`）。
+“检测到”某个 CLI 只代表版本探测成功，不代表已登录或可调用；技能或 MCP 工具是否真的执行过，以对话中显示的运行记录为准。公众号排版与发布由独立插件负责。
 
 ## 联网说明
 

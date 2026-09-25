@@ -250,14 +250,14 @@ it("shows the editor selection as removable context and refreshes it on focus", 
   expect(props.onComposerFocus).toHaveBeenCalled();
 });
 
-it("shows reading context from another plugin as a removable chip and focuses without clearing the draft", () => {
+it("shows reading context from another plugin as a removable chip and focuses without clearing the draft", async () => {
   const { props, rerender, input } = setup();
   fireEvent.change(input, { target: { value: "写到一半的问题" } });
   const reading = { label: "选中 12 字 · 深度工作", detail: "乔木 RSS · 深度工作\n\n一段话", kind: "article" as const, selected: true };
   const onDismissReading = vi.fn();
   rerender(<ChatPanel {...props} reading={reading} onDismissReading={onDismissReading} focusVersion={1} />);
   expect(screen.getByText("选中 12 字 · 深度工作").closest("[title]")?.getAttribute("title")).toContain("一段话");
-  expect(document.activeElement).toBe(input);
+  await waitFor(() => expect(document.activeElement).toBe(input));
   expect((input as HTMLTextAreaElement).value).toBe("写到一半的问题");
   fireEvent.click(screen.getByRole("button", { name: "不附加正在阅读的内容" }));
   expect(onDismissReading).toHaveBeenCalledOnce();
