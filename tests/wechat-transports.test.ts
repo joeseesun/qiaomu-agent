@@ -30,6 +30,14 @@ describe("WeChat direct transport", () => {
     await expect(new WechatDirectClient({ id: "direct:1", name: "测试号" }, "wx-test", "secret").testConnection())
       .rejects.toThrow("11.22.33.44");
   });
+
+  it("rejects body images that cannot be uploaded through the direct transport", async () => {
+    const client = new WechatDirectClient({ id: "direct:1", name: "测试号" }, "wx-test", "secret");
+    for (const src of ["http://example.com/pic.jpg", "data:image/png;base64,AAAA"]) {
+      await expect(client.createDraft({ account_id: "direct:1", title: "测试", content_html: `<img src="${src}">`, thumb_media_id: "cover", publish_now: false }))
+        .rejects.toThrow("正文图片必须使用公网 HTTPS");
+    }
+  });
 });
 
 describe("mixed account routing", () => {

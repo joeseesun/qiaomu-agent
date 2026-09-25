@@ -125,9 +125,10 @@ export class WechatDirectClient implements WechatTransport {
     if (body.account_id !== this.account.id) throw new Error("公众号不匹配");
     if (body.publish_now !== false) throw new Error("只允许创建草稿");
     const doc = new DOMParser().parseFromString(body.content_html, "text/html");
-    for (const image of Array.from(doc.querySelectorAll("img[src^='https://']"))) {
+    for (const image of Array.from(doc.querySelectorAll("img[src]"))) {
       const src = image.getAttribute("src")!;
       if (/^https:\/\/mmbiz\.qpic\.cn\//i.test(src)) continue;
+      if (!src.startsWith("https://")) throw new Error("正文图片必须使用公网 HTTPS 地址，或先保存为本地附件再发布");
       const uploaded = await this.uploadRemote(src, "content");
       image.setAttribute("src", uploaded.url!);
     }

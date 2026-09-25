@@ -2,9 +2,9 @@ import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from "obsidia
 import type QiaomuAgentPlugin from "./main";
 import { ProviderSettings } from "./ui/provider-settings";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
-import { WechatBridgeClient, normalizeBridgeUrl } from "./wechat/bridge-client";
 import { WechatDirectClient } from "./wechat/direct-client";
 import { WechatRelayClient } from "./wechat/relay-client";
+import { WechatTransportRouter } from "./wechat/transport-router";
 import { listWechatThemes } from "./wechat/export-html";
 
 export class ModelManagerModal extends Modal {
@@ -110,20 +110,18 @@ export class QiaomuSettingTab extends PluginSettingTab {
         text.setValue(this.app.secretStorage.getSecret(wechat.secretId) ?? "");
         text.onChange((value) => this.app.secretStorage.setSecret(wechat.secretId, value.trim()));
       });
-    let accountDropdownAdded = false;
-    const accountSetting = new Setting(containerEl).setName("默认公众号").setDesc(wechat.defaultAccountId ? `当前：${wechat.defaultAccountId}` : "测试连接后选择。");
-    accountSetting.addButton((button) => button.setButtonText("测试连接").onClick(async () => {
+    const accountSetting = new Setting(containerEl).setName("默认公众号").setDesc(wechat.defaultAccountId ? `当前：${wechat.defaultAccountId}` : "加载连接后选择。");
+    accountSetting.addButton((button) => button.setButtonText("加载公众号").onClick(async () => {
       button.setDisabled(true);
       try {
-        normalizeBridgeUrl(wechat.bridgeUrl);
-        const client = new WechatBridgeClient(wechat.bridgeUrl, this.app.secretStorage.getSecret(wechat.secretId) ?? "");
-        const accounts = await client.listAccounts();
-        if (accounts.length === 0) throw new Error("Bridge 没有配置公众号");
-        accountSetting.setDesc(`连接成功，共 ${accounts.length} 个公众号。`);
-        if (!accountDropdownAdded) accountSetting.addDropdown((dropdown) => {
-          accountDropdownAdded = true;
+        const router = new WechatTransportRouter(this.app, wechat);
+        const accounts = await router.listAccounts();
+        if (accounts.length === 0) throw new Error(router.errors.join("；") || "尚未配置可用公众号");
+        accountSetting.setDesc(`已加载 ${accounts.length} 个公众号。${router.errors.join("；")}`);
+        if (!accounts.some((account) => account.id === wechat.defaultAccountId)) wechat.defaultAccountId = accounts[0]!.id;
+        accountSetting.controlEl.querySelector("select")?.remove();
+        accountSetting.addDropdown((dropdown) => {
           for (const account of accounts) dropdown.addOption(account.id, account.name);
-          if (!accounts.some((account) => account.id === wechat.defaultAccountId)) wechat.defaultAccountId = accounts[0]!.id;
           dropdown.setValue(wechat.defaultAccountId).onChange(async (value) => {
             wechat.defaultAccountId = value;
             await this.plugin.saveSettings();
