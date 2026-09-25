@@ -41,3 +41,21 @@ export function validateAttachments(attachments: ChatAttachment[], backendId: st
     }
   }
 }
+/** Notes a folder attachment can carry before the rest are only listed by path. */
+export const FOLDER_NOTE_LIMIT = 40;
+export const FOLDER_TEXT_LIMIT = 200_000;
+/** One text attachment holding a folder's notes, each under its own path heading. */
+export function folderAttachment(folder: string, notes: { path: string; text: string }[]): ChatAttachment {
+  const sorted = [...notes].sort((a, b) => a.path.localeCompare(b.path));
+  const parts: string[] = []; const skipped: string[] = []; let used = 0;
+  for (const note of sorted) {
+    const part = `## ${note.path}\n\n${note.text.trim()}`;
+    if (parts.length >= FOLDER_NOTE_LIMIT || used + part.length > FOLDER_TEXT_LIMIT) { skipped.push(note.path); continue; }
+    parts.push(part); used += part.length;
+  }
+  if (skipped.length) parts.push(`（另有 ${skipped.length} 篇笔记未附加全文，需要时请单独附加）\n${skipped.map((path) => `- ${path}`).join("\n")}`);
+  if (!sorted.length) parts.push("（此文件夹中没有 Markdown 笔记）");
+  const text = parts.join("\n\n");
+  const name = folder.split("/").pop() || folder;
+  return { id: crypto.randomUUID(), name: `${name}/`, mediaType: "text/plain", size: new TextEncoder().encode(text).length, text, vaultPath: folder };
+}

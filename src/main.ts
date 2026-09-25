@@ -5,6 +5,7 @@ import { BackendService } from "./services/backend-service";
 import { discoverLocalClis } from "./services/cli-discovery";
 import { SkillService } from "./services/skill-service";
 import { ObsidianCliService } from "./services/obsidian-cli";
+import { ADD_COMMANDS, type AddKind } from "./services/hotkeys";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
 import { InlineEditModal } from "./ui/inline-edit-modal";
@@ -52,6 +53,11 @@ export default class QiaomuAgentPlugin extends Plugin {
       id: "new-conversation",
       name: "新建 Agent 对话",
       callback: () => this.eachView((view) => view.newConversation()),
+    });
+    for (const [kind, command] of Object.entries(ADD_COMMANDS) as [AddKind, typeof ADD_COMMANDS[AddKind]][]) this.addCommand({
+      id: command.id,
+      name: command.name,
+      callback: () => void this.activateView().then(() => this.eachView((view) => view.requestAdd(kind))),
     });
     this.addCommand({
       id: "manage-capabilities",

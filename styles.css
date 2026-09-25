@@ -350,6 +350,19 @@
 .qiaomu-agent--react .qa-context-numbers { font-variant-numeric: tabular-nums; }
 .qiaomu-agent--react .qa-context-detail button { justify-content: center; margin-top: 4px; border: 1px solid var(--background-modifier-border); }
 
+/* Add menu: grouped like Codex, trigger keys like Claude's shortcut column */
+.qiaomu-agent--react .qa-control-popover:has(.qa-add-menu) { width: min(300px, calc(100% - 48px)); max-height: min(420px, 55dvh); padding: 6px; }
+.qa-add-group + .qa-add-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--background-modifier-border); }
+.qa-add-heading { padding: 6px 8px 4px; color: var(--text-faint); font-size: 12px; font-weight: 500; }
+.qiaomu-agent--react .qa-add-menu button { min-height: 34px; padding: 6px 8px; }
+.qiaomu-agent--react .qa-add-menu button > svg { flex: none; color: var(--text-muted); }
+.qiaomu-agent--react .qa-add-menu button > span:first-of-type { flex: 0 0 auto; }
+.qiaomu-agent--react .qa-add-menu button > .qa-add-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 12px; }
+.qa-add-key { margin-left: auto; min-width: 20px; padding: 0 5px; border: 1px solid var(--background-modifier-border); border-radius: 5px; color: var(--text-muted); background: transparent; font-family: var(--font-monospace); font-size: 11px; line-height: 18px; text-align: center; }
+.qiaomu-agent--react .qa-add-menu button:hover { background: var(--background-modifier-hover); }
+.qiaomu-agent--react .qa-add-menu button:focus-visible { outline: 2px solid var(--text-normal); outline-offset: -2px; }
+@container (max-width: 320px) { .qiaomu-agent--react .qa-add-menu .qa-add-hint { display: none; } }
+
 /* Brand marks (lobe icons): mono marks follow the text color. */
 .qa-brand { display: inline-flex; flex: none; align-items: center; justify-content: center; color: var(--text-normal); }
 .qa-brand svg { width: 100%; height: 100%; display: block; }
