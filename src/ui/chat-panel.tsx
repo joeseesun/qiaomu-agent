@@ -42,7 +42,7 @@ interface Props {
   efforts: string[]; effort: string; modelLoading: boolean; onEffort: (effort: string) => void;
   sources: ModelSource[]; selection: PickerSelection | null; recentModels: PickerSelection[];
   onPickModel: (source: string, model: string) => void; onLoadModels: (source: string) => void; onManageModels: () => void;
-  customPrompts: PromptTemplate[]; onManagePrompts: () => void;
+  customPrompts: PromptTemplate[]; onManagePrompts: (draft?: string) => void;
   onPickFile: (choose: (attachment: ChatAttachment) => void) => void;
   onPickFolder: (choose: (attachment: ChatAttachment) => void) => void;
   /** Absent where pages cannot be read (mobile). */
@@ -153,10 +153,19 @@ export function ChatPanel(props: Props) {
   const imageEditing = attachments.some((file) => file.intent === "edit");
   const permissionLabel = imageEditing ? "图片编辑只读" : props.permission === "full" ? "完全访问" : props.permission === "edit" ? "可写当前库" : "只读";
   const PermissionIcon = imageEditing ? Shield : props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
+  const insertPrompt = (body: string) => {
+    const draft = draftBeforePrompts.current ?? (slashQuery(input) === null ? input : null);
+    draftBeforePrompts.current = null;
+    setInput(draft ? `${draft.trimEnd()}\n\n${body}` : body);
+    setMenuDismissed(true); textarea.current?.focus();
+  };
   const choosePrompt = (index: number) => {
     const prompt = promptChoices[index];
-    draftBeforePrompts.current = null;
-    if (prompt) setInput(prompt.body); else { props.onManagePrompts(); setInput(""); }
+    if (prompt) insertPrompt(prompt.body); else {
+      const draft = draftBeforePrompts.current;
+      draftBeforePrompts.current = null;
+      setInput(draft ?? ""); props.onManagePrompts();
+    }
     setMenuDismissed(true); textarea.current?.focus();
   };
   const addAttachment = (file: ChatAttachment) => {
@@ -270,7 +279,6 @@ export function ChatPanel(props: Props) {
       }}>
         {!messages.length && <div className="qa-empty">
           <h3>从一个想法开始</h3><p>围绕笔记提问、整理，或协作修改。输入 / 使用 Prompt，@ 引用库内文件。</p>
-          <div className="qa-suggestions">{props.prompts.slice(0, 3).map((prompt) => <button key={prompt} type="button" onClick={() => { setInput(prompt); textarea.current?.focus(); }}>{prompt}</button>)}</div>
         </div>}
         {messages.filter((m) => m.role !== "system").map((message, index, visible) => {
           const text = messageText(message);
@@ -319,8 +327,15 @@ export function ChatPanel(props: Props) {
       <ConversationScrollButton />
     </Conversation>
     <div className="qa-composer">
+      <div className="qa-prompt-strip" role="group" aria-label="常用 Prompt">
+        {[...props.customPrompts.filter((p) => p.pinned).map((p) => ({ id: p.id, name: p.name, body: p.body })),
+          ...props.prompts.slice(0, 3).map((body, index) => ({ id: `quick-${index}`, name: body, body }))].slice(0, 5)
+          .map((prompt) => <button key={prompt.id} type="button" onClick={() => insertPrompt(prompt.body)}>{prompt.name}</button>)}
+        <button type="button" className="qa-prompt-strip-manage" onClick={() => props.onManagePrompts()} aria-label="管理 Prompt 库"><Plus size={14} /></button>
+      </div>
       {menuOpen && <div className="qa-command-menu" id={`${inputId}-menu`} role="listbox" aria-label="Prompt 菜单">
         {promptChoices.map((p, index) => <button type="button" role="option" aria-selected={index === menuIndex} id={`${inputId}-option-${index}`} key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(index)}><Slash size={15} /><span>{p.name}</span></button>)}
+        {!promptChoices.length && <div className="qa-command-empty">没有匹配的 Prompt</div>}
         <button type="button" role="option" aria-selected={menuIndex === promptChoices.length} id={`${inputId}-option-${promptChoices.length}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(promptChoices.length)}><Plus size={15} /><span>管理自定义 Prompt…</span></button>
       </div>}
       {running && props.statusText && waitingText === false && <div className="qa-status" role="status">{props.statusText}</div>}
@@ -370,6 +385,7 @@ export function ChatPanel(props: Props) {
               <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-use`}>
                 <div className="qa-add-heading" id={`${inputId}-use`}>使用</div>
                 <button type="button" aria-label="使用 Prompt" onClick={() => { close(); if (input && draftBeforePrompts.current === null) draftBeforePrompts.current = input; setInput("/"); setMenuDismissed(false); setMenuIndex(0); textarea.current?.focus(); }}><Slash size={16} /><span>Prompt</span><AddKey keys="/" /></button>
+                {input.trim() && <button type="button" aria-label="将当前草稿保存为 Prompt" onClick={() => { close(); props.onManagePrompts(input); }}><BookOpen size={16} /><span>保存为 Prompt</span></button>}
                 <button type="button" aria-label={props.skillLabel === "技能" ? "选择技能" : `技能：${props.skillLabel}`} onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} /><span>技能</span><span className="qa-add-hint">{props.skillLabel === "技能" ? "选择要用的技能" : props.skillLabel}</span><ChevronRight size={14} /></button>
                 {props.webSearch !== undefined && <button type="button" aria-label="联网搜索" aria-pressed={props.webSearch} onClick={props.onToggleWebSearch}><Globe size={16} /><span>联网搜索</span><span className="qa-add-hint">{props.webSearch ? "需要时自动搜索" : "已关闭"}</span><span className="qa-add-switch" aria-hidden="true" /></button>}
               </div>

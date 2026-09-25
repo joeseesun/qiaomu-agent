@@ -560,7 +560,12 @@ export class ChatView extends ItemView {
       onManageModels: () => new ModelManagerModal(this.app, this.plugin).open(),
       onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); this.render(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
-      onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
+      onManagePrompts: (draft?: string) => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => {
+        const previous = this.plugin.settings.customPrompts;
+        this.plugin.settings.customPrompts = prompts;
+        try { await this.plugin.saveSettings(); this.render(); }
+        catch (error) { this.plugin.settings.customPrompts = previous; throw error; }
+      }, draft).open(),
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
       onPickFolder: (choose: (attachment: ChatAttachment) => void) => this.chooseFolder(choose),
       onPickWebPage: getRuntimeRequire() ? (choose: (attachment: ChatAttachment) => void) => this.chooseWebPage(choose) : undefined,

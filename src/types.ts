@@ -97,7 +97,7 @@ export interface ConversationRecord extends ConversationIdentity {
   messages: ChatMessage[];
 }
 
-export interface PromptTemplate { id: string; name: string; body: string; }
+export interface PromptTemplate { id: string; name: string; body: string; pinned?: boolean; }
 
 export type ChatRole = "user" | "assistant" | "status";
 
