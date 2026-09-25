@@ -10,13 +10,14 @@ import { ApprovalCard, ChangeSummary } from "./turn-review";
 import { readAttachment, MAX_ATTACHMENTS } from "../services/attachments";
 import { slashQuery, startsFileMention } from "../services/composer";
 import { Attachments } from "../components/ai-elements/attachments";
-import { type AgentMessage, messageText } from "../services/chat-transport";
+import { type AgentMessage, messageText, messageUsage } from "../services/chat-transport";
 import { Conversation, ConversationContent, ConversationScrollButton } from "../components/ai-elements/conversation";
 import { Message, MessageContent, MessageAction, MessageActions } from "../components/ai-elements/message";
 import { PromptInput, PromptInputFooter, PromptInputHeader, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "../components/ai-elements/prompt-input";
 import { splitMermaid } from "../services/mermaid-content";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { ComposerPopover, effortLabel } from "./composer-popover";
+import { ContextRing } from "./context-ring";
 import { conversationImages } from "../services/conversation-images";
 import { ConversationImageLightbox, referenceImageAttachment, showConversationImageMenu } from "./conversation-image";
 
@@ -117,6 +118,7 @@ export function ChatPanel(props: Props) {
   // While the reply has no text yet, its placeholder carries the status instead of the composer.
   const lastMessage = messages.at(-1);
   const waitingText = running && lastMessage?.role === "assistant" && !messageText(lastMessage);
+  const contextUsage = latestUsage(messages);
   const query = slashQuery(input);
   const promptChoices = [...props.prompts.map((body, i) => ({ id: `quick-${i}`, name: body, body })), ...props.customPrompts]
     .filter((p) => !query || `${p.name} ${p.body}`.toLocaleLowerCase().includes(query));
@@ -160,7 +162,7 @@ export function ChatPanel(props: Props) {
   const submit = async (text: string) => {
     if ((!text.trim() && !attachments.length) || reading || running || locked.current) return;
     if (imageEditing && !text.trim()) { setAttachmentError("请描述希望如何修改图片"); textarea.current?.focus(); return; }
-    try { props.onValidateAttachments(attachments); } catch (e) { setAttachmentError(String(e)); return; }
+    try { props.onValidateAttachments(attachments); } catch (e) { setAttachmentError(e instanceof Error ? e.message : String(e)); return; }
     locked.current = true; clearError(); setStopped(false); setInput("");
     const sent = attachments; setAttachments([]); setAttachmentError("");
     try { await sendMessage({ text: text.trim() || "请分析这些附件。", metadata: { createdAt: Date.now(), sourcePath: props.note?.path, attachments: sent } }); }
@@ -338,11 +340,21 @@ export function ChatPanel(props: Props) {
             onSelect={(source, model) => { props.onPickModel(source, model); close(); }}
             onLoad={props.onLoadModels} onManage={() => { close(); props.onManageModels(); }} />}
         </ComposerPopover>
+        {contextUsage && <ContextRing usage={contextUsage} onNew={props.onNew} disabled={running} />}
         <PromptInputSubmit status={status} disabled={(!input.trim() && !attachments.length) || reading > 0 || props.modelLoading} onStop={() => { setStopped(true); void stop().then(props.onPersist); }} />
         </PromptInputFooter>
       </PromptInput>
     </div>
   </>;
+}
+
+/** The most recent reply's reported context usage; older replies describe a smaller window. */
+function latestUsage(messages: AgentMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const usage = messages[index]!.role === "assistant" ? messageUsage(messages[index]!) : undefined;
+    if (usage) return usage;
+  }
+  return undefined;
 }
 
 /** Reading context from another plugin or view, shown as a removable composer chip. */

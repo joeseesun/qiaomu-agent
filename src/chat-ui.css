@@ -148,3 +148,16 @@
 .qiaomu-agent--react .qa-mermaid summary { color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .qiaomu-agent--react .qa-mermaid pre { max-height: 300px; overflow: auto; white-space: pre-wrap; }
 .qiaomu-agent--react .qa-model-control .qa-effort-label { color: var(--text-faint); font-size: var(--font-ui-small); font-weight: 400; }
+
+/* Context window ring (after AI Elements Context) */
+.qiaomu-agent--react .qa-context-control .qa-control-trigger { padding: 4px; }
+.qiaomu-agent--react .qa-context-ring circle { fill: none; stroke-width: 2; }
+.qiaomu-agent--react .qa-context-track { stroke: var(--background-modifier-border); }
+.qiaomu-agent--react .qa-context-value { stroke: var(--text-muted); stroke-linecap: round; }
+.qiaomu-agent--react .qa-context-control.is-warning .qa-context-value { stroke: var(--text-warning); }
+.qiaomu-agent--react .qa-context-control .qa-control-popover { left: auto; right: 24px; }
+.qiaomu-agent--react .qa-context-detail { padding: 4px 6px; font-size: 13px; line-height: 1.6; }
+.qiaomu-agent--react .qa-context-detail p { margin: 0 0 6px; color: var(--text-muted); }
+.qiaomu-agent--react .qa-context-detail p:first-child { color: var(--text-normal); }
+.qiaomu-agent--react .qa-context-numbers { font-variant-numeric: tabular-nums; }
+.qiaomu-agent--react .qa-context-detail button { justify-content: center; margin-top: 4px; border: 1px solid var(--background-modifier-border); }

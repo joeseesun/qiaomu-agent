@@ -22,8 +22,20 @@ export interface ProviderConfig extends ApiConnection {
   /** Hide this provider from the composer without deleting its credentials. */
   showInPicker?: boolean;
   /** Optional API request parameters, keyed by exact model ID. */
-  modelOptions?: Record<string, { temperature?: number; maxOutputTokens?: number }>;
+  modelOptions?: Record<string, ModelOptions>;
   fetchedAt?: number;
+}
+
+/** Per-model settings; an unset capability means "use what the vendor reports". */
+export interface ModelOptions {
+  temperature?: number;
+  maxOutputTokens?: number;
+  /** Context window in tokens. */
+  contextWindow?: number;
+  /** Whether the model thinks, i.e. offers reasoning effort levels. */
+  reasoning?: boolean;
+  /** Whether the model accepts image input. */
+  vision?: boolean;
 }
 
 export interface QiaomuSettings {
@@ -92,6 +104,14 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   activities?: ChatActivity[];
   changes?: TurnChanges;
+  /** Context window occupancy the backend reported after this reply. */
+  usage?: ContextUsage;
+}
+
+/** Tokens currently in the model's context window, as reported by the backend. */
+export interface ContextUsage {
+  used: number;
+  size: number;
 }
 
 /** One file an agent turn touched. `before`/`after` are null when the file did not exist. */
@@ -158,6 +178,8 @@ export interface ChatRequest {
   selection?: EditorSelectionContext;
   /** What the user is reading in another plugin or view (Qiaomu Context Protocol). */
   reading?: ContextSnapshot;
+  /** Context window the provider reported for the selected API model. */
+  contextWindow?: number;
   skill?: AgentSkill;
   mcpConfig?: Record<string, unknown>;
   obsidianCli?: ObsidianCliConnection;
@@ -178,6 +200,7 @@ export interface ChatCallbacks {
   onStatus: (status: string) => void;
   onActivity?: (activity: ChatActivity) => void;
   onAttachment?: (attachment: GeneratedAttachment) => void | Promise<void>;
+  onUsage?: (usage: ContextUsage) => void;
   /** The agent is about to write these absolute paths; `before` is given when the agent reports it. */
   onFileIntent?: (paths: Array<{ path: string; before?: string | null; patch?: string; read?: boolean }>) => void;
   /** Ask the user; resolves with the chosen option id, or null when cancelled. */
@@ -210,6 +233,12 @@ export interface ModelChoice {
   name: string;
   efforts: string[];
   isDefault?: boolean;
+  /** Context window in tokens, when the provider reports it. */
+  contextWindow?: number;
+  /** Image input, when the provider reports it. */
+  vision?: boolean;
+  /** Thinking support, when the provider reports it. */
+  reasoning?: boolean;
 }
 
 export interface ChatAttachment {

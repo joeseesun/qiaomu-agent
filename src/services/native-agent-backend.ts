@@ -7,11 +7,13 @@ import type {
   ChatCallbacks,
   ChatRequest,
   CliDetection,
+  ContextUsage,
   GeneratedAttachment,
   PermissionMode,
   ModelChoice,
 } from "../types";
 import { promptWithContext } from "./cli-profiles";
+import { acpContextUsage, codexContextUsage } from "./context-usage";
 import { JsonRpcProcess } from "./json-rpc-process";
 
 const ACP_AGENTS = new Set(["gemini", "opencode", "qwen", "kimi", "cursor", "cline", "auggie", "hermes", "openclaw"]);
@@ -109,6 +111,7 @@ export class NativeAgentBackend implements ChatBackend {
   private sessionId: string | null = null;
   private mcpSignature = "";
   private activeCallbacks: ChatCallbacks | null = null;
+  private lastUsage: ContextUsage | null = null;
   private activePermissionMode: PermissionMode = "plan";
   private connectedMode: PermissionMode | null = null;
   private ready = false;
@@ -190,6 +193,8 @@ export class NativeAgentBackend implements ChatBackend {
       await this.ensureConnected(request);
       signal.throwIfAborted();
       if (!this.process) throw new Error("原生 Agent 连接未建立");
+      // An agent may report usage after its prompt response; carry it into this reply until a new report arrives.
+      if (this.lastUsage) callbacks.onUsage?.(this.lastUsage);
       if (this.detection.id === "codex") await this.sendCodex(request, signal);
       else await this.sendAcp(request);
       await Promise.all(this.mediaTasks);
@@ -200,13 +205,21 @@ export class NativeAgentBackend implements ChatBackend {
     }
   }
 
+  private reportUsage(usage: ContextUsage | null): void {
+    if (!usage) return;
+    this.lastUsage = usage;
+    this.activeCallbacks?.onUsage?.(usage);
+  }
+
   resetSession(): void {
     this.sessionId = null;
+    this.lastUsage = null;
     this.prompted = false;
   }
 
   async shutdown(): Promise<void> {
     this.sessionId = null;
+    this.lastUsage = null;
     this.ready = false;
     this.connectedMode = null;
     const process = this.process;
@@ -238,6 +251,7 @@ export class NativeAgentBackend implements ChatBackend {
         this.turnReject?.(new Error(reason));
         this.turnResolve = null; this.turnReject = null;
         this.sessionId = null;
+        this.lastUsage = null;
         this.activeCallbacks?.onStatus(`${this.detection.label} · 连接中断`);
         console.warn(`Qiaomu Agent ${this.detection.id} native transport closed: ${reason}`);
       },
@@ -351,6 +365,8 @@ export class NativeAgentBackend implements ChatBackend {
       } else if (method === "item/started" || method === "item/completed") {
         const item = record(record(params)?.item);
         if (item) this.emitCodexActivity(item, method === "item/completed");
+      } else if (method === "thread/tokenUsage/updated") {
+        this.reportUsage(codexContextUsage(params));
       } else if (method === "turn/completed") {
         this.activeTurnId = null;
         const turn = record(record(params)?.turn);
@@ -366,6 +382,10 @@ export class NativeAgentBackend implements ChatBackend {
     const kind = update.sessionUpdate;
     if (kind === "config_option_update") {
       this.configOptions = arrayAt(update, "configOptions").map(record).filter((o): o is Record<string, unknown> => !!o);
+      return;
+    }
+    if (kind === "usage_update") {
+      this.reportUsage(acpContextUsage(update));
       return;
     }
     if (kind === "agent_message_chunk") {

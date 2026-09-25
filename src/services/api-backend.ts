@@ -7,6 +7,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { ApiConnection, ChatBackend, ChatCallbacks, ChatRequest, ModelChoice } from "../types";
 import { attachmentContext } from "./attachments";
 import { apiProtocol, permitsEmptyKey, validateApiUrl } from "./api-providers";
+import { apiContextUsage } from "./context-usage";
+import { reportedCapabilities, resolveModel } from "./model-capabilities";
 
 export function buildApiMessages(request: ChatRequest): ModelMessage[] {
   const sections: string[] = [];
@@ -50,16 +52,18 @@ export class ApiBackend implements ChatBackend {
     const response = await fetch(`${base}/models`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`无法获取模型列表（${response.status}），可继续使用已配置模型`);
     const body = await response.json() as { data?: { id: string; display_name?: string }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
-    const models = body.data?.map((m) => ({ id: m.id, name: m.display_name || m.id }))
-      ?? body.models?.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => ({ id: m.name.replace(/^models\//, ""), name: m.displayName || m.name })) ?? [];
-    return models.map((m) => ({ ...m, efforts: apiEfforts(provider, m.id), isDefault: m.id === this.connection.model }));
+    const models = body.data?.map((m) => ({ id: m.id, name: m.display_name || m.id, ...reportedCapabilities(m) }))
+      ?? body.models?.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => ({ id: m.name.replace(/^models\//, ""), name: m.displayName || m.name, ...reportedCapabilities(m) })) ?? [];
+    return models.map((m) => ({ ...m, efforts: resolveModel({ provider, models: [{ ...m, efforts: [] }] }, m.id).efforts, isDefault: m.id === this.connection.model }));
   }
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
     if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("尚未配置 API Key，请打开连接设置");
     if (!(request.model || this.connection.model).trim()) throw new Error("尚未选择模型");
     signal.throwIfAborted();
     const protocol = apiProtocol(this.connection);
-    const options = { apiKey: this.apiKey || "local", baseURL: validateApiUrl(this.connection.baseUrl), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, redirect: "error" }) };
+    const effort = request.reasoningEffort as "low" | "medium" | "high" | undefined;
+    const bodyExtras = openRouterReasoning(this.connection.provider, protocol, effort);
+    const options = { apiKey: this.apiKey || "local", baseURL: validateApiUrl(this.connection.baseUrl), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, body: withBodyExtras(init?.body, bodyExtras), redirect: "error" }) };
     const modelId = request.model || this.connection.model;
     const editingImage = request.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
     const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
@@ -71,8 +75,6 @@ export class ApiBackend implements ChatBackend {
       : protocol === "google"
         ? createGoogleGenerativeAI(options)(modelId)
         : protocol === "openai-responses" || (editingImage && this.connection.provider === "openai") ? createOpenAI(options).responses(modelId) : createOpenAI(options).chat(modelId);
-    const effort = request.reasoningEffort;
-    if (effort && !apiEfforts(this.connection.provider, modelId).includes(effort)) throw new Error("此模型未配置所选推理强度，请改为默认");
     callbacks.onStatus(`正在连接 ${this.label}…`);
     const result = streamText({
       model, system: request.systemPrompt, messages: buildApiMessages(request),
@@ -80,9 +82,9 @@ export class ApiBackend implements ChatBackend {
       ...(editingImage && this.connection.provider === "openai" ? { tools: { image_generation: openai.tools.imageGeneration({ action: "edit", model: "gpt-image-2.5-sunburst" }) }, toolChoice: { type: "tool" as const, toolName: "image_generation" } } : {}),
       ...(request.modelOptions?.temperature !== undefined ? { temperature: request.modelOptions.temperature } : {}),
       ...(request.modelOptions?.maxOutputTokens !== undefined ? { maxOutputTokens: request.modelOptions.maxOutputTokens } : {}),
-      ...((effort || (editingImage && protocol === "google")) ? { providerOptions: this.connection.provider === "google"
-        ? { google: { ...(effort ? { thinkingConfig: { thinkingLevel: effort } } : {}), ...(editingImage ? { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } : {}) } }
-        : { openai: { reasoningEffort: effort } } } : {}),
+      // The SDK maps one reasoning level to each vendor's own switch (OpenAI effort, Claude thinking, Gemini thinking level).
+      ...(effort ? { reasoning: effort } : {}),
+      ...(editingImage && protocol === "google" ? { providerOptions: { google: { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } } } : {}),
     });
     for await (const part of result.fullStream) {
       if (part.type === "text-delta") callbacks.onText(part.text);
@@ -97,15 +99,22 @@ export class ApiBackend implements ChatBackend {
         const output = part.output as { result?: string };
         if (output.result) await callbacks.onAttachment?.({ id: crypto.randomUUID(), name: `edited-${Date.now()}.png`, mediaType: "image/png", size: Math.floor(output.result.length * 0.75), base64: output.result });
       }
+      if (part.type === "finish-step") {
+        const usage = apiContextUsage(part.usage, request.contextWindow);
+        if (usage) callbacks.onUsage?.(usage);
+      }
       if (part.type === "error") throw part.error;
     }
     signal.throwIfAborted();
   }
 }
 
-// Conservative provider-specific controls; never send a universal effort knob to all APIs.
-export function apiEfforts(provider: ApiConnection["provider"], model: string): string[] {
-  if (provider === "openai" && /^(gpt-5|o[134])/.test(model)) return ["low", "medium", "high"];
-  if (provider === "google" && /^gemini-3/.test(model)) return ["low", "high"];
-  return [];
+/** OpenRouter turns thinking on through its own `reasoning` object rather than OpenAI's `reasoning_effort`. */
+export function openRouterReasoning(provider: string, protocol: string, effort: string | undefined): Record<string, unknown> | null {
+  return provider === "openrouter" && protocol === "openai-chat" && effort ? { reasoning: { effort } } : null;
+}
+
+export function withBodyExtras(body: BodyInit | null | undefined, extras: Record<string, unknown> | null): BodyInit | null | undefined {
+  if (!extras || typeof body !== "string") return body;
+  try { return JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, ...extras }); } catch { return body; }
 }

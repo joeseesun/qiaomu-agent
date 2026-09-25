@@ -20,6 +20,7 @@ import { enabledMcpConfig } from "./services/mcp-config";
 import { getRuntimeRequire } from "./services/runtime-require";
 import { ApiBackend } from "./services/api-backend";
 import { permitsEmptyKey } from "./services/api-providers";
+import { checkImageInput, resolveModel } from "./services/model-capabilities";
 import { activeProvider, agentShown, chooseModel, exposedModels, findProvider, providerIcon, providerLabel, visibleAgentModels, type ModelSource } from "./services/model-sources";
 import { nativeTransportFor } from "./services/native-agent-backend";
 import { agentIconKey } from "./ui/brand-icon";
@@ -83,6 +84,12 @@ export class ChatView extends ItemView {
         if (reading) this.plugin.reading.consumed();
         const modelId = settings.modelSelections?.[this.selectionKey()]?.model || settings.api.model;
         const modelOptions = backend.id === "api" ? activeProvider(settings)?.modelOptions?.[modelId] : undefined;
+        const provider = backend.id === "api" ? activeProvider(settings) : undefined;
+        const capabilities = provider ? resolveModel(provider, modelId) : undefined;
+        const contextWindow = capabilities?.contextWindow;
+        const effort = settings.modelSelections?.[this.selectionKey()]?.effort || undefined;
+        if (capabilities && effort && !capabilities.efforts.includes(effort)) throw new Error("这个模型没有开启思考模式，请把推理强度改为默认，或在模型设置中开启思考模式");
+        if (capabilities) checkImageInput(capabilities, last.metadata?.attachments ?? []);
         const vaultInstructions = backend.id === "api" ? await this.vaultInstructions() : undefined;
         const request = {
           prompt: imageEdit && backend.id === "cli:codex"
@@ -93,7 +100,8 @@ export class ChatView extends ItemView {
           cwd: this.plugin.skillService.getVaultRoot(),
           model: settings.modelSelections?.[this.selectionKey()]?.model || (backend.id === "api" ? settings.api.model : undefined),
           modelOptions,
-          reasoningEffort: settings.modelSelections?.[this.selectionKey()]?.effort || undefined,
+          contextWindow,
+          reasoningEffort: effort,
           attachments: last.metadata?.attachments,
           permissionMode, skill: this.selectedSkill && !settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill : undefined,
           activeFilePath: file?.path,
@@ -519,7 +527,13 @@ export class ChatView extends ItemView {
       customPrompts: this.plugin.settings.customPrompts ?? [],
       onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
-      onValidateAttachments: (attachments: ChatAttachment[]) => validateAttachments(attachments, this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner).id),
+      onValidateAttachments: (attachments: ChatAttachment[]) => {
+        const backendId = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner).id;
+        validateAttachments(attachments, backendId);
+        const provider = backendId === "api" ? activeProvider(this.plugin.settings) : undefined;
+        const modelId = this.plugin.settings.modelSelections?.[this.selectionKey()]?.model || this.plugin.settings.api.model;
+        if (provider) checkImageInput(resolveModel(provider, modelId), attachments);
+      },
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
       permission, fileAccessAvailable: !key.startsWith("api:"), fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,

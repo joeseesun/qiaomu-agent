@@ -1,6 +1,7 @@
 import type { ApiConnection, ModelChoice, ProviderConfig, QiaomuSettings } from "../types";
 import { API_PROVIDERS, apiProtocol } from "./api-providers";
 import { recommendedModels } from "./key-detection";
+import { resolveModel } from "./model-capabilities";
 
 /** A place models come from: a local agent (`cli:<id>`) or a configured provider (`api:<providerId>`). */
 export interface ModelSource {
@@ -60,8 +61,8 @@ export function maskKey(key: string): string {
 /** Models the picker offers: exactly the enabled ones (explicit list), plus the configured default. */
 export function exposedModels(provider: ProviderConfig): ModelChoice[] {
   const all = provider.models ?? [];
-  const list = (provider.enabledModels ?? []).map((id) => all.find((model) => model.id === id) ?? { id, name: id, efforts: [] });
-  return list;
+  // Efforts follow the per-model thinking setting, so a switch in settings shows up in the picker.
+  return (provider.enabledModels ?? []).map((id) => ({ ...(all.find((model) => model.id === id) ?? { id, name: id }), efforts: resolveModel(provider, id).efforts }));
 }
 
 export interface ConnectDeps {

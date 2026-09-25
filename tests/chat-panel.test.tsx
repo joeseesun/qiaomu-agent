@@ -227,3 +227,15 @@ it("labels write access next to the permission icon but not read-only", () => {
   rerender(<ChatPanel {...props} permission="edit" />);
   expect(document.querySelector(".qa-permission-label")?.textContent).toBe("可写当前库");
 });
+it("shows the context ring only after a reported usage, warning near the limit", async () => {
+  const { input, send, chat, props } = setup();
+  expect(screen.queryByRole("button", { name: /上下文已用/ })).toBeNull();
+  send.mockImplementationOnce(async (_request, callbacks) => { callbacks.onText("好"); callbacks.onUsage({ used: 170_000, size: 200_000 }); });
+  fireEvent.change(input, { target: { value: "你好" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(chat.status).toBe("ready"));
+  fireEvent.click(await screen.findByRole("button", { name: "上下文已用 85%" }));
+  expect(screen.getByText("170K / 200K tokens")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
+  expect(props.onNew).toHaveBeenCalledOnce();
+});

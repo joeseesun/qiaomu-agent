@@ -1,8 +1,9 @@
 import { Modal, Notice, Platform, setIcon, ToggleComponent, type App } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
-import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ProviderConfig } from "../types";
+import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ModelOptions, ProviderConfig } from "../types";
 import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl } from "../services/api-providers";
-import { ApiBackend, apiEfforts } from "../services/api-backend";
+import { ApiBackend } from "../services/api-backend";
+import { builtinEfforts, compactTokens, resolveModel } from "../services/model-capabilities";
 import { detectKey, recommendedModels } from "../services/key-detection";
 import { agentShown, connectProvider, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, removeProvider, upsertProvider } from "../services/model-sources";
 import { nativeTransportFor, nativeTransportLabel } from "../services/native-agent-backend";
@@ -334,6 +335,8 @@ export class ProviderSettings {
 /** One provider: key, searchable model switches, default model, endpoint, removal. */
 class ProviderModal extends Modal {
   private query = "";
+  /** Model whose options are open; kept across redraws. */
+  private expanded = "";
   private changingKey = false;
   private confirmRemove = false;
   private busy = "";
@@ -341,6 +344,66 @@ class ProviderModal extends Modal {
   private testResult = "";
 
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly id: string, private readonly onChange: () => void) { super(app); }
+
+  /** Per-model options. Capabilities default to what the vendor reported; a choice here overrides it. */
+  private drawModelOptions(panel: HTMLElement, provider: ProviderConfig, id: string, model: ModelChoice | undefined, redraw: () => void): void {
+    panel.createDiv({ cls: "qa-switch-id", text: id });
+    const options = provider.modelOptions?.[id] ?? {};
+    const save = async (patch: Partial<ModelOptions>) => {
+      const latest = this.provider ?? provider;
+      const next: ModelOptions = { ...(latest.modelOptions?.[id] ?? {}), ...patch };
+      for (const key of Object.keys(next) as Array<keyof ModelOptions>) if (next[key] === undefined) delete next[key];
+      await this.save({ ...latest, modelOptions: { ...latest.modelOptions, [id]: next } });
+      redraw();
+    };
+    const auto = resolveModel({ provider: provider.provider, models: provider.models }, id);
+
+    const windowRow = panel.createDiv({ cls: "qa-model-option" });
+    const windowLabel = windowRow.createEl("label");
+    windowLabel.createSpan({ text: "上下文窗口" });
+    const windowInput = windowLabel.createEl("input", { type: "number", attr: { min: "1", step: "1", placeholder: `自动${auto.contextWindow ? `（${compactTokens(auto.contextWindow)}）` : "（未知）"}` } });
+    windowInput.value = options.contextWindow === undefined ? "" : String(options.contextWindow);
+    windowInput.addEventListener("change", () => {
+      const value = windowInput.value === "" ? undefined : windowInput.valueAsNumber;
+      if (value !== undefined && (!Number.isInteger(value) || value < 1)) { new Notice("上下文窗口需要是正整数"); windowInput.value = options.contextWindow === undefined ? "" : String(options.contextWindow); return; }
+      void save({ contextWindow: value });
+    });
+    const presets = windowRow.createDiv({ cls: "qa-option-presets" });
+    for (const value of [32_000, 128_000, 200_000, 1_000_000]) {
+      const preset = presets.createEl("button", { cls: "qa-text-button", text: compactTokens(value), attr: { "aria-pressed": String(options.contextWindow === value) } });
+      preset.addEventListener("click", () => void save({ contextWindow: options.contextWindow === value ? undefined : value }));
+    }
+
+    const reportedThinking = builtinEfforts(provider.provider, id).length > 0 || model?.reasoning;
+    this.tristate(panel, "思考模式", options.reasoning, reportedThinking === undefined ? "未知" : reportedThinking ? "支持" : "不支持", ["开启", "关闭"], (value) => void save({ reasoning: value }));
+    this.tristate(panel, "图片输入", options.vision, model?.vision === undefined ? "未知" : model.vision ? "支持" : "不支持", ["支持", "不支持"], (value) => void save({ vision: value }));
+
+    const addNumber = (label: string, value: number | undefined, min: number, max: number, step: string, field: "temperature" | "maxOutputTokens") => {
+      const wrapper = panel.createEl("label", { cls: "qa-model-option" });
+      wrapper.createSpan({ text: label });
+      const input = wrapper.createEl("input", { type: "number", attr: { min: String(min), max: String(max), step, placeholder: "默认" } });
+      input.value = value === undefined ? "" : String(value);
+      input.addEventListener("change", () => {
+        if (input.value !== "" && (!input.validity.valid || !Number.isFinite(input.valueAsNumber))) { new Notice(`${label}超出允许范围`); input.value = value === undefined ? "" : String(value); return; }
+        void save({ [field]: input.value === "" ? undefined : input.valueAsNumber });
+      });
+    };
+    // Thinking models fix their own sampling temperature.
+    if (!resolveModel(provider, id).efforts.length) addNumber("温度（0–2）", options.temperature, 0, 2, "0.1", "temperature");
+    addNumber("最大输出 Token（1–65536）", options.maxOutputTokens, 1, 65536, "1", "maxOutputTokens");
+  }
+
+  /** 自动 / on / off, where 自动 names what was detected. */
+  private tristate(panel: HTMLElement, label: string, value: boolean | undefined, detected: string, [on, off]: [string, string], onChange: (value: boolean | undefined) => void): void {
+    const row = panel.createDiv({ cls: "qa-model-option" });
+    row.createSpan({ text: label });
+    const group = row.createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
+    labelGroup(group, label);
+    for (const [choice, text] of [[undefined, `自动 · ${detected}`], [true, on], [false, off]] as const) {
+      const button = group.createEl("button", { text, attr: { role: "radio", "aria-checked": String(value === choice) } });
+      button.addEventListener("click", () => { if (value !== choice) onChange(choice); });
+    }
+  }
 
   private get provider(): ProviderConfig | undefined { return this.plugin.settings.providers.find((item) => item.id === this.id); }
 
@@ -459,27 +522,11 @@ class ProviderModal extends Modal {
           makeDefault.addEventListener("click", async () => { await this.save({ ...provider, model: id }); this.draw(); });
         }
         if (toggle.checked) {
-          const details = row.createEl("button", { cls: "qa-text-button", text: "配置", attr: { "aria-expanded": "false" } });
-          const panel = list.createDiv({ cls: "qa-model-options" });
-          panel.hidden = true;
-          details.addEventListener("click", () => { panel.hidden = !panel.hidden; details.setAttribute("aria-expanded", String(!panel.hidden)); });
-          panel.createDiv({ cls: "qa-switch-id", text: id });
-          const options = provider.modelOptions?.[id] ?? {};
-          const addNumber = (label: string, value: number | undefined, min: number, max: number, step: string, field: "temperature" | "maxOutputTokens") => {
-            const wrapper = panel.createEl("label", { cls: "qa-model-option" });
-            wrapper.createSpan({ text: label });
-            const input = wrapper.createEl("input", { type: "number", attr: { min: String(min), max: String(max), step, placeholder: "默认" } });
-            input.value = value === undefined ? "" : String(value);
-            input.addEventListener("change", async () => {
-              if (input.value !== "" && (!input.validity.valid || !Number.isFinite(input.valueAsNumber))) { new Notice(`${label}超出允许范围`); input.value = value === undefined ? "" : String(value); return; }
-              const latest = this.provider ?? provider;
-              const next = { ...(latest.modelOptions?.[id] ?? options) };
-              if (input.value === "") delete next[field]; else next[field] = input.valueAsNumber;
-              await this.save({ ...latest, modelOptions: { ...latest.modelOptions, [id]: next } });
-            });
-          };
-          if (!apiEfforts(provider.provider, id).length) addNumber("温度（0–2）", options.temperature, 0, 2, "0.1", "temperature");
-          addNumber("最大输出 Token（1–65536）", options.maxOutputTokens, 1, 65536, "1", "maxOutputTokens");
+          const open = this.expanded === id;
+          const details = row.createEl("button", { cls: "qa-text-button", text: "配置", attr: { "aria-expanded": String(open) } });
+          details.addEventListener("click", () => { this.expanded = open ? "" : id; drawList(); });
+          // Saving replaces the provider object, so redraw from the saved settings.
+          if (open) this.drawModelOptions(list.createDiv({ cls: "qa-model-options" }), provider, id, model, () => this.draw());
         }
       }
       if (shown.length > 200) list.createDiv({ cls: "qa-list-empty", text: `还有 ${shown.length - 200} 个，请搜索` });
