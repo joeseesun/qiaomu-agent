@@ -12,6 +12,7 @@ export class WechatPreviewView extends ItemView {
   private timer: number | null = null;
   private generation = 0;
   private frame!: HTMLElement;
+  private screen!: HTMLElement;
   private shadow!: ShadowRoot;
   private status!: HTMLElement;
   private phone = true;
@@ -31,7 +32,11 @@ export class WechatPreviewView extends ItemView {
     this.frame = root.createDiv({ cls: "qiaomu-wechat-preview-frame is-phone" });
     const device = this.frame.createDiv({ cls: "qiaomu-wechat-preview-device" });
     device.createDiv({ cls: "qiaomu-wechat-preview-device-top", attr: { "aria-hidden": "true" } });
-    this.shadow = device.createDiv({ cls: "qiaomu-wechat-preview-screen" }).attachShadow({ mode: "open" });
+    this.screen = device.createDiv({ cls: "qiaomu-wechat-preview-screen" });
+    this.shadow = this.screen.attachShadow({ mode: "open" });
+    const resizeObserver = new ResizeObserver(() => this.syncPreviewScale());
+    resizeObserver.observe(this.screen);
+    this.register(() => resizeObserver.disconnect());
     device.createDiv({ cls: "qiaomu-wechat-preview-device-bottom", attr: { "aria-hidden": "true" } });
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.followActiveFile()));
     this.registerEvent(this.app.vault.on("modify", (file) => { if (file.path === this.file?.path) this.schedule(); }));
@@ -43,10 +48,12 @@ export class WechatPreviewView extends ItemView {
     menu.addItem((item) => item.setTitle("手机预览").setIcon("smartphone").setChecked(this.phone).onClick(() => {
       this.phone = true;
       this.frame.toggleClass("is-phone", true);
+      this.syncPreviewScale();
     }));
     menu.addItem((item) => item.setTitle("宽幅预览").setIcon("panel-top").setChecked(!this.phone).onClick(() => {
       this.phone = false;
       this.frame.toggleClass("is-phone", false);
+      this.syncPreviewScale();
     }));
     menu.addSeparator();
     menu.addItem((item) => item.setTitle("深色模拟").setIcon("moon").setChecked(this.dark).onClick(() => {
@@ -60,6 +67,14 @@ export class WechatPreviewView extends ItemView {
   private updateStatus(): void {
     const warnings = this.note?.warnings.length ?? 0;
     this.status.setText([warnings ? `${warnings} 条排版提醒` : "", this.dark ? "深色仅为模拟" : ""].filter(Boolean).join(" · "));
+  }
+
+  /** Keep a 390 CSS-pixel article viewport when the phone mockup shrinks to fit the pane. */
+  private syncPreviewScale(): void {
+    const article = this.shadow?.querySelector<HTMLElement>(".article");
+    if (!article || !this.screen?.clientWidth) return;
+    article.style.width = this.phone ? "390px" : "";
+    article.style.setProperty("zoom", this.phone ? String(this.screen.clientWidth / 390) : "1");
   }
 
   override async onClose(): Promise<void> {
@@ -95,7 +110,7 @@ export class WechatPreviewView extends ItemView {
       this.note = note;
       this.shadow.innerHTML = "";
       const style = document.createElement("style");
-      style.textContent = ":host{display:block}.article{box-sizing:border-box;padding:22px 18px 36px;background:#fff;color:#1a1a1a;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}.article-header{margin:0 0 30px}.article-title{font-size:23px;line-height:1.42;font-weight:650;letter-spacing:.01em}.article-author{margin-top:12px;color:#777;font-size:13px}.article img{max-width:100%}";
+      style.textContent = ":host{display:block}.article{box-sizing:border-box;padding:22px 12px 36px;background:#fff;color:#1a1a1a;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}.article-header{margin:0 0 24px}.article-title{font-size:22px;line-height:1.4;font-weight:600;letter-spacing:0}.article-author{margin-top:12px;color:#777;font-size:14px;line-height:1.5}.article img{max-width:100%}";
       this.shadow.append(style);
       const article = document.createElement("div");
       article.className = "article";
@@ -105,6 +120,7 @@ export class WechatPreviewView extends ItemView {
       if (typeof author === "string" && author.trim()) heading.createDiv({ cls: "article-author", text: author.trim() });
       article.createDiv({ cls: "article-content" }).innerHTML = html;
       this.shadow.append(article);
+      this.syncPreviewScale();
       this.updateStatus();
     } catch (error) { if (generation === this.generation) this.status.setText(`预览失败：${error instanceof Error ? error.message : String(error)}`); }
   }
