@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, Modal, Setting, Notice, TFile } from "obsidian";
+import { App, FuzzySuggestModal, Modal, Setting, Notice, TFile, TFolder } from "obsidian";
 import type { PromptTemplate } from "../types";
 import { appendReply, undoReply } from "../services/note-actions";
 
@@ -7,6 +7,12 @@ export class FilePicker extends FuzzySuggestModal<TFile> {
   getItems(): TFile[] { return this.markdownOnly ? this.app.vault.getMarkdownFiles() : this.app.vault.getFiles(); }
   getItemText(file: TFile): string { return file.path; }
   onChooseItem(file: TFile): void { this.choose(file); }
+}
+export class FolderPicker extends FuzzySuggestModal<TFolder> {
+  constructor(app: App, private readonly choose: (folder: TFolder) => void) { super(app); this.setPlaceholder("搜索文件夹…"); }
+  getItems(): TFolder[] { return this.app.vault.getAllLoadedFiles().filter((item): item is TFolder => item instanceof TFolder && !item.isRoot()); }
+  getItemText(folder: TFolder): string { return folder.path; }
+  onChooseItem(folder: TFolder): void { this.choose(folder); }
 }
 export class PromptManager extends Modal {
   constructor(app: App, private readonly prompts: PromptTemplate[], private readonly save: (prompts: PromptTemplate[]) => Promise<void>) { super(app); }
