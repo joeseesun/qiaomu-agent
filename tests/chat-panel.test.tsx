@@ -7,7 +7,7 @@ import { AgentTransport, messageText, type AgentMessage } from "../src/services/
 import { Platform, type App, type Component } from "obsidian";
 import type { ComponentProps, ReactNode } from "react";
 vi.mock("obsidian", () => ({
-  Component: class {}, Notice: class {},
+  Component: class {}, Notice: class {}, Modal: class {}, MarkdownView: class {}, Menu: class {}, Setting: class {}, TFile: class {}, requestUrl: vi.fn(),
   Platform: { isDesktopApp: true },
   MarkdownRenderer: { render: async (_: unknown, text: string, target: HTMLElement) => { target.textContent = text; } },
 }));
@@ -21,6 +21,7 @@ function setup() {
   const chat = new Chat<AgentMessage>({ transport: new AgentTransport(async (messages) => ({ backend: { id: "mock", label: "Mock", send }, request: { prompt: messageText(messages.at(-1)!), systemPrompt: "", cwd: null, permissionMode: "plan", history: [], attachments: messages.at(-1)?.metadata?.attachments } })) });
   const props: ComponentProps<typeof ChatPanel> = {
     chat, app: {} as App, parent: { addChild() {}, removeChild() {} } as unknown as Component,
+    conversationId: "test", conversationTitle: "", branch: null, onOpenParent: vi.fn(), onForkMessage: vi.fn(), imageTargetNote: null,
     backendLabel: "Mock", skillLabel: "技能", permission: "plan", fileAccessAvailable: true, fullAccessAvailable: true, note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
     sources: [{ key: "api:mock", kind: "api", label: "Mock 服务商", models: [{ id: "mock", name: "Mock model", efforts: ["low", "high"] }, { id: "other", name: "Other model", efforts: [] }], loaded: true }],
     selection: { source: "api:mock", model: "mock" }, recentModels: [], onPickModel: vi.fn(), onLoadModels: vi.fn(), onManageModels: vi.fn(),
@@ -77,6 +78,7 @@ it("model/effort actions and icon-only reply actions invoke the right callbacks"
   expect(screen.queryByText("🧠")).toBeNull();
   fireEvent.change(input, { target: { value: "hello" } }); fireEvent.submit(container.querySelector("form")!);
   fireEvent.click(await screen.findByRole("button", { name: "追加到指定文件" })); expect(props.onAppend).toHaveBeenCalledWith("测试回复", false);
+  fireEvent.click(screen.getByRole("button", { name: "从这条回复创建分支" })); expect(props.onForkMessage).toHaveBeenCalledOnce();
 });
 
 it("shows user time and can edit a message before regenerating its reply", async () => {

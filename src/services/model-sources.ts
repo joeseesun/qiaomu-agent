@@ -13,6 +13,26 @@ export interface ModelSource {
   error?: string;
   /** Local agents may not have reported models yet. */
   loaded: boolean;
+  showDefault?: boolean;
+  allowCustom?: boolean;
+  canListModels?: boolean;
+}
+
+/** Keep first-run composer choices small. Every detected agent remains available in settings. */
+export const DEFAULT_VISIBLE_AGENT_IDS = ["codex", "claude", "opencode", "pi", "cursor", "antigravity", "kimi"] as const;
+
+export function agentShown(settings: QiaomuSettings, id: string): boolean {
+  if (settings.hiddenAgents.includes(id)) return false;
+  return settings.agentVisibility[id] ?? DEFAULT_VISIBLE_AGENT_IDS.includes(id as typeof DEFAULT_VISIBLE_AGENT_IDS[number]);
+}
+
+export function visibleAgentModels(settings: QiaomuSettings, agentId: string, reported: ModelChoice[]): { models: ModelChoice[]; showDefault: boolean } {
+  const enabled = settings.agentEnabledModels[agentId];
+  const all = [...reported];
+  for (const id of settings.agentCustomModels[agentId] ?? []) {
+    if (!all.some((model) => model.id === id)) all.push({ id, name: id, efforts: [] });
+  }
+  return { models: enabled ? all.filter((model) => enabled.includes(model.id)) : all, showDefault: !enabled || enabled.includes("") };
 }
 
 export const RECENT_LIMIT = 8;
@@ -41,7 +61,6 @@ export function maskKey(key: string): string {
 export function exposedModels(provider: ProviderConfig): ModelChoice[] {
   const all = provider.models ?? [];
   const list = (provider.enabledModels ?? []).map((id) => all.find((model) => model.id === id) ?? { id, name: id, efforts: [] });
-  if (provider.model && !list.some((model) => model.id === provider.model)) list.unshift({ id: provider.model, name: provider.model, efforts: [] });
   return list;
 }
 
@@ -76,7 +95,7 @@ export async function connectProvider(
     ...draft,
     models,
     fetchedAt: Date.now(),
-    enabledModels: existing?.enabledModels?.length ? existing.enabledModels : recommended,
+    enabledModels: existing?.enabledModels ?? recommended,
     model: existing?.model && models.some((model) => model.id === existing.model) ? existing.model : recommended[0] ?? draft.model,
   };
   if (existing) deps.setSecret(existing.secretId, "");

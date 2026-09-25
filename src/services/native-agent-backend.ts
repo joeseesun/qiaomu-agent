@@ -14,7 +14,7 @@ import type {
 import { promptWithContext } from "./cli-profiles";
 import { JsonRpcProcess } from "./json-rpc-process";
 
-const ACP_AGENTS = new Set(["gemini", "opencode", "qwen", "kimi"]);
+const ACP_AGENTS = new Set(["gemini", "opencode", "qwen", "kimi", "cursor", "cline", "auggie", "hermes", "openclaw"]);
 
 export function nativeTransportFor(agentId: string): "app-server" | "acp" | null {
   if (agentId === "codex") return "app-server";
@@ -74,8 +74,8 @@ function effectivePrompt(request: ChatRequest, includeSystemPrompt: boolean): st
 }
 
 export function acpLaunch(agentId: string, permissionMode: PermissionMode): string[] {
-  if (agentId === "kimi") return ["acp"];
-  if (agentId === "opencode") return ["acp"];
+  if (["kimi", "opencode", "cursor", "hermes", "openclaw"].includes(agentId)) return ["acp"];
+  if (["cline", "auggie"].includes(agentId)) return ["--acp"];
   if (agentId === "qwen") return ["--acp", "--approval-mode", permissionMode !== "plan" ? "auto-edit" : "plan"];
   return ["--acp", "--approval-mode", permissionMode !== "plan" ? "auto_edit" : "plan"];
 }
@@ -107,6 +107,7 @@ export class NativeAgentBackend implements ChatBackend {
   readonly label: string;
   private process: JsonRpcProcess | null = null;
   private sessionId: string | null = null;
+  private mcpSignature = "";
   private activeCallbacks: ChatCallbacks | null = null;
   private activePermissionMode: PermissionMode = "plan";
   private connectedMode: PermissionMode | null = null;
@@ -118,6 +119,8 @@ export class NativeAgentBackend implements ChatBackend {
   private prompted = false;
   private mediaTasks: Promise<void>[] = [];
   private emittedMedia = new Set<string>();
+
+  isBusy(): boolean { return this.activeCallbacks !== null; }
 
   async listModels(request: ChatRequest): Promise<ModelChoice[]> {
     if (this.activeCallbacks) throw new Error("请等当前回复结束后切换模型");
@@ -152,10 +155,14 @@ export class NativeAgentBackend implements ChatBackend {
   }
 
   private async ensureAcpSession(request: ChatRequest): Promise<void> {
+    const servers = acpMcpServers(request.mcpConfig);
+    const signature = JSON.stringify(servers);
+    if (this.sessionId && this.mcpSignature !== signature) this.resetSession();
     if (this.sessionId) return;
-    const result = await this.process!.request("session/new", { cwd: request.cwd, mcpServers: acpMcpServers(request.mcpConfig) }, 30_000);
+    const result = await this.process!.request("session/new", { cwd: request.cwd, mcpServers: servers }, 30_000);
     this.sessionId = stringAt(result, "sessionId");
     if (!this.sessionId) throw new Error("ACP Agent 未返回 sessionId");
+    this.mcpSignature = signature;
     this.configOptions = arrayAt(result, "configOptions").map(record).filter((o): o is Record<string, unknown> => !!o);
     this.legacyModels = arrayAt(result, "models", "availableModels").map((m) => ({ id: stringAt(m, "modelId") || "", name: stringAt(m, "name") || "", efforts: [] })).filter((m) => !!m.id);
     this.prompted = false;

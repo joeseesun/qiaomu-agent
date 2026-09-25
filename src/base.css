@@ -117,6 +117,27 @@
 .qiaomu-agent-settings__feedback.is-error { color: var(--text-error); }
 
 .qiaomu-agent-connect-modal { width: min(760px, calc(100vw - 32px)); }
+
+/* Inline rewrite: small host dialog, neutral controls, readable before/after. */
+.modal.qa-inline-edit-modal { width: min(640px, calc(100vw - 24px)); }
+.qa-inline-edit-modal .modal-content { display: grid; gap: 14px; }
+.qa-inline-edit-modal .modal-title { font-size: 18px; font-weight: 600; }
+.qa-inline-edit-context { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.qa-inline-edit-modal textarea.qa-inline-edit-input { display: block; width: 100%; min-height: 86px; padding: 10px 12px; resize: vertical; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); color: var(--text-normal); box-shadow: none; font: inherit; }
+.qa-inline-edit-modal textarea.qa-inline-edit-input:focus { border-color: var(--text-muted); outline: 2px solid color-mix(in srgb, var(--text-normal) 12%, transparent); outline-offset: 1px; box-shadow: none !important; }
+.qa-inline-edit-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -7px; }
+.qa-inline-edit-modal .qa-inline-edit-presets button { min-height: 28px; padding: 4px 9px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-muted); box-shadow: none; font-size: 12px; }
+.qa-inline-edit-modal .qa-inline-edit-presets button:hover { color: var(--text-normal); border-color: var(--background-modifier-border-hover); }
+.qa-inline-edit-original, .qa-inline-edit-preview { max-height: min(38dvh, 340px); overflow: auto; padding: 14px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); color: var(--text-normal); font-family: var(--font-text); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qa-inline-edit-original { color: var(--text-muted); }
+.qa-inline-edit-del { color: var(--text-muted); text-decoration: line-through; background: color-mix(in srgb, var(--text-normal) 8%, transparent); }
+.qa-inline-edit-add { color: var(--text-normal); background: color-mix(in srgb, var(--text-normal) 16%, transparent); border-radius: 2px; }
+.qa-inline-edit-error { color: var(--text-error); font-size: 13px; }
+.qa-inline-edit-status { color: var(--text-muted); font-size: 13px; }
+.qa-inline-edit-modal .setting-item { padding: 0; border: 0; }
+.qa-inline-edit-modal .setting-item-control { width: 100%; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.qa-inline-edit-modal button.mod-cta, .qa-inline-edit-modal button.mod-cta:hover { background: var(--text-normal); color: var(--background-primary); box-shadow: none; }
+.qa-inline-edit-modal button:focus-visible { outline: 2px solid var(--text-normal); outline-offset: 2px; }
 .qiaomu-agent-connect-modal .modal-content { padding: 28px 30px 22px; }
 .qiaomu-agent-connect-modal h2 { margin: 0 0 5px; font-size: 24px; letter-spacing: -.02em; }
 .qiaomu-agent-connect__subtitle { margin: 0 0 24px; color: var(--text-muted); }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Clock, LayoutGrid, RefreshCw, Search, Settings2 } from "lucide-react";
 import type { ModelSource } from "../services/model-sources";
 import { BrandIcon } from "./brand-icon";
@@ -38,6 +38,8 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
   const [rail, setRail] = useState(ALL);
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const sourceLabelId = useId();
+  const effortLabelId = useId();
   useEffect(() => { search.current?.focus(); }, []);
   // A rail source that disappears (provider removed) falls back to "all".
   useEffect(() => { if (rail !== ALL && rail !== RECENT && !sources.some((s) => s.key === rail)) setRail(ALL); }, [rail, sources]);
@@ -51,6 +53,8 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
       for (const item of recent) {
         const source = bySource.get(item.source);
         if (!source) continue;
+        if (source.kind === "api" && !source.models.some((model) => model.id === item.model)) continue;
+        if (source.kind === "agent" && (item.model ? !source.models.some((model) => model.id === item.model) : source.showDefault === false)) continue;
         const name = source.models.find((m) => m.id === item.model)?.name ?? item.model;
         if (matches(q, name, item.model, source.label)) result.push({ type: "model", key: `r:${item.source}:${item.model}`, source, id: item.model, name, showSource: true });
       }
@@ -62,19 +66,19 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
       const sourceHit = matches(q, source.label);
       const models = source.models.filter((m) => sourceHit || matches(q, m.name, m.id));
       const group: Row[] = [];
-      if (source.kind === "agent" && (sourceHit || matches(q, "默认模型"))) {
+      if (source.kind === "agent" && source.showDefault !== false && (sourceHit || matches(q, "默认模型"))) {
         group.push({ type: "model", key: `${source.key}:`, source, id: "", name: "默认模型", showSource: false });
       }
       for (const model of models) group.push({ type: "model", key: `${source.key}:${model.id}`, source, id: model.id, name: model.name || model.id, showSource: false });
       // Listing an agent's models starts its process, so only offer it when that agent is in focus.
-      if (source.kind === "agent" && !source.loaded && !q && rail === source.key) group.push({ type: "load", key: `${source.key}:load`, source });
+      if (source.kind === "agent" && source.canListModels && !source.loaded && !q && rail === source.key) group.push({ type: "load", key: `${source.key}:load`, source });
       if (source.error && !q && rail === source.key) group.push({ type: "note", key: `${source.key}:error`, text: source.error });
       if (!group.length) continue;
       if (visible.length > 1) result.push({ type: "header", key: `${source.key}:header`, label: source.label });
       result.push(...group);
     }
     const target = rail !== ALL ? bySource.get(rail) : current ? bySource.get(current.source) : undefined;
-    if (query.trim() && target && !result.some((row) => row.type === "model" && row.source.key === target.key && row.id === query.trim())) {
+    if (query.trim() && target?.kind === "agent" && target.allowCustom !== false && !result.some((row) => row.type === "model" && row.source.key === target.key && row.id === query.trim())) {
       result.push({ type: "custom", key: "custom", source: target, id: query.trim() });
     }
     if (!result.length) result.push({ type: "note", key: "empty", text: sources.length ? "没有匹配的模型" : "还没有可用的模型来源，先添加服务商或安装本地 Agent。" });
@@ -100,19 +104,20 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
   };
 
   const railButton = (key: string, label: string, icon: ReactNode) => (
-    <button key={key} type="button" className="qa-picker-rail-item" aria-pressed={rail === key} aria-label={label} title={label}
+    <button key={key} type="button" className="qa-picker-rail-item" aria-pressed={rail === key}
       onClick={() => {
         setRail(key);
         const source = bySource.get(key);
-        if (source?.kind === "agent" && !source.loaded && !source.loading && !source.error) onLoad(key);
+        if (source?.canListModels && !source.loaded && !source.loading && !source.error) onLoad(key);
         search.current?.focus();
-      }}>{icon}</button>
+      }}>{icon}<span className="qiaomu-agent__sr-only">{label}</span></button>
   );
 
   return <div className="qa-picker">
-    <div className="qa-picker-search">
+    <label className="qa-picker-search">
       <Search size={14} aria-hidden="true" />
-      <input ref={search} aria-label="筛选模型" placeholder="筛选，或输入任意模型 ID" value={query}
+      <span className="qiaomu-agent__sr-only">筛选模型</span>
+      <input ref={search} placeholder="筛选模型" value={query}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") { event.preventDefault(); focusItem(1); }
@@ -121,15 +126,17 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
             if (first) { event.preventDefault(); choose(first); }
           }
         }} />
-    </div>
+    </label>
     <div className="qa-picker-body">
-      <div className="qa-picker-rail" role="toolbar" aria-label="模型来源" aria-orientation="vertical">
+      <div className="qa-picker-rail" role="toolbar" aria-labelledby={sourceLabelId} aria-orientation="vertical">
+        <span id={sourceLabelId} className="qiaomu-agent__sr-only">模型来源</span>
         {railButton(ALL, "全部模型", <LayoutGrid size={15} />)}
         {recent.length > 0 && railButton(RECENT, "最近使用", <Clock size={15} />)}
         {sources.length > 0 && <span className="qa-picker-rail-sep" aria-hidden="true" />}
         {sources.map((source) => railButton(source.key, source.label, <BrandIcon icon={source.icon} kind={source.kind} size={16} />))}
       </div>
       <div ref={list} className="qa-picker-list" onKeyDown={onListKey}>
+        {rail !== ALL && rail !== RECENT && <div className="qa-picker-active-source">{bySource.get(rail)?.label}</div>}
         {rows.map((row) => {
           if (row.type === "header") return <div key={row.key} className="qa-picker-group">{row.label}</div>;
           if (row.type === "note") return <p key={row.key} className="qa-picker-note">{row.text}</p>;
@@ -142,7 +149,7 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
             <span className="qa-picker-name">使用「{row.id}」</span><span className="qa-picker-meta">{row.source.label}</span>
           </button>;
           const selected = current?.source === row.source.key && current.model === row.id;
-          return <button key={row.key} type="button" className="qa-picker-item" aria-pressed={selected} onClick={() => choose(row)} title={row.id || undefined}>
+          return <button key={row.key} type="button" className="qa-picker-item" aria-pressed={selected} onClick={() => choose(row)}>
             <BrandIcon icon={row.source.icon} kind={row.source.kind} />
             <span className="qa-picker-name">{row.name}</span>
             {row.showSource && <span className="qa-picker-meta">{row.source.label}</span>}
@@ -151,8 +158,8 @@ export function ModelPicker({ sources, current, recent, efforts, effort, onEffor
         })}
       </div>
     </div>
-    {efforts.length > 0 && <div className="qa-picker-effort" role="radiogroup" aria-label="推理强度">
-      <span>推理</span>
+    {efforts.length > 0 && <div className="qa-picker-effort" role="radiogroup" aria-labelledby={effortLabelId}>
+      <span id={effortLabelId} className="qiaomu-agent__sr-only">推理强度</span><span>推理</span>
       {["", ...efforts].map((value) => <button key={value || "default"} type="button" role="radio" aria-checked={effort === value} onClick={() => onEffort(value)}>{effortLabel(value)}</button>)}
     </div>}
     <div className="qa-picker-footer">

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { parseCliOutputLine } from "../src/services/cli-output";
 
 describe("parseCliOutputLine", () => {
+  it("reads Antigravity streaming events and reports authentication errors", () => {
+    expect(parseCliOutputLine('{"event":"step_update","step_update":{"text_delta":"OK"}}').text).toBe("OK");
+    expect(parseCliOutputLine('{"event":"result","result":{"status":"SUCCESS","response":"OK"}}')).toMatchObject({ terminal: true, error: null });
+    expect(parseCliOutputLine('{"event":"result","result":{"status":"ERROR","error":"authentication required"}}').error).toBe("authentication required");
+  });
   it("reads Codex messages and completion", () => {
     expect(
       parseCliOutputLine('{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}')

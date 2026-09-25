@@ -2,7 +2,7 @@ import { Bot, Boxes } from "lucide-react";
 import { BRAND_ICONS } from "./brand-icons";
 
 /** Agent id → brand key; ids without a mark fall back to a generic glyph. */
-const AGENT_ICONS: Record<string, string> = { codex: "codex", claude: "claudecode", gemini: "geminicli", kimi: "moonshot", qwen: "qwen", opencode: "opencode", grok: "grok" };
+const AGENT_ICONS: Record<string, string> = { codex: "codex", claude: "claudecode", gemini: "geminicli", antigravity: "antigravity", kimi: "moonshot", qwen: "qwen", opencode: "opencode", grok: "grok", zcode: "zcode", cursor: "cursor", cline: "cline", hermes: "hermesagent", openclaw: "openclaw" };
 
 export function agentIconKey(agentId: string): string | undefined {
   return AGENT_ICONS[agentId];

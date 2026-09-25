@@ -182,6 +182,32 @@ export const CLI_PROFILES: CliProfile[] = [
       ...modelArgs(request),
     ],
   },
+  {
+    id: "antigravity",
+    label: "Antigravity CLI",
+    commands: ["agy"],
+    versionArgs: ["--version"],
+    supportsMcpFile: false,
+    buildArgs: (request) => [
+      "-p", `${request.systemPrompt}\n\n${promptWithContext(request)}`,
+      "--output-format", "stream-json",
+      ...(request.model ? ["--model", request.model] : []),
+    ],
+  },
+  ...([[
+    "cursor", "Cursor CLI", ["cursor-agent", "agent"],
+  ], [
+    "cline", "Cline CLI", ["cline"],
+  ], [
+    "auggie", "Auggie CLI", ["auggie"],
+  ], [
+    "hermes", "Hermes Agent", ["hermes"],
+  ], [
+    "openclaw", "OpenClaw", ["openclaw"],
+  ]] as const).map(([id, label, commands]): CliProfile => ({
+    id, label, commands: [...commands], versionArgs: ["--version"], supportsMcpFile: false,
+    buildArgs: () => [], // These agents are launched through ACP, not the generic CLI backend.
+  })),
 ];
 
 export function getCliProfile(id: string): CliProfile | undefined {

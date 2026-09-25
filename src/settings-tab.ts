@@ -1,12 +1,14 @@
 import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type QiaomuAgentPlugin from "./main";
 import { ProviderSettings } from "./ui/provider-settings";
+import { CapabilitiesModal } from "./ui/capabilities-modal";
 import { WechatBridgeClient, normalizeBridgeUrl } from "./wechat/bridge-client";
 import { listWechatThemes } from "./wechat/export-html";
 
 export class ModelManagerModal extends Modal {
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin) { super(app); }
   override onOpen(): void {
+    this.modalEl.addClass("qa-model-manager-modal");
     const tab = new QiaomuSettingTab(this.app, this.plugin, true);
     tab.containerEl = this.contentEl;
     tab.display();
@@ -27,7 +29,6 @@ export class QiaomuSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("qiaomu-agent-settings");
     containerEl.createEl("h2", { text: this.connectionsOnly ? "模型" : "乔木 Agent" });
-    if (this.connectionsOnly) containerEl.createEl("p", { cls: "setting-item-description", text: "在这里添加服务商；日常在输入框右下角直接切换模型。" });
 
     if (this.connectionsOnly) { this.renderConnectionSection(containerEl); return; }
     const tabs = containerEl.createDiv({ cls: "qiaomu-agent-settings__tabs" });
@@ -51,13 +52,22 @@ export class QiaomuSettingTab extends PluginSettingTab {
     body.setAttribute("role", "tabpanel");
     if (this.activeSection === "models") this.renderConnectionSection(body);
     if (this.activeSection === "chat") this.renderBehaviorSection(body);
-    if (this.activeSection === "tools") { this.renderToolsSection(body); this.renderSkillsSection(body); this.renderAdvancedSection(body); }
+    if (this.activeSection === "tools") { this.renderToolsSection(body); this.renderCapabilitySection(body); }
     if (this.activeSection === "publish") this.renderPublishSection(body);
     if (this.activeSection === "about") this.renderAboutSection(body);
   }
 
   private renderAboutSection(containerEl: HTMLElement): void {
     new Setting(containerEl).setName(`当前版本 ${this.plugin.manifest.version}`).setDesc("在 Obsidian 第三方插件中检查并安装更新。");
+    new Setting(containerEl).setName("微信").setDesc("joeseesun");
+    for (const [name, description, src, alt] of [
+      ["打赏支持", "感谢支持乔木持续维护这个插件。", "https://radio.qiaomu.ai/assets/qiaomu_reward_qr.png", "向阳乔木打赏二维码"],
+      ["关注公众号", "向阳乔木推荐看", "https://radio.qiaomu.ai/assets/qiaomu_wechat_public_account_qr.jpg", "向阳乔木推荐看公众号二维码"],
+    ] as const) {
+      const setting = new Setting(containerEl).setName(name).setDesc(description);
+      setting.settingEl.addClass("qiaomu-agent-settings__qr");
+      setting.controlEl.createEl("img", { attr: { src, alt, loading: "lazy", width: "144", height: "144" } });
+    }
     const links: Array<[string, string, string]> = [
       ["反馈 Bug", "在 GitHub 提交问题", "https://github.com/joeseesun/qiaomu-agent/issues/new"],
       ["使用说明", "打开说明", "https://github.com/joeseesun/qiaomu-agent#readme"],
@@ -171,6 +181,22 @@ export class QiaomuSettingTab extends PluginSettingTab {
   private renderBehaviorSection(containerEl: HTMLElement): void {
     containerEl.createEl("h3", { text: "对话" });
     new Setting(containerEl)
+      .setName("对话字体")
+      .setDesc("系统字体适合阅读；也可跟随 Obsidian 主题。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("system", "系统字体")
+        .addOption("obsidian", "跟随 Obsidian")
+        .setValue(this.plugin.settings.chatFontFamily)
+        .onChange(async (value) => { this.plugin.settings.chatFontFamily = value === "obsidian" ? "obsidian" : "system"; await this.plugin.saveSettings(); }));
+    const chatSize = new Setting(containerEl).setName("对话字号").setDesc(`${this.plugin.settings.chatFontSize} px`);
+    chatSize.addSlider((slider) => slider.setLimits(13, 20, 1).setValue(this.plugin.settings.chatFontSize).onChange(async (value) => {
+      this.plugin.settings.chatFontSize = value; chatSize.setDesc(`${value} px`); await this.plugin.saveSettings();
+    }));
+    const codeSize = new Setting(containerEl).setName("代码字号").setDesc(`${this.plugin.settings.codeFontSize} px`);
+    codeSize.addSlider((slider) => slider.setLimits(12, 18, 1).setValue(this.plugin.settings.codeFontSize).onChange(async (value) => {
+      this.plugin.settings.codeFontSize = value; codeSize.setDesc(`${value} px`); await this.plugin.saveSettings();
+    }));
+    new Setting(containerEl)
       .setName("默认权限")
       .setDesc("控制本地 Agent 是否可以修改文件；手动追加回复仍需确认目标。")
       .addDropdown((dropdown) =>
@@ -223,61 +249,13 @@ export class QiaomuSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderSkillsSection(containerEl: HTMLElement): void {
-    containerEl.createEl("h3", { text: "Skills" });
-    if (Platform.isDesktopApp) new Setting(containerEl)
-      .setName("外部 Skills 目录")
-      .setDesc("桌面端可填写多个绝对路径，每行一个；库内 .agents/skills 等标准目录会自动扫描。")
-      .addTextArea((text) => {
-        text.inputEl.rows = 4;
-        text.setPlaceholder("/path/to/skills");
-        text.setValue(this.plugin.settings.skillDirectories.join("\n")).onChange(async (value) => {
-          this.plugin.settings.skillDirectories = value
-            .split(/\r?\n/)
-            .map((item) => item.trim())
-            .filter(Boolean);
-          await this.plugin.saveSettings();
-        });
-      });
-    new Setting(containerEl)
-      .setName("已发现技能")
-      .setDesc(
-        this.plugin.skillService.list().length
-          ? this.plugin.skillService.list().map((skill) => skill.name).join("、")
-          : "尚未发现可用的 SKILL.md"
-      )
-      .addButton((button) =>
-        button.setButtonText("刷新").onClick(async () => {
-          await this.plugin.skillService.refresh(this.plugin.settings.skillDirectories);
-          this.display();
-        })
-      );
-  }
-
-  private renderAdvancedSection(containerEl: HTMLElement): void {
-    if (!Platform.isDesktopApp) return;
-    const details = containerEl.createEl("details", { cls: "qiaomu-agent-settings__advanced" });
-    details.createEl("summary", { text: "高级：MCP" });
-    details.createEl("p", {
-      cls: "setting-item-description",
-      text: "首版将这份配置临时传给支持配置文件参数的本地 CLI。实际启用与工具调用由对应 Agent 决定。",
-    });
-    const textarea = details.createEl("textarea", { cls: "qiaomu-agent-settings__json" });
-    textarea.rows = 12;
-    textarea.value = this.plugin.settings.mcpConfig;
-    const feedback = details.createDiv({ cls: "qiaomu-agent-settings__feedback" });
-    textarea.addEventListener("change", async () => {
-      try {
-        JSON.parse(textarea.value || "{}");
-        this.plugin.settings.mcpConfig = textarea.value;
-        feedback.setText("JSON 有效，已保存");
-        feedback.removeClass("is-error");
-        await this.plugin.saveSettings();
-      } catch (error) {
-        feedback.setText(`未保存：${error instanceof Error ? error.message : "JSON 无效"}`);
-        feedback.addClass("is-error");
-      }
-    });
+  private renderCapabilitySection(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName("技能")
+      .setDesc(`${this.plugin.skillService.list().filter((skill) => !this.plugin.settings.disabledSkillPaths.includes(skill.path)).length} 个在乔木中显示`)
+      .addButton((button) => button.setButtonText("管理技能").onClick(() => new CapabilitiesModal(this.app, this.plugin, "skills").open()));
+    if (Platform.isDesktopApp) new Setting(containerEl).setName("工具连接")
+      .setDesc("添加本地程序或远程服务，供支持 MCP 的 Agent 使用。")
+      .addButton((button) => button.setButtonText("管理连接").onClick(() => new CapabilitiesModal(this.app, this.plugin, "mcp").open()));
   }
 
 }

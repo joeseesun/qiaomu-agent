@@ -1,6 +1,6 @@
 import { activeNoteBlock, selectionBlock } from "./agent-prompt";
 import { streamText, type ModelMessage } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAI, openai } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { ApiConnection, ChatBackend, ChatCallbacks, ChatRequest, ModelChoice } from "../types";
@@ -20,15 +20,11 @@ export function buildApiMessages(request: ChatRequest): ModelMessage[] {
     ...request.history.filter((m) => m.role === "user" || m.role === "assistant").slice(-20)
       .map((m): ModelMessage => m.role === "assistant" ? { role: "assistant", content: m.content } : { role: "user", content: [
         { type: "text", text: `${m.content}\n\n${attachmentContext({ ...request, attachments: m.attachments })}` },
-        ...(m.attachments ?? []).filter((a) => a.url).map((a) => a.mediaType.startsWith("image/")
-          ? { type: "image" as const, image: a.url!, mediaType: a.mediaType }
-          : { type: "file" as const, data: a.url!, mediaType: a.mediaType, filename: a.name }),
+        ...(m.attachments ?? []).filter((a) => a.url).map((a) => ({ type: "file" as const, data: a.url!, mediaType: a.mediaType, filename: a.name })),
       ] }),
     { role: "user", content: [
       { type: "text", text: sections.join("\n\n") },
-      ...(request.attachments ?? []).filter((a) => a.url).map((a) => a.mediaType.startsWith("image/")
-        ? { type: "image" as const, image: a.url!, mediaType: a.mediaType }
-        : { type: "file" as const, data: a.url!, mediaType: a.mediaType, filename: a.name }),
+      ...(request.attachments ?? []).filter((a) => a.url).map((a) => ({ type: "file" as const, data: a.url!, mediaType: a.mediaType, filename: a.name })),
     ] },
   ];
 }
@@ -62,19 +58,27 @@ export class ApiBackend implements ChatBackend {
     const protocol = apiProtocol(this.connection);
     const options = { apiKey: this.apiKey || "local", baseURL: validateApiUrl(this.connection.baseUrl), fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, redirect: "error" }) };
     const modelId = request.model || this.connection.model;
+    const editingImage = request.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
+    const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
+    if (editingImage && this.connection.provider !== "openai" && !(protocol === "google" && googleImageModel)) {
+      throw new Error("当前模型尚未接入图片编辑；请切换 Codex、OpenAI 或 Gemini 图片模型");
+    }
     const model = protocol === "anthropic"
       ? createAnthropic({ ...options, headers: { "anthropic-dangerous-direct-browser-access": "true" } })(modelId)
       : protocol === "google"
         ? createGoogleGenerativeAI(options)(modelId)
-        : protocol === "openai-responses" ? createOpenAI(options).responses(modelId) : createOpenAI(options).chat(modelId);
+        : protocol === "openai-responses" || (editingImage && this.connection.provider === "openai") ? createOpenAI(options).responses(modelId) : createOpenAI(options).chat(modelId);
     const effort = request.reasoningEffort;
     if (effort && !apiEfforts(this.connection.provider, modelId).includes(effort)) throw new Error("此模型未配置所选推理强度，请改为默认");
     callbacks.onStatus(`正在连接 ${this.label}…`);
     const result = streamText({
       model, system: request.systemPrompt, messages: buildApiMessages(request),
       abortSignal: signal, maxRetries: 0,
-      ...(effort ? { providerOptions: this.connection.provider === "google"
-        ? { google: { thinkingConfig: { thinkingLevel: effort } } }
+      ...(editingImage && this.connection.provider === "openai" ? { tools: { image_generation: openai.tools.imageGeneration({ action: "edit", model: "gpt-image-2.5-sunburst" }) }, toolChoice: { type: "tool" as const, toolName: "image_generation" } } : {}),
+      ...(request.modelOptions?.temperature !== undefined ? { temperature: request.modelOptions.temperature } : {}),
+      ...(request.modelOptions?.maxOutputTokens !== undefined ? { maxOutputTokens: request.modelOptions.maxOutputTokens } : {}),
+      ...((effort || (editingImage && protocol === "google")) ? { providerOptions: this.connection.provider === "google"
+        ? { google: { ...(effort ? { thinkingConfig: { thinkingLevel: effort } } : {}), ...(editingImage ? { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } : {}) } }
         : { openai: { reasoningEffort: effort } } } : {}),
     });
     for await (const part of result.fullStream) {
@@ -86,6 +90,10 @@ export class ApiBackend implements ChatBackend {
         size: part.file.uint8Array.byteLength,
         base64: part.file.base64,
       });
+      if (part.type === "tool-result" && part.toolName === "image_generation") {
+        const output = part.output as { result?: string };
+        if (output.result) await callbacks.onAttachment?.({ id: crypto.randomUUID(), name: `edited-${Date.now()}.png`, mediaType: "image/png", size: Math.floor(output.result.length * 0.75), base64: output.result });
+      }
       if (part.type === "error") throw part.error;
     }
     signal.throwIfAborted();

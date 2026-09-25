@@ -1,6 +1,7 @@
 import type { ModelChoice, QiaomuSettings } from "./types";
 import { migrateProviders } from "./services/model-sources";
 import { recommendedModels } from "./services/key-detection";
+import { normalizeBranchTitle } from "./services/conversations";
 
 export const DEFAULT_SYSTEM_PROMPT = `你是用户 Obsidian 知识库中的协作助手。
 
@@ -27,11 +28,20 @@ export const DEFAULT_SETTINGS: QiaomuSettings = {
   autoAttachActiveNote: true,
   useObsidianCli: true,
   skillDirectories: [],
+  disabledSkillPaths: [],
   mcpConfig: "{\n  \"mcpServers\": {}\n}",
+  disabledMcpServers: [],
   lastConversation: [],
   providers: [],
   recentModels: [],
+  hiddenAgents: [],
+  agentVisibility: {},
+  chatFontFamily: "system",
+  chatFontSize: 15,
+  codeFontSize: 13,
   agentModelCache: {},
+  agentEnabledModels: { pi: [""] },
+  agentCustomModels: {},
   wechat: {
     bridgeUrl: "",
     secretId: "qiaomu-agent-wechat-bridge-token",
@@ -53,16 +63,36 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
     schemaVersion: 1,
     permissionMode: data.permissionMode === "edit" || data.permissionMode === "full" ? data.permissionMode : "plan",
     customPrompts: Array.isArray(data.customPrompts) ? data.customPrompts.filter((p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.body === "string") : [],
-    conversations: Array.isArray(data.conversations) ? data.conversations.filter((c) => c && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.messages)).slice(0, 30) : [],
+    activeConversation: data.activeConversation && typeof data.activeConversation.id === "string" && typeof data.activeConversation.title === "string"
+      ? normalizeBranchTitle({ ...data.activeConversation, createdAt: Number.isFinite(data.activeConversation.createdAt) ? data.activeConversation.createdAt : Date.now() }) : undefined,
+    conversations: Array.isArray(data.conversations) ? data.conversations.filter((c) => c && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.messages))
+      .map((c) => normalizeBranchTitle({ ...c, createdAt: Number.isFinite(c.createdAt) ? c.createdAt : Date.now() })).slice(0, 30) : [],
     modelSelections: data.modelSelections && typeof data.modelSelections === "object" && !Array.isArray(data.modelSelections) ? Object.fromEntries(Object.entries(data.modelSelections).filter(([, v]) => v && typeof v.model === "string" && typeof v.effort === "string")) : {},
     api: { ...DEFAULT_SETTINGS.api, ...api },
     // The built-in default connection is only listed once a key exists for it (checked on load).
     providers: migrateProviders(data, { ...DEFAULT_SETTINGS.api, ...api })
       .filter((item) => Array.isArray(data.providers) || item.secretId !== DEFAULT_SETTINGS.api.secretId)
       // "Nothing selected = everything" is gone: never-curated providers start with recommended models.
-      .map((item) => item.enabledModels?.length ? item : { ...item, enabledModels: recommendedModels(item.provider, item.models ?? []) }),
+      .map((item) => ({
+        ...item,
+        enabledModels: Array.isArray(item.enabledModels) ? item.enabledModels : recommendedModels(item.provider, item.models ?? []),
+        showInPicker: item.showInPicker !== false,
+        modelOptions: Object.fromEntries(Object.entries(item.modelOptions ?? {}).filter(([id, value]) => typeof id === "string" && value && typeof value === "object")
+          .map(([id, value]) => [id, {
+            ...(typeof value.temperature === "number" && value.temperature >= 0 && value.temperature <= 2 ? { temperature: value.temperature } : {}),
+            ...(typeof value.maxOutputTokens === "number" && Number.isInteger(value.maxOutputTokens) && value.maxOutputTokens >= 1 && value.maxOutputTokens <= 65536 ? { maxOutputTokens: value.maxOutputTokens } : {}),
+          }])),
+      })),
     recentModels: Array.isArray(data.recentModels) ? data.recentModels.filter((item) => item && typeof item.source === "string" && typeof item.model === "string").slice(0, 8) : [],
+    hiddenAgents: Array.isArray(data.hiddenAgents) ? data.hiddenAgents.filter((id): id is string => typeof id === "string") : [],
+    agentVisibility: data.agentVisibility && typeof data.agentVisibility === "object" && !Array.isArray(data.agentVisibility)
+      ? Object.fromEntries(Object.entries(data.agentVisibility).filter(([id, value]) => id.length > 0 && typeof value === "boolean")) : {},
+    chatFontFamily: data.chatFontFamily === "obsidian" ? "obsidian" : "system",
+    chatFontSize: typeof data.chatFontSize === "number" && Number.isInteger(data.chatFontSize) && data.chatFontSize >= 13 && data.chatFontSize <= 20 ? data.chatFontSize : 15,
+    codeFontSize: typeof data.codeFontSize === "number" && Number.isInteger(data.codeFontSize) && data.codeFontSize >= 12 && data.codeFontSize <= 18 ? data.codeFontSize : 13,
     agentModelCache: normalizeModelCache(data.agentModelCache),
+    agentEnabledModels: { pi: [""], ...normalizeAgentIds(data.agentEnabledModels) },
+    agentCustomModels: normalizeAgentIds(data.agentCustomModels, false),
     wechat: normalizeWechatSettings(data.wechat),
     quickPrompts: Array.isArray(data.quickPrompts)
       ? data.quickPrompts.filter((item): item is string => typeof item === "string").slice(0, 8)
@@ -70,10 +100,23 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
     skillDirectories: Array.isArray(data.skillDirectories)
       ? data.skillDirectories.filter((item): item is string => typeof item === "string")
       : [],
+    disabledSkillPaths: Array.isArray(data.disabledSkillPaths)
+      ? data.disabledSkillPaths.filter((item): item is string => typeof item === "string") : [],
+    disabledMcpServers: Array.isArray(data.disabledMcpServers)
+      ? data.disabledMcpServers.filter((item): item is string => typeof item === "string") : [],
     lastConversation: Array.isArray(data.lastConversation)
       ? data.lastConversation.filter((item) => item && typeof item.content === "string").slice(-80)
       : [],
   };
+}
+
+function normalizeAgentIds(raw: unknown, allowDefault = true): Record<string, string[]> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>)
+    .filter(([, value]) => Array.isArray(value))
+    .map(([agent, value]) => [agent, [...new Set((value as unknown[])
+      .filter((id): id is string => typeof id === "string" && (allowDefault || Boolean(id.trim())))
+      .map((id) => id.trim()))].slice(0, 200)]));
 }
 
 function normalizeWechatSettings(raw: unknown): QiaomuSettings["wechat"] {
@@ -99,7 +142,9 @@ function normalizeModelCache(raw: unknown): QiaomuSettings["agentModelCache"] {
     if (!Array.isArray(value?.models)) continue;
     const models = value.models.filter((m): m is ModelChoice => Boolean(m && typeof (m as ModelChoice).id === "string"))
       .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.id, efforts: Array.isArray(m.efforts) ? m.efforts.filter((e) => typeof e === "string") : [] }));
-    result[key] = { models: models.slice(0, 200), fetchedAt: typeof value.fetchedAt === "number" ? value.fetchedAt : 0 };
+    // Earlier builds truncated Pi's 427-entry catalog at 200. Reload it once on next use.
+    if (key === "pi" && models.length === 200) continue;
+    result[key] = { models: models.slice(0, 1000), fetchedAt: typeof value.fetchedAt === "number" ? value.fetchedAt : 0 };
   }
   return result;
 }

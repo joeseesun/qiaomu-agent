@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Chat } from "@ai-sdk/react";
 import type QiaomuAgentPlugin from "./main";
-import type { AgentSkill, PermissionMode, ChatAttachment, ChatRequest, EditorSelectionContext, GeneratedAttachment, ModelChoice } from "./types";
+import type { AgentSkill, PermissionMode, ChatAttachment, ChatMessage, ChatRequest, EditorSelectionContext, GeneratedAttachment, ModelChoice } from "./types";
 import { FilePicker, PromptManager, AppendDialog } from "./ui/host-dialogs";
 import { readAttachment, validateAttachments, MAX_ATTACHMENT_BYTES } from "./services/attachments";
 import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage, type TurnHooks } from "./services/chat-transport";
@@ -12,11 +12,15 @@ import { TurnChangeTracker, toVaultPath } from "./services/change-tracker";
 import { RevertDialog } from "./ui/revert-dialog";
 import { ChatPanel } from "./ui/chat-panel";
 import { ModelManagerModal } from "./settings-tab";
+import { CapabilitiesModal } from "./ui/capabilities-modal";
+import { enabledMcpConfig } from "./services/mcp-config";
 import { getRuntimeRequire } from "./services/runtime-require";
 import { ApiBackend } from "./services/api-backend";
 import { permitsEmptyKey } from "./services/api-providers";
-import { activeProvider, chooseModel, exposedModels, findProvider, providerIcon, providerLabel, type ModelSource } from "./services/model-sources";
+import { activeProvider, agentShown, chooseModel, exposedModels, findProvider, providerIcon, providerLabel, visibleAgentModels, type ModelSource } from "./services/model-sources";
+import { nativeTransportFor } from "./services/native-agent-backend";
 import { agentIconKey } from "./ui/brand-icon";
+import { activeIdentity, conversationTitle, forkConversation, openConversation, startConversation } from "./services/conversations";
 import type { PickerSelection } from "./ui/model-picker";
 
 export const VIEW_TYPE_QIAOMU_AGENT = "qiaomu-agent-view";
@@ -29,6 +33,7 @@ export class ChatView extends ItemView {
   private attachNote = true;
   /** Selection the user removed from the composer; it comes back when the selection changes. */
   private dismissedSelection = "";
+  private shownSelection = "";
   private prefill = "";
   private prefillVersion = 0;
   private statusText = "";
@@ -61,22 +66,29 @@ export class ChatView extends ItemView {
         // Capture every input before the first await: navigation cannot change this turn.
         const settings = this.plugin.settings;
         const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
-        const permissionMode = settings.permissionMode === "full" && backend.id !== "cli:codex" ? "edit" : settings.permissionMode;
-        const file = this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
         const last = messages.at(-1);
         if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
-        const parsed: unknown = backend.id === "api" ? {} : JSON.parse(settings.mcpConfig || "{}");
+        const imageEdit = last.metadata?.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
+        // Image editing produces a chat artifact; inserting it into a note is a separate, confirmed action.
+        const permissionMode = imageEdit ? "plan" : settings.permissionMode === "full" && backend.id !== "cli:codex" ? "edit" : settings.permissionMode;
+        const file = !imageEdit && this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
+        const parsed: unknown = backend.id === "api" ? {} : enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
-        const selection = this.activeSelection();
+        const selection = imageEdit ? null : this.activeSelection();
+        const modelId = settings.modelSelections?.[this.selectionKey()]?.model || settings.api.model;
+        const modelOptions = backend.id === "api" ? activeProvider(settings)?.modelOptions?.[modelId] : undefined;
         const vaultInstructions = backend.id === "api" ? await this.vaultInstructions() : undefined;
         const request = {
-          prompt: messageText(last), systemPrompt: buildSystemPrompt(settings.systemPrompt, vaultInstructions),
+          prompt: imageEdit && backend.id === "cli:codex"
+            ? `请使用图像编辑或生成工具，以附带图片为参考生成修改后的图片，并在回复中展示结果。不要修改笔记或其他文件。用户的修改要求：${messageText(last)}`
+            : messageText(last), systemPrompt: buildSystemPrompt(settings.systemPrompt, vaultInstructions),
           selection: selection ?? undefined,
           cwd: this.plugin.skillService.getVaultRoot(),
           model: settings.modelSelections?.[this.selectionKey()]?.model || (backend.id === "api" ? settings.api.model : undefined),
+          modelOptions,
           reasoningEffort: settings.modelSelections?.[this.selectionKey()]?.effort || undefined,
           attachments: last.metadata?.attachments,
-          permissionMode, skill: this.selectedSkill ?? undefined,
+          permissionMode, skill: this.selectedSkill && !settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill : undefined,
           activeFilePath: file?.path,
           mcpConfig: parsed as Record<string, unknown>,
           obsidianCli: settings.useObsidianCli ? this.plugin.obsidianCliService.getConnection() : undefined,
@@ -116,22 +128,37 @@ export class ChatView extends ItemView {
   }
 
   setComposer(text: string): void { this.prefill = text; this.prefillVersion++; this.render(); }
+  refreshSelection(): void {
+    if (!this.root) return;
+    const selection = this.activeSelection();
+    const key = selection ? this.editorSelectionKey(selection) : "";
+    if (key !== this.shownSelection) this.render();
+  }
   newConversation(): void {
     if (this.running()) return;
-    // Existing conversation is archived before clearing, never silently discarded.
-    const stored = this.chat.messages.map(toStoredMessage);
-    if (stored.length) {
-      this.plugin.settings.conversations = [
-        { id: crypto.randomUUID(), title: stored.find((m) => m.role === "user")?.content.slice(0, 60) || "对话", messages: stored.slice(-80) },
-        ...(this.plugin.settings.conversations ?? []),
-      ].slice(0, 30);
-    }
-    this.chat.messages = [];
+    startConversation(this.plugin.settings, this.chat.messages.map(toStoredMessage));
+    this.showConversation([]);
+  }
+  private showConversation(messages: ChatMessage[]): void {
+    this.chat.messages = messages.map((message) => fromStoredMessage(message, (attachment) => this.resolveAttachment(attachment)));
     this.chat.clearError();
     this.plugin.backendService.resetSessions(this.backendOwner);
     this.statusText = "";
     void this.persist();
     this.render();
+  }
+  private openConversation(id: string): void {
+    if (this.running()) return;
+    const messages = openConversation(this.plugin.settings, this.chat.messages.map(toStoredMessage), id);
+    if (!messages) { new Notice("原对话已不在历史记录中"); return; }
+    this.showConversation(messages);
+  }
+  private forkFromMessage(messageId: string): void {
+    if (this.running()) return;
+    const messages = forkConversation(this.plugin.settings, this.chat.messages.map(toStoredMessage), messageId);
+    if (!messages) { new Notice("这条回复无法创建分支"); return; }
+    this.showConversation(messages);
+    new Notice("已创建对话分支；两个对话仍共用当前笔记库");
   }
   refreshControls(): void {
     const settings = this.plugin.settings;
@@ -160,7 +187,7 @@ export class ChatView extends ItemView {
       const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
       const settings = this.plugin.settings;
       const key = this.selectionKey();
-      const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: backend.id === "api" ? {} : JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
+        const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: backend.id === "api" ? {} : enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers) };
       let choices: ModelChoice[] = [];
       try { choices = await backend.listModels?.(request) ?? []; }
       catch { if (generation === this.modelGeneration) this.modelError = "无法获取模型，请重试或手动输入 ID"; }
@@ -197,6 +224,8 @@ export class ChatView extends ItemView {
 
   private persist(): Promise<void> {
     const snapshot = this.chat.messages.slice(-80).map(toStoredMessage);
+    const identity = activeIdentity(this.plugin.settings);
+    if (!identity.title && snapshot.length) identity.title = conversationTitle(snapshot);
     this.persistQueue = this.persistQueue.catch(() => {}).then(async () => {
       this.plugin.settings.lastConversation = snapshot;
       await this.plugin.saveSettings();
@@ -343,15 +372,15 @@ export class ChatView extends ItemView {
   private modelSources(): ModelSource[] {
     const settings = this.plugin.settings;
     const currentKey = (() => { try { return this.selectionKey(); } catch { return ""; } })();
-    const agents: ModelSource[] = this.plugin.backendService.getDetections().filter((d) => d.callable).map((d) => {
+    const agents: ModelSource[] = this.plugin.backendService.getDetections().filter((d) => d.callable && agentShown(settings, d.id)).map((d) => {
       const key = `cli:${d.id}`;
       const cached = settings.agentModelCache[d.id]?.models;
       const models = currentKey === key && this.models.length ? this.models : cached ?? [];
       const state = this.sourceState.get(key) ?? (currentKey === key ? { loading: this.modelLoading, error: this.modelError } : {});
-      return { key, kind: "agent", label: d.label, icon: agentIconKey(d.id), models, loaded: Boolean(cached?.length) || (currentKey === key && this.models.length > 0), ...state };
+      return { key, kind: "agent", label: d.label, icon: agentIconKey(d.id), ...visibleAgentModels(settings, d.id, models), allowCustom: !Object.hasOwn(settings.agentEnabledModels, d.id), canListModels: Boolean(nativeTransportFor(d.id) || d.id === "antigravity" || d.id === "pi"), loaded: Boolean(cached?.length) || (currentKey === key && this.models.length > 0), ...state };
     });
     const providers: ModelSource[] = settings.providers
-      .filter((p) => Boolean(this.app.secretStorage.getSecret(p.secretId)) || permitsEmptyKey(p))
+      .filter((p) => p.showInPicker !== false && (Boolean(this.app.secretStorage.getSecret(p.secretId)) || permitsEmptyKey(p)))
       .map((p) => ({ key: `api:${p.id}`, kind: "api", label: providerLabel(p), icon: providerIcon(p), models: exposedModels(p), loaded: true, ...this.sourceState.get(`api:${p.id}`) }));
     return [...agents, ...providers];
   }
@@ -377,7 +406,7 @@ export class ChatView extends ItemView {
     try {
       if (source.startsWith("cli:")) {
         const backend = this.plugin.backendService.resolve(source, this.backendOwner);
-        const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: JSON.parse(settings.mcpConfig || "{}") as Record<string, unknown> };
+        const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers) };
         const models = await backend.listModels?.(request) ?? [];
         settings.agentModelCache[source.slice(4)] = { models: models.map(({ id, name, efforts }) => ({ id, name, efforts })), fetchedAt: Date.now() };
       } else {
@@ -397,19 +426,16 @@ export class ChatView extends ItemView {
     const menu = new Menu();
     const choose = (skill: AgentSkill | null) => { if (!this.running()) { this.selectedSkill = skill; this.render(); } };
     menu.addItem((item) => item.setTitle("不使用技能").setChecked(!this.selectedSkill).onClick(() => choose(null)));
-    for (const skill of this.plugin.skillService.list()) menu.addItem((item) => item.setTitle(skill.name).setChecked(skill.path === this.selectedSkill?.path).onClick(() => choose(skill)));
+    menu.addItem((item) => item.setTitle("选择技能…").setIcon("search").onClick(() => new CapabilitiesModal(this.app, this.plugin, "skills", choose).open()));
+    menu.addItem((item) => item.setTitle("管理技能与工具连接…").setIcon("settings-2").onClick(() => new CapabilitiesModal(this.app, this.plugin).open()));
     menu.showAtMouseEvent(event);
   }
   private openHistory(event: MouseEvent): void {
     const menu = new Menu();
     const history = this.plugin.settings.conversations ?? [];
     if (!history.length) menu.addItem((item) => item.setTitle("暂无历史对话").setDisabled(true));
-    for (const entry of history) menu.addItem((item) => item.setTitle(entry.title).onClick(() => {
-      if (this.running()) return;
-      this.newConversation();
-      this.chat.messages = entry.messages.map((message) => fromStoredMessage(message, (attachment) => this.resolveAttachment(attachment)));
-      void this.persist(); this.render();
-    }));
+    for (const entry of history) menu.addItem((item) => item.setTitle(entry.title).setIcon(entry.fork ? "git-branch" : "messages-square")
+      .onClick(() => this.openConversation(entry.id)));
     menu.showAtMouseEvent(event);
   }
   private resolveAttachment(attachment: ChatAttachment): ChatAttachment {
@@ -451,11 +477,16 @@ export class ChatView extends ItemView {
   }
   private render(): void {
     if (!this.root) return;
+    const appearance = this.plugin.settings;
+    this.contentEl.toggleClass("qa-font-obsidian", appearance.chatFontFamily === "obsidian");
+    this.contentEl.style.setProperty("--qa-chat-font-size", `${appearance.chatFontSize}px`);
+    this.contentEl.style.setProperty("--qa-code-font-size", `${appearance.codeFontSize}px`);
     const file = this.plugin.getActiveMarkdownFile();
     const label = this.plugin.backendService.getBackendOptions().find((o) => o.value === this.selectedBackend)?.label.replace(/\s*·.*$/, "") || "选择模型";
     let key = ""; try { key = this.selectionKey(); } catch { /* connection can be unavailable */ }
     const selection = this.plugin.settings.modelSelections?.[key];
     const editorSelection = this.activeSelection();
+    this.shownSelection = editorSelection ? this.editorSelectionKey(editorSelection) : "";
     this.highlightSelection(Boolean(editorSelection));
     const sources = this.modelSources();
     const picked = this.pickerSelection();
@@ -465,7 +496,10 @@ export class ChatView extends ItemView {
     const permission = this.plugin.settings.permissionMode === "full" && !fullAccessAvailable ? "edit" : this.plugin.settings.permissionMode;
     this.root.render(createElement(ChatPanel, {
       chat: this.chat, app: this.app, parent: this,
-      backendLabel: this.modelLoading && !model ? "加载模型…" : model?.name || picked?.model || (source ? source.label : sources.length ? label : "添加模型"), skillLabel: this.selectedSkill?.name || "技能",
+      conversationId: activeIdentity(this.plugin.settings).id,
+      imageTargetNote: file,
+      conversationTitle: this.plugin.settings.activeConversation?.title ?? "",
+      backendLabel: this.modelLoading && !model ? "加载模型…" : model?.name || picked?.model || (source ? source.label : sources.length ? label : "添加模型"), skillLabel: this.selectedSkill && !this.plugin.settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill.name : "技能",
       efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
       sources, selection: picked, recentModels: this.plugin.settings.recentModels,
       onPickModel: (sourceKey: string, modelId: string) => this.pickModel(sourceKey, modelId),
@@ -482,6 +516,9 @@ export class ChatView extends ItemView {
       prefill: this.prefill, prefillVersion: this.prefillVersion,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
       onHistory: (event: MouseEvent) => this.openHistory(event),
+      branch: this.plugin.settings.activeConversation?.fork ?? null,
+      onOpenParent: (id: string) => this.openConversation(id),
+      onForkMessage: (id: string) => this.forkFromMessage(id),
       onSkill: (event: MouseEvent) => this.openSkillMenu(event),
       onEditMessage: () => this.plugin.backendService.resetSessions(this.backendOwner),
       onPermission: (mode: PermissionMode) => {

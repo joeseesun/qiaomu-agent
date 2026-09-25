@@ -18,6 +18,10 @@ export interface ProviderConfig extends ApiConnection {
   models?: ModelChoice[];
   /** Models shown in the picker; empty means all of `models`. */
   enabledModels?: string[];
+  /** Hide this provider from the composer without deleting its credentials. */
+  showInPicker?: boolean;
+  /** Optional API request parameters, keyed by exact model ID. */
+  modelOptions?: Record<string, { temperature?: number; maxOutputTokens?: number }>;
   fetchedAt?: number;
 }
 
@@ -32,19 +36,46 @@ export interface QiaomuSettings {
   providers: ProviderConfig[];
   /** Most recently used models, newest first, across agents and providers. */
   recentModels: Array<{ source: string; model: string }>;
+  /** Local agents hidden from the composer model picker. */
+  hiddenAgents: string[];
+  /** Explicit composer visibility overrides. Absent entries use the seven-agent default. */
+  agentVisibility: Record<string, boolean>;
+  chatFontFamily: "system" | "obsidian";
+  chatFontSize: number;
+  codeFontSize: number;
   /** Model lists reported by local agents, so the picker can show them without starting each agent. */
   agentModelCache: Record<string, { models: ModelChoice[]; fetchedAt: number }>;
+  /** Explicit per-agent picker choices. Missing entry means all reported models and the default. */
+  agentEnabledModels: Record<string, string[]>;
+  /** User supplied model IDs for agents that do not report a complete list. */
+  agentCustomModels: Record<string, string[]>;
   systemPrompt: string;
   quickPrompts: string[];
   autoAttachActiveNote: boolean;
   useObsidianCli: boolean;
   skillDirectories: string[];
+  /** Skill paths hidden from Qiaomu's explicit picker and prompt injection. */
+  disabledSkillPaths: string[];
   mcpConfig: string;
+  /** MCP servers excluded from Qiaomu-managed per-session configuration. */
+  disabledMcpServers: string[];
   lastConversation: ChatMessage[];
-  conversations?: Array<{ id: string; title: string; messages: ChatMessage[] }>;
+  activeConversation?: ConversationIdentity;
+  conversations?: ConversationRecord[];
   modelSelections?: Record<string, { model: string; effort: string }>;
   customPrompts?: PromptTemplate[];
   wechat: WechatPublishSettings;
+}
+
+export interface ConversationIdentity {
+  id: string;
+  title: string;
+  createdAt: number;
+  fork?: { parentId: string; parentTitle: string; messageId: string };
+}
+
+export interface ConversationRecord extends ConversationIdentity {
+  messages: ChatMessage[];
 }
 
 export interface WechatPublishSettings {
@@ -130,6 +161,7 @@ export interface ChatRequest {
   cwd: string | null;
   model?: string;
   reasoningEffort?: string;
+  modelOptions?: { temperature?: number; maxOutputTokens?: number };
   attachments?: ChatAttachment[];
   permissionMode: PermissionMode;
   activeFilePath?: string;
@@ -198,9 +230,14 @@ export interface ChatAttachment {
   text?: string;
   url?: string;
   vaultPath?: string;
+  /** User explicitly asked to edit this image as a reference, rather than only analyze it. */
+  intent?: "edit";
 }
 
 export interface CliDetection {
+  /** Runtime arguments/environment for bundled Node CLIs. */
+  argsPrefix?: string[];
+  env?: Record<string, string>;
   id: string;
   label: string;
   command: string;

@@ -27,9 +27,9 @@ export function ComposerPopover({ label, trigger, disabled, className = "", chil
   }} onKeyDown={(event) => {
     if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
   }}>
-    <button ref={button} type="button" className="qa-control-trigger" aria-label={label} title={label} aria-expanded={open}
-      aria-haspopup="dialog" aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{trigger}</button>
-    {open && <div ref={panel} id={id} role="dialog" aria-label={label} className="qa-control-popover">{children(close)}</div>}
+    <button ref={button} type="button" className="qa-control-trigger" aria-labelledby={`${id}-trigger`} aria-expanded={open}
+      aria-haspopup="dialog" aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{trigger}<span id={`${id}-trigger`} className="qiaomu-agent__sr-only">{label}</span></button>
+    {open && <div ref={panel} id={id} role="dialog" aria-labelledby={`${id}-label`} className="qa-control-popover"><span id={`${id}-label`} className="qiaomu-agent__sr-only">{label}</span>{children(close)}</div>}
   </div>;
 }
 

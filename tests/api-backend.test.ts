@@ -15,12 +15,13 @@ describe("API streaming transport", () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
     vi.stubGlobal("fetch", fetcher);
     const cb = callbacks();
-    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "siliconflow", model: "test" }, "fake").send(request, cb, new AbortController().signal);
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "siliconflow", model: "test" }, "fake").send({ ...request, modelOptions: { temperature: 0.7, maxOutputTokens: 4096 } }, cb, new AbortController().signal);
     expect(cb.onText.mock.calls.flat().join("")).toBe("中文回复");
     const [url, init] = fetcher.mock.calls[0]!;
     expect(String(url)).toMatch(/\/chat\/completions$/);
     expect(JSON.parse(init.body).model).toBe("test");
     expect(JSON.parse(init.body).stream).toBe(true);
+    expect(JSON.parse(init.body)).toMatchObject({ temperature: 0.7, max_tokens: 4096 });
   });
   it("does not retry authentication failures", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Invalid key", type: "authentication_error" } }), { status: 401 }));
@@ -33,6 +34,36 @@ describe("API streaming transport", () => {
     const controller = new AbortController(); controller.abort();
     await expect(new ApiBackend(DEFAULT_SETTINGS.api, "fake").send(request, callbacks(), controller.signal)).rejects.toThrow();
     expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("does not treat a plain chat API as an image editor", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    await expect(new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "doubao", model: "text-model" }, "fake").send({ ...request,
+      attachments: [{ id: "reference", name: "reference.png", mediaType: "image/png", size: 2, url: "data:image/png;base64,AA==", intent: "edit" }],
+    }, callbacks(), new AbortController().signal)).rejects.toThrow("图片编辑");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("routes OpenAI reference edits through the Responses image tool", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const image = { id: "reference", name: "reference.png", mediaType: "image/png", size: 3, url: "data:image/png;base64,AQID", intent: "edit" as const };
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "openai", model: "gpt-5.5" }, "fake").send({ ...request, attachments: [image] }, callbacks(), new AbortController().signal).catch(() => {});
+    const [url, init] = fetcher.mock.calls[0]!;
+    const body = JSON.parse(init.body);
+    expect(String(url)).toMatch(/\/responses$/);
+    expect(body.tools).toContainEqual(expect.objectContaining({ type: "image_generation", action: "edit", model: "gpt-image-2.5-sunburst" }));
+    expect(JSON.stringify(body.input)).toContain("data:image/png;base64,AQID");
+  });
+  it("requests image output only from a Gemini image model", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const image = { id: "reference", name: "reference.png", mediaType: "image/png", size: 3, url: "data:image/png;base64,AQID", intent: "edit" as const };
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "google", protocol: "google", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3.1-flash-image" }, "fake")
+      .send({ ...request, attachments: [image] }, callbacks(), new AbortController().signal).catch(() => {});
+    const [url, init] = fetcher.mock.calls[0]!;
+    const body = JSON.parse(init.body);
+    expect(String(url)).toContain("gemini-3.1-flash-image");
+    expect(body.generationConfig.responseModalities).toEqual(["TEXT", "IMAGE"]);
+    expect(JSON.stringify(body.contents)).toContain("AQID");
   });
 });
 

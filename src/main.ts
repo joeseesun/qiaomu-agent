@@ -1,4 +1,4 @@
-import { Menu, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { Menu, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo, type MarkdownView } from "obsidian";
 import { ChatView, VIEW_TYPE_QIAOMU_AGENT } from "./chat-view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./defaults";
 import { BackendService } from "./services/backend-service";
@@ -8,6 +8,8 @@ import { ObsidianCliService } from "./services/obsidian-cli";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
 import { WechatPublishModal } from "./wechat/publish-modal";
+import { InlineEditModal } from "./ui/inline-edit-modal";
+import { CapabilitiesModal } from "./ui/capabilities-modal";
 
 export default class QiaomuAgentPlugin extends Plugin {
   override settings: QiaomuSettings = { ...DEFAULT_SETTINGS, api: { ...DEFAULT_SETTINGS.api } };
@@ -43,6 +45,11 @@ export default class QiaomuAgentPlugin extends Plugin {
       callback: () => this.eachView((view) => view.newConversation()),
     });
     this.addCommand({
+      id: "manage-capabilities",
+      name: "管理技能与工具连接",
+      callback: () => new CapabilitiesModal(this.app, this).open(),
+    });
+    this.addCommand({
       id: "ask-about-selection",
       name: "询问选中的文本",
       editorCallback: (editor) => {
@@ -50,6 +57,20 @@ export default class QiaomuAgentPlugin extends Plugin {
         void this.activateView(selection ? `请分析这段内容：\n\n${selection}` : undefined);
       },
     });
+    this.addCommand({
+      id: "rewrite-selection-inline",
+      name: "改写选中内容（预览后替换）",
+      editorCheckCallback: (checking, editor, ctx) => {
+        if (!editor.getSelection().trim() || !ctx.file) return false;
+        if (!checking) this.openInlineEdit(editor, ctx);
+        return true;
+      },
+    });
+    this.registerEvent(this.app.workspace.on("editor-menu", (menu: Menu, editor, ctx) => {
+      if (!editor.getSelection().trim() || !ctx.file) return;
+      menu.addItem((item) => item.setTitle("用乔木 Agent 改写选中内容…").setIcon("pencil-line")
+        .setSection("action").onClick(() => this.openInlineEdit(editor, ctx)));
+    }));
 
     this.addCommand({
       id: "publish-wechat-draft",
@@ -81,6 +102,10 @@ export default class QiaomuAgentPlugin extends Plugin {
     // Focus back in a note: its own selection is visible again, so drop our mirror highlight.
     this.registerDomEvent(document, "focusin", (event) => {
       if ((event.target as HTMLElement | null)?.closest?.(".cm-editor")) (globalThis as unknown as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights?.delete("qiaomu-selection");
+    });
+    // CodeMirror changes the editor selection before the chat composer receives focus.
+    this.registerDomEvent(document, "selectionchange", () => {
+      this.eachView((view) => view.refreshSelection());
     });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
@@ -137,6 +162,15 @@ export default class QiaomuAgentPlugin extends Plugin {
 
   openWechatPublish(file: TFile): void {
     new WechatPublishModal(this.app, file, this.settings.wechat).open();
+  }
+
+  private openInlineEdit(editor: Editor, ctx: MarkdownView | MarkdownFileInfo): void {
+    const original = editor.getSelection();
+    if (!original.trim() || !ctx.file) { new Notice("请先在笔记中选中要改写的文字"); return; }
+    new InlineEditModal(this.app, this, {
+      editor, path: ctx.file.path, from: editor.getCursor("from"), to: editor.getCursor("to"),
+      original, document: editor.getValue(),
+    }).open();
   }
 
   getActiveMarkdownFile(): TFile | null {

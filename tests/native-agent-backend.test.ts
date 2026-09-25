@@ -12,6 +12,8 @@ describe("native agent transports", () => {
     expect(nativeTransportFor("codex")).toBe("app-server");
     expect(nativeTransportFor("kimi")).toBe("acp");
     expect(nativeTransportFor("qwen")).toBe("acp");
+    expect(nativeTransportFor("cursor")).toBe("acp");
+    expect(nativeTransportFor("cline")).toBe("acp");
     expect(nativeTransportFor("claude")).toBeNull();
     expect(nativeTransportLabel("codex")).toBe("App Server");
   });
@@ -19,6 +21,8 @@ describe("native agent transports", () => {
   it("uses the documented ACP launch forms and permission posture", () => {
     expect(acpLaunch("kimi", "plan")).toEqual(["acp"]);
     expect(acpLaunch("opencode", "edit")).toEqual(["acp"]);
+    expect(acpLaunch("cursor", "plan")).toEqual(["acp"]);
+    expect(acpLaunch("cline", "plan")).toEqual(["--acp"]);
     expect(acpLaunch("qwen", "plan")).toEqual(["--acp", "--approval-mode", "plan"]);
     expect(acpLaunch("gemini", "edit")).toEqual(["--acp", "--approval-mode", "auto_edit"]);
     expect(acpLaunch("gemini", "full")).toEqual(["--acp", "--approval-mode", "auto_edit"]);

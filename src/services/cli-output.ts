@@ -27,6 +27,14 @@ export function parseCliOutputLine(line: string): ParsedCliOutput {
       return { text: "", error: null, terminal: false };
     }
     const event = parsed as Record<string, unknown>;
+    if (event.event === "step_update") {
+      const step = event.step_update as Record<string, unknown> | undefined;
+      return { text: typeof step?.text_delta === "string" ? step.text_delta : "", error: null, terminal: false };
+    }
+    if (event.event === "result") {
+      const result = event.result as Record<string, unknown> | undefined;
+      return { text: typeof result?.response === "string" ? result.response : "", error: result?.status === "SUCCESS" ? null : String(result?.error || "Antigravity CLI 未完成"), terminal: true };
+    }
     const text = extractJsonEventText(event);
     const terminal = event.type === "turn.completed" || event.type === "result";
     const explicitError =

@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, History, Plus, SquarePen, X, AlertCircle, CalendarPlus, FilePlus2, Settings2, AtSign, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChatActivity, PermissionMode, ChatAttachment, PromptTemplate } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -17,9 +17,15 @@ import { PromptInput, PromptInputFooter, PromptInputHeader, PromptInputSubmit, P
 import { splitMermaid } from "../services/mermaid-content";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { ComposerPopover, effortLabel } from "./composer-popover";
+import { conversationImages } from "../services/conversation-images";
+import { ConversationImageLightbox, referenceImageAttachment, showConversationImageMenu } from "./conversation-image";
 
 interface Props {
   chat: Chat<AgentMessage>; app: App; parent: Component;
+  conversationId: string; conversationTitle: string;
+  branch: { parentId: string; parentTitle: string; messageId: string } | null;
+  onOpenParent: (id: string) => void; onForkMessage: (messageId: string) => void;
+  imageTargetNote: TFile | null;
   backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null;
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
@@ -94,9 +100,15 @@ export function ChatPanel(props: Props) {
   const [menuIndex, setMenuIndex] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const previousConversation = useRef(props.conversationId);
   const upload = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (previousConversation.current === props.conversationId) return;
+    previousConversation.current = props.conversationId;
+    setInput(""); setAttachments([]); setEditingId(null); setEditText(""); clearError();
+  }, [props.conversationId, clearError]);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const locked = useRef(false);
   const inputId = useId();
@@ -105,8 +117,9 @@ export function ChatPanel(props: Props) {
   const promptChoices = [...props.prompts.map((body, i) => ({ id: `quick-${i}`, name: body, body })), ...props.customPrompts]
     .filter((p) => !query || `${p.name} ${p.body}`.toLocaleLowerCase().includes(query));
   const menuOpen = query !== null && !menuDismissed;
-  const permissionLabel = props.permission === "full" ? "完全访问" : props.permission === "edit" ? "可写当前库" : "只读";
-  const PermissionIcon = props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
+  const imageEditing = attachments.some((file) => file.intent === "edit");
+  const permissionLabel = imageEditing ? "图片编辑只读" : props.permission === "full" ? "完全访问" : props.permission === "edit" ? "可写当前库" : "只读";
+  const PermissionIcon = imageEditing ? Shield : props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
   const choosePrompt = (index: number) => {
     const prompt = promptChoices[index];
     if (prompt) setInput(prompt.body); else { props.onManagePrompts(); setInput(""); }
@@ -124,6 +137,12 @@ export function ChatPanel(props: Props) {
     try { for (const file of files) { try { addAttachment(await readAttachment(file)); } catch (e) { if (mounted.current) setAttachmentError(String(e)); } } }
     finally { if (mounted.current) setReading((n) => n - 1); }
   };
+  const addReferenceImage = (image: ChatAttachment) => {
+    void referenceImageAttachment(props.app, image).then((file) => {
+      addAttachment(file);
+      textarea.current?.focus();
+    }).catch((error) => setAttachmentError(error instanceof Error ? error.message : String(error)));
+  };
   useEffect(() => {
     if (!props.prefillVersion) return;
     setInput(props.prefill); textarea.current?.focus();
@@ -135,6 +154,7 @@ export function ChatPanel(props: Props) {
 
   const submit = async (text: string) => {
     if ((!text.trim() && !attachments.length) || reading || running || locked.current) return;
+    if (imageEditing && !text.trim()) { setAttachmentError("请描述希望如何修改图片"); textarea.current?.focus(); return; }
     try { props.onValidateAttachments(attachments); } catch (e) { setAttachmentError(String(e)); return; }
     locked.current = true; clearError(); setStopped(false); setInput("");
     const sent = attachments; setAttachments([]); setAttachmentError("");
@@ -166,15 +186,46 @@ export function ChatPanel(props: Props) {
     finally { locked.current = false; await props.onPersist(); }
   };
   const title = messages.find((m) => m.role === "user");
+  const images = conversationImages(messages);
+  const imageFromElement = (element: HTMLImageElement, index: number): ChatAttachment => {
+    const id = element.closest("[data-qa-image-id]")?.getAttribute("data-qa-image-id");
+    const existing = images.find((item) => item.id === id);
+    if (existing) return existing;
+    const url = element.currentSrc || element.src;
+    const name = element.alt || `图片 ${index + 1}`;
+    const mediaType = /^data:(image\/[^;,]+)/.exec(url)?.[1] || (/\.jpe?g(?:[?#]|$)/i.test(url) ? "image/jpeg" : /\.webp(?:[?#]|$)/i.test(url) ? "image/webp" : /\.gif(?:[?#]|$)/i.test(url) ? "image/gif" : "image/png");
+    return { id: `rendered-${index}`, name, mediaType, size: 0, url };
+  };
+  const openRenderedImage = (image: ChatAttachment, event: MouseEvent) => {
+    const root = (event.target as Element).closest(".qa-conversation-content");
+    const elements = root ? Array.from(root.querySelectorAll<HTMLImageElement>(".qa-message-content img")) : [];
+    const rendered = elements.length ? elements.map(imageFromElement) : images;
+    const identity = (item: ChatAttachment) => item.size ? `${item.name}:${item.size}` : item.url || item.id;
+    const all = rendered.filter((item, index) => rendered.findIndex((candidate) => identity(candidate) === identity(item)) === index);
+    const clicked = elements.findIndex((element) => element === event.target || element.closest("[data-qa-image-id]") === event.target);
+    const selected = rendered[clicked] ?? rendered.find((item) => item.id === image.id || item.url === image.url) ?? image;
+    new ConversationImageLightbox(props.app, all, all.find((item) => identity(item) === identity(selected)) ?? selected, props.imageTargetNote, addReferenceImage).open();
+  };
   return <>
     <header className="qa-header">
-      <div className="qa-title">{title ? messageText(title).split("\n")[0]?.slice(0, 60) : "新对话"}</div>
+      <div className="qa-title-wrap"><div className="qa-title">{props.conversationTitle || (title ? messageText(title).split("\n")[0]?.slice(0, 60) : "新对话")}</div>
+        {props.branch && <button type="button" className="qa-branch-parent" disabled={running} onClick={() => props.onOpenParent(props.branch!.parentId)}>
+          <GitBranch size={12} /><span>返回原对话 · {props.branch.parentTitle}</span></button>}
+      </div>
       <button type="button" disabled={running} onClick={props.onConnection} aria-label="连接设置"><Settings2 size={17} /></button>
       <button type="button" disabled={running} onClick={(e) => props.onHistory(e.nativeEvent)}><History size={17} /><span className="qiaomu-agent__sr-only">历史对话</span></button>
       <button type="button" disabled={running} onClick={props.onNew}><SquarePen size={17} /><span className="qiaomu-agent__sr-only">新对话</span></button>
     </header>
     <Conversation>
-      <ConversationContent>
+      <ConversationContent onClick={(event) => {
+        const image = event.target;
+        if (!(image instanceof HTMLImageElement) || !image.closest(".qa-markdown-host")) return;
+        event.preventDefault(); openRenderedImage(imageFromElement(image, 0), event.nativeEvent);
+      }} onContextMenu={(event) => {
+        const image = event.target;
+        if (!(image instanceof HTMLImageElement) || !image.closest(".qa-markdown-host")) return;
+        event.preventDefault(); showConversationImageMenu(props.app, imageFromElement(image, 0), event.nativeEvent, props.imageTargetNote, addReferenceImage);
+      }}>
         {!messages.length && <div className="qa-empty">
           <h3>从一个想法开始</h3><p>围绕笔记提问、整理，或协作修改。</p>
           <div className="qa-suggestions">{props.prompts.slice(0, 3).map((prompt) => <button key={prompt} type="button" onClick={() => { setInput(prompt); textarea.current?.focus(); }}>{prompt}</button>)}</div>
@@ -189,7 +240,9 @@ export function ChatPanel(props: Props) {
           for (const part of message.parts) if (part.type === "data-attachment") messageAttachments.set(part.data.id, part.data);
           return <Message key={message.id} from={message.role} className={editingId === message.id ? "is-editing" : ""}>
             <MessageContent>
-              <Attachments files={[...messageAttachments.values()]} variant={message.role === "assistant" ? "grid" : "inline"} />
+              <Attachments files={[...messageAttachments.values()]} variant={message.role === "assistant" ? "grid" : "inline"}
+                onOpenImage={openRenderedImage}
+                onImageMenu={(image, event) => showConversationImageMenu(props.app, image, event, props.imageTargetNote, addReferenceImage)} />
               <Activities activities={activities} running={active} />
               {approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} onChoose={(choice) => props.onApprove(approval.id, choice)} />)}
               {message.role === "user" && editingId === message.id ? <form className="qa-message-editor" onSubmit={(event) => { event.preventDefault(); void submitEdit(message); }}>
@@ -210,6 +263,7 @@ export function ChatPanel(props: Props) {
             </div>}
             {message.role === "assistant" && text && !active && <MessageActions>
               <MessageAction label="复制回复" onClick={() => void navigator.clipboard.writeText(text).then(() => new Notice("已复制")).catch(() => new Notice("复制失败，请手动选择文本"))}><Copy size={14} /></MessageAction>
+              <MessageAction label="从这条回复创建分支" disabled={running} onClick={() => props.onForkMessage(message.id)}><GitBranch size={14} /></MessageAction>
               <MessageAction label="追加到今日日记" onClick={() => props.onAppend(text, true)}><CalendarPlus size={14} /></MessageAction>
               <MessageAction label="追加到指定文件" onClick={() => props.onAppend(text, false)}><FilePlus2 size={14} /></MessageAction>
             </MessageActions>}
@@ -232,7 +286,7 @@ export function ChatPanel(props: Props) {
         <input type="file" multiple hidden ref={upload} onChange={(e) => { void addFiles(Array.from(e.currentTarget.files ?? [])); e.currentTarget.value = ""; }} />
         <Attachments files={attachments} onRemove={(id) => setAttachments((current) => current.filter((a) => a.id !== id))} />
         {reading > 0 && <div className="qa-status">正在读取附件…</div>}
-        {(props.note || props.editorSelection) && <PromptInputHeader>
+        {!imageEditing && (props.note || props.editorSelection) && <PromptInputHeader>
           {props.note && <span className="qa-note"><FileText size={13} /><span>{props.note.basename}</span>
             <button type="button" disabled={running} onClick={props.onToggleNote}><X size={12} /><span className="qiaomu-agent__sr-only">不附加当前笔记</span></button></span>}
           {props.editorSelection && <span className="qa-note qa-selection-chip" title={props.editorSelection.detail.slice(0, 400)}><TextSelect size={13} /><span>{props.editorSelection.label}</span>
@@ -252,7 +306,7 @@ export function ChatPanel(props: Props) {
             if (startsFileMention(value, cursor) && !(event.nativeEvent as InputEvent).isComposing) props.onPickFile((file) => { addAttachment(file); setInput((current) => current === value ? value.slice(0, cursor - 1) + value.slice(cursor) : current); textarea.current?.focus(); });
           }}
           onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { if (!e.clipboardData.getData("text/plain")) e.preventDefault(); void addFiles(files); } }}
-          placeholder="输入消息，/ 选择 Prompt，@ 引用文件…" />
+          placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息，/ 选择 Prompt，@ 引用文件…"} />
         <PromptInputFooter><PromptInputTools>
           <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} disabled={running}>
             {(close) => <>
@@ -262,7 +316,7 @@ export function ChatPanel(props: Props) {
               <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
             </>}
           </ComposerPopover>
-          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running}>
+          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
             {(close) => <>
               <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
               <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>

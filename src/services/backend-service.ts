@@ -2,11 +2,12 @@ import { Platform, type App } from "obsidian";
 import type { ChatBackend, CliDetection, QiaomuSettings } from "../types";
 import { ApiBackend } from "./api-backend";
 import { CliBackend } from "./cli-backend";
+import { ZcodeBackend } from "./zcode-backend";
 import { NativeAgentBackend, nativeTransportFor, nativeTransportLabel } from "./native-agent-backend";
 
 export class BackendService {
   private detections: CliDetection[] = [];
-  private readonly nativeBackends = new Map<string, NativeAgentBackend>();
+  private readonly nativeBackends = new Map<string, NativeAgentBackend | ZcodeBackend>();
 
   constructor(
     private readonly app: App,
@@ -68,6 +69,15 @@ export class BackendService {
     }
   }
 
+  /** Restart idle Codex App Server processes so a newly installed MCP server is loaded. */
+  async refreshCodexMcp(): Promise<boolean> {
+    const entries = [...this.nativeBackends].filter(([key]) => JSON.parse(key)[1] === "codex") as Array<[string, NativeAgentBackend]>;
+    if (entries.some(([, backend]) => backend.isBusy())) return false;
+    for (const [key] of entries) this.nativeBackends.delete(key);
+    await Promise.all(entries.map(([, backend]) => backend.shutdown()));
+    return true;
+  }
+
   async release(owner: string): Promise<void> {
     const owned = [...this.nativeBackends].filter(([key]) => JSON.parse(key)[0] === owner);
     for (const [key] of owned) this.nativeBackends.delete(key);
@@ -80,6 +90,12 @@ export class BackendService {
   }
 
   private localBackend(detection: CliDetection, owner: string): ChatBackend {
+    if (detection.id === "zcode") {
+      const key = JSON.stringify([owner, detection.id]);
+      let backend = this.nativeBackends.get(key);
+      if (!backend) { backend = new ZcodeBackend(detection); this.nativeBackends.set(key, backend); }
+      return backend;
+    }
     if (!nativeTransportFor(detection.id)) return new CliBackend(detection);
     const key = JSON.stringify([owner, detection.id]);
     let backend = this.nativeBackends.get(key);

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../src/defaults";
-import { activeProvider, chooseModel, connectProvider, exposedModels, maskKey, migrateProviders, newProvider, removeProvider, upsertProvider } from "../src/services/model-sources";
+import { activeProvider, agentShown, chooseModel, connectProvider, DEFAULT_VISIBLE_AGENT_IDS, exposedModels, maskKey, migrateProviders, newProvider, removeProvider, upsertProvider, visibleAgentModels } from "../src/services/model-sources";
 import type { QiaomuSettings } from "../src/types";
 
 function fresh(): QiaomuSettings {
@@ -8,6 +8,15 @@ function fresh(): QiaomuSettings {
 }
 
 describe("model providers", () => {
+  it("defaults to at most seven visible agents and keeps Pi's catalog opt-in", () => {
+    const settings = normalizeSettings({});
+    expect(DEFAULT_VISIBLE_AGENT_IDS).toHaveLength(7);
+    expect(agentShown(settings, "codex")).toBe(true);
+    expect(agentShown(settings, "grok")).toBe(false);
+    expect(visibleAgentModels(settings, "pi", [{ id: "anthropic/claude", name: "Claude", efforts: [] }]).models).toEqual([]);
+    settings.agentVisibility.grok = true;
+    expect(agentShown(normalizeSettings(settings), "grok")).toBe(true);
+  });
   it("migrates the old single connection and per-provider profiles into a list", () => {
     const settings = normalizeSettings({
       api: { provider: "deepseek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", secretId: "s-deepseek" },
@@ -25,16 +34,44 @@ describe("model providers", () => {
     expect(maskKey("")).toBe("");
   });
 
-  it("exposes exactly the enabled models plus the configured default; nothing enabled means nothing extra", () => {
+  it("exposes only enabled models, including manually added IDs", () => {
     const provider = { ...newProvider("deepseek", []), model: "manual", models: [{ id: "a", name: "A", efforts: [] }, { id: "b", name: "B", efforts: [] }] };
-    expect(exposedModels(provider).map((m) => m.id)).toEqual(["manual"]);
-    expect(exposedModels({ ...provider, enabledModels: ["b", "typed"] }).map((m) => m.id)).toEqual(["manual", "b", "typed"]);
+    expect(exposedModels(provider).map((m) => m.id)).toEqual([]);
+    expect(exposedModels({ ...provider, enabledModels: ["b", "typed"] }).map((m) => m.id)).toEqual(["b", "typed"]);
+  });
+
+  it("keeps per-agent visibility and manual IDs after reload", () => {
+    const settings = normalizeSettings({ agentEnabledModels: { kimi: ["", "k3"] }, agentCustomModels: { kimi: ["custom-x"] } });
+    const listed = visibleAgentModels(settings, "kimi", [{ id: "k3", name: "K3", efforts: [] }, { id: "k2", name: "K2", efforts: [] }]);
+    expect(listed.models.map((model) => model.id)).toEqual(["k3"]);
+    expect(listed.showDefault).toBe(true);
+    settings.agentEnabledModels.kimi = ["custom-x"];
+    expect(visibleAgentModels(settings, "kimi", []).models.map((model) => model.id)).toEqual(["custom-x"]);
+    expect(visibleAgentModels(settings, "kimi", []).showDefault).toBe(false);
   });
 
   it("gives never-curated migrated providers their recommended models", () => {
     const settings = normalizeSettings({ providers: [{ id: "deepseek", provider: "deepseek", baseUrl: "https://api.deepseek.com/v1", model: "", secretId: "s",
       models: [{ id: "deepseek-chat", name: "c", efforts: [] }, { id: "deepseek-reasoner", name: "r", efforts: [] }] }] });
     expect(settings.providers[0]!.enabledModels).toEqual(["deepseek-chat", "deepseek-reasoner"]);
+  });
+
+  it("keeps an explicitly empty model list and per-model options after reload", () => {
+    const provider = { ...newProvider("deepseek", []), enabledModels: [], showInPicker: false,
+      modelOptions: { "deepseek-chat": { temperature: 0.7, maxOutputTokens: 4096 } } };
+    const restored = normalizeSettings({ providers: [provider] }).providers[0]!;
+    expect(restored.enabledModels).toEqual([]);
+    expect(restored.showInPicker).toBe(false);
+    expect(restored.modelOptions?.["deepseek-chat"]).toEqual({ temperature: 0.7, maxOutputTokens: 4096 });
+  });
+
+  it("restores model picker visibility and readable chat typography settings", () => {
+    const settings = normalizeSettings({ hiddenAgents: ["codex"], chatFontFamily: "obsidian", chatFontSize: 18, codeFontSize: 15 });
+    expect(settings.hiddenAgents).toEqual(["codex"]);
+    expect(settings.chatFontFamily).toBe("obsidian");
+    expect(settings.chatFontSize).toBe(18);
+    expect(settings.codeFontSize).toBe(15);
+    expect(normalizeSettings({ chatFontSize: 99, codeFontSize: 3 }).chatFontSize).toBe(15);
   });
 
   it("connects with one key sent only to the chosen provider, enabling recommended models", async () => {

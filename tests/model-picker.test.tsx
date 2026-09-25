@@ -7,7 +7,7 @@ import type { ModelSource } from "../src/services/model-sources";
 afterEach(cleanup);
 
 const sources: ModelSource[] = [
-  { key: "cli:codex", kind: "agent", label: "Codex", icon: "codex", models: [], loaded: false },
+  { key: "cli:codex", kind: "agent", label: "Codex", icon: "codex", models: [], loaded: false, canListModels: true },
   { key: "api:deepseek", kind: "api", label: "DeepSeek", icon: "deepseek", models: [{ id: "deepseek-chat", name: "DeepSeek V4", efforts: [] }, { id: "deepseek-reasoner", name: "DeepSeek R2", efforts: ["low", "high"] }], loaded: true },
   { key: "api:moonshot", kind: "api", label: "Kimi", icon: "moonshot", models: [{ id: "kimi-k3", name: "Kimi K3", efforts: [] }], loaded: true },
 ];
@@ -41,11 +41,26 @@ describe("unified model picker", () => {
     expect(screen.getByRole("button", { name: /Kimi K3/ })).toBeTruthy();
   });
 
-  it("accepts any typed model id for the current source", () => {
+  it("keeps API search inside the models enabled in settings", () => {
     const { props } = setup();
     fireEvent.change(screen.getByRole("textbox", { name: "筛选模型" }), { target: { value: "deepseek-v5-preview" } });
-    fireEvent.click(screen.getByRole("button", { name: /使用「deepseek-v5-preview」/ }));
-    expect(props.onSelect).toHaveBeenCalledWith("api:deepseek", "deepseek-v5-preview");
+    expect(screen.queryByRole("button", { name: /使用「deepseek-v5-preview」/ })).toBeNull();
+    expect(props.onSelect).not.toHaveBeenCalled();
+  });
+
+  it("does not offer disabled API models through recent history", () => {
+    setup({ recent: [{ source: "api:deepseek", model: "disabled-model" }] });
+    fireEvent.click(screen.getByRole("button", { name: "最近使用" }));
+    expect(screen.queryByRole("button", { name: /disabled-model/ })).toBeNull();
+  });
+
+  it("does not reintroduce hidden local models through search or recent history", () => {
+    const curated = [{ ...sources[0]!, models: [{ id: "k3", name: "K3", efforts: [] }], showDefault: false, allowCustom: false, loaded: true }, ...sources.slice(1)];
+    setup({ sources: curated, recent: [{ source: "cli:codex", model: "hidden" }] });
+    fireEvent.change(screen.getByRole("textbox", { name: "筛选模型" }), { target: { value: "hidden" } });
+    expect(screen.queryByRole("button", { name: /使用「hidden」/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.queryByRole("button", { name: "默认模型" })).toBeNull();
   });
 
   it("narrows to one source from the rail, offers the agent default and lazy model loading", () => {
@@ -56,6 +71,13 @@ describe("unified model picker", () => {
     expect(props.onLoad).toHaveBeenCalledWith("cli:codex");
     fireEvent.click(screen.getByRole("button", { name: "默认模型" }));
     expect(props.onSelect).toHaveBeenCalledWith("cli:codex", "");
+  });
+
+  it("does not offer a model-list request for a CLI without a list capability", () => {
+    setup({ sources: [{ key: "cli:grok", kind: "agent", label: "Grok CLI", models: [], loaded: false }] });
+    fireEvent.click(screen.getByRole("button", { name: "Grok CLI" }));
+    expect(screen.getByRole("button", { name: "默认模型" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "获取模型列表" })).toBeNull();
   });
 
   it("shows recent models across sources and supports keyboard navigation", () => {
