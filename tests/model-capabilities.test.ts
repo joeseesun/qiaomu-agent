@@ -36,6 +36,8 @@ describe("resolved model", () => {
     expect(resolveModel({ provider: "google" }, "gemini-3-pro").efforts).toEqual(["low", "high"]);
     expect(resolveModel({ provider: "openai", modelOptions: { "gpt-5.5": { reasoning: false } } }, "gpt-5.5").efforts).toEqual([]);
     expect(resolveModel({ provider: "custom" }, "unknown").efforts).toEqual([]);
+    expect(resolveModel({ provider: "deepseek", models: [{ id: "deepseek-flash", name: "Flash", reasoning: true, efforts: ["low", "high", "max"] }] }, "deepseek-flash").efforts)
+      .toEqual(["none", "low", "high", "max"]);
   });
 
   it("blocks images only for models known not to read them", () => {
@@ -89,6 +91,10 @@ describe("thinking switches", () => {
   });
 
   it("uses OpenRouter's reasoning object, and every common switch for other compatible services", () => {
+    expect(thinkingRequest({ provider: "deepseek" }, "openai-chat", "deepseek-flash", "max"))
+      .toEqual({ body: { thinking: { type: "enabled" }, reasoning_effort: "max" } });
+    expect(thinkingRequest({ provider: "deepseek" }, "openai-chat", "deepseek-flash", "none"))
+      .toEqual({ body: { thinking: { type: "disabled" } } });
     expect(thinkingRequest({ provider: "openrouter" }, "openai-chat", "deepseek/deepseek-v4-pro", "high")).toEqual({ body: { reasoning: { effort: "high" } } });
     expect(thinkingRequest(relay, "openai-chat", "qwen3.7-plus", "low").body)
       .toEqual({ thinking: { type: "enabled" }, enable_thinking: true, reasoning_effort: "low", reasoning: { effort: "low" } });

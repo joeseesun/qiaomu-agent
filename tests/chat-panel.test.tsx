@@ -221,11 +221,13 @@ it("shows progress in the reply placeholder, then marks the finished reply as la
   const replies = container.querySelectorAll(".qa-message.is-assistant");
   expect(replies[replies.length - 1]!.classList.contains("is-latest")).toBe(true);
 });
-it("labels write access next to the permission icon but not read-only", () => {
+it("shows access as an icon whose accessible name carries the current level", () => {
   const { rerender, props } = setup();
-  expect(document.querySelector(".qa-permission-label")).toBeNull();
+  expect(screen.getByRole("button", { name: "访问权限：只读" })).toBeTruthy();
   rerender(<ChatPanel {...props} permission="edit" />);
-  expect(document.querySelector(".qa-permission-label")?.textContent).toBe("可写当前库");
+  const trigger = screen.getByRole("button", { name: "访问权限：可写当前库" });
+  expect(trigger.textContent).toBe("");
+  expect(document.querySelector(".qa-permission-control.is-edit")).toBeTruthy();
 });
 it("shows the context ring only after a reported usage, warning near the limit", async () => {
   const { input, send, chat, props } = setup();

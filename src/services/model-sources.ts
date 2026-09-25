@@ -19,12 +19,12 @@ export interface ModelSource {
   canListModels?: boolean;
 }
 
-/** Keep first-run composer choices small. Every detected agent remains available in settings. */
+/** Keep the settings list scannable; discovery itself determines which agents can be shown. */
 export const DEFAULT_VISIBLE_AGENT_IDS = ["codex", "claude", "opencode", "pi", "cursor", "antigravity", "kimi"] as const;
 
 export function agentShown(settings: QiaomuSettings, id: string): boolean {
   if (settings.hiddenAgents.includes(id)) return false;
-  return settings.agentVisibility[id] ?? DEFAULT_VISIBLE_AGENT_IDS.includes(id as typeof DEFAULT_VISIBLE_AGENT_IDS[number]);
+  return settings.agentVisibility[id] ?? true;
 }
 
 export function visibleAgentModels(settings: QiaomuSettings, agentId: string, reported: ModelChoice[]): { models: ModelChoice[]; showDefault: boolean } {
@@ -90,6 +90,7 @@ export async function connectProvider(
     ? { ...existing, protocol: endpoint.protocol ?? existing.protocol, secretId: `qiaomu-agent-${existing.id}-${crypto.randomUUID()}` }
     : { ...fresh, baseUrl, ...(endpoint.protocol ? { protocol: endpoint.protocol } : {}), ...(endpoint.name ? { name: endpoint.name } : {}) };
   const models = await deps.listModels(draft, key.trim());
+  if (presetId === "ollama" && models.length === 0) throw new Error("Ollama 尚未安装对话模型。请先在 Ollama 中下载模型后重试。");
   deps.setSecret(draft.secretId, key.trim());
   const recommended = recommendedModels(presetId, models);
   const provider: ProviderConfig = {

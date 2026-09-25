@@ -17,6 +17,7 @@ import { externalFiles } from "./services/local-host";
 import { ChatPanel } from "./ui/chat-panel";
 import { ModelManagerModal } from "./settings-tab";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
+import { chatFontStack, codeFontStack } from "./services/fonts";
 import { enabledMcpConfig } from "./services/mcp-config";
 import { getRuntimeRequire } from "./services/runtime-require";
 import { ApiBackend } from "./services/api-backend";
@@ -58,7 +59,7 @@ export class ChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, readonly plugin: QiaomuAgentPlugin) { super(leaf); }
   getViewType(): string { return VIEW_TYPE_QIAOMU_AGENT; }
   getDisplayText(): string { return "乔木 Agent"; }
-  override getIcon(): string { return "sparkles"; }
+  override getIcon(): string { return "tree-deciduous"; }
   override async onOpen(): Promise<void> { await this.ensureReady(); }
 
   async ensureReady(): Promise<void> {
@@ -497,7 +498,8 @@ export class ChatView extends ItemView {
   private render(): void {
     if (!this.root) return;
     const appearance = this.plugin.settings;
-    this.contentEl.toggleClass("qa-font-obsidian", appearance.chatFontFamily === "obsidian");
+    this.contentEl.style.setProperty("--qa-chat-font", chatFontStack(appearance.chatFontFamily, appearance.chatFontCustom));
+    this.contentEl.style.setProperty("--qa-code-font", codeFontStack(appearance.codeFontFamily));
     this.contentEl.style.setProperty("--qa-chat-font-size", `${appearance.chatFontSize}px`);
     this.contentEl.style.setProperty("--qa-code-font-size", `${appearance.codeFontSize}px`);
     const file = this.plugin.getActiveMarkdownFile();
@@ -524,7 +526,7 @@ export class ChatView extends ItemView {
       onPickModel: (sourceKey: string, modelId: string) => this.pickModel(sourceKey, modelId),
       onLoadModels: (sourceKey: string) => void this.loadSourceModels(sourceKey),
       onManageModels: () => new ModelManagerModal(this.app, this.plugin).open(),
-      onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); },
+      onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); this.render(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
       onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),

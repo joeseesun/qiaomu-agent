@@ -23,6 +23,17 @@ describe("API streaming transport", () => {
     expect(JSON.parse(init.body).stream).toBe(true);
     expect(JSON.parse(init.body)).toMatchObject({ temperature: 0.7, max_tokens: 4096 });
   });
+  it.each([
+    ["none", { thinking: { type: "disabled" } }],
+    ["max", { thinking: { type: "enabled" }, reasoning_effort: "max" }],
+  ] as const)("encodes DeepSeek reasoning choice %s in the chat request", async (effort, expected) => {
+    const chunk = { id: "c1", object: "chat.completion.chunk", created: 1, model: "deepseek-flash", choices: [{ index: 0, delta: { content: "好" }, finish_reason: "stop" }] };
+    const fetcher = vi.fn().mockResolvedValue(new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetcher);
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "deepseek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash" }, "fake")
+      .send({ ...request, reasoningEffort: effort }, callbacks(), new AbortController().signal);
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body)).toMatchObject(expected);
+  });
   it("does not retry authentication failures", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Invalid key", type: "authentication_error" } }), { status: 401 }));
     vi.stubGlobal("fetch", fetcher);
@@ -69,6 +80,15 @@ describe("API streaming transport", () => {
 
 afterEach(() => vi.unstubAllGlobals());
 describe("API discovery transport", () => {
+  it("shows the vendor name for DeepSeek's current Flash model", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [
+      { id: "deepseek-flash", name: "DeepSeek-V4.1-Flash", context_window: 1_048_576, max_output_tokens: 393_216,
+        input_modalities: ["text", "image"], effort: { supported_levels: ["low", "high", "max"], default_level: "high" } },
+    ] }))));
+    const models = await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "deepseek", baseUrl: "https://api.deepseek.com/v1" }, "fake").listModels();
+    expect(models[0]).toMatchObject({ id: "deepseek-flash", name: "DeepSeek-V4.1-Flash", contextWindow: 1_048_576,
+      maxOutputTokens: 393_216, vision: true, reasoning: true, efforts: ["low", "high", "max"] });
+  });
   it.each([
     ["anthropic", "x-api-key"], ["google", "x-goog-api-key"], ["openai-chat", "Authorization"], ["openai-responses", "Authorization"],
   ] as const)("uses %s authentication for custom providers", async (protocol, header) => {

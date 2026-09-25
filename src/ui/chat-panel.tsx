@@ -325,7 +325,7 @@ export function ChatPanel(props: Props) {
               <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
             </>}
           </ComposerPopover>
-          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<><PermissionIcon size={18} />{props.permission !== "plan" && !imageEditing && <span className="qa-permission-label">{permissionLabel}</span>}</>} disabled={running || imageEditing}>
+          {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}`} label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
             {(close) => <>
               <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
               <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
@@ -334,7 +334,7 @@ export function ChatPanel(props: Props) {
           </ComposerPopover>}
         </PromptInputTools>
         <ComposerPopover className="qa-model-control" label="模型与推理" disabled={running}
-          trigger={<>{(() => { const source = props.sources.find((item) => item.key === props.selection?.source); return source ? <BrandIcon icon={source.icon} kind={source.kind} size={14} /> : null; })()}<span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && props.effort && <span className="qa-effort-label">{effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
+          trigger={<>{(() => { const source = props.sources.find((item) => item.key === props.selection?.source); return source ? <BrandIcon icon={source.icon} kind={source.kind} size={14} /> : null; })()}<span className="qa-model-name">{props.backendLabel}</span>{!!props.efforts.length && <span className="qa-effort-label">推理 {effortLabel(props.effort)}</span>}<ChevronDown size={12} /></>}>
           {(close) => <ModelPicker sources={props.sources} current={props.selection} recent={props.recentModels}
             efforts={props.efforts} effort={props.effort} onEffort={props.onEffort}
             onSelect={(source, model) => { props.onPickModel(source, model); close(); }}

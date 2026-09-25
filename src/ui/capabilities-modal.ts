@@ -1,115 +1,183 @@
-import { App, Modal, Notice, Platform, Setting } from "obsidian";
+import { App, Menu, Modal, Notice, Platform, setIcon } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
 import { getRuntimeRequire } from "../services/runtime-require";
 import { listMcpServers, readMcpConfig, removeMcpServer, saveMcpServer, type McpServerEntry } from "../services/mcp-config";
 import { addCodexMcp, listCodexMcp } from "../services/codex-mcp";
 import { parseSkillFrontmatter } from "../utils";
 import type { AgentSkill } from "../types";
+import { actionButton, hostSwitch, iconAction, sectionHead, wideField } from "./settings-kit";
 
+type Tab = "skills" | "mcp";
+type View = "list" | "add";
+
+/** Folder picked through <input webkitdirectory>: the first file's absolute path minus its relative part. */
+function pickedFolder(files: FileList | null): string | null {
+  const file = files?.[0];
+  if (!file?.webkitRelativePath) return null;
+  const electron = getRuntimeRequire()?.("electron") as { webUtils?: { getPathForFile(file: File): string } } | undefined;
+  const full = electron?.webUtils?.getPathForFile(file) || (file as File & { path?: string }).path;
+  if (!full) return null;
+  const inner = file.webkitRelativePath.split("/").slice(1).join("/");
+  for (const suffix of [`/${inner}`, `\\${inner.replace(/\//g, "\\")}`]) if (full.endsWith(suffix)) return full.slice(0, -suffix.length);
+  return null;
+}
+
+/**
+ * Skills or tool connections, one page at a time: a list, and an "add" page that opens in place
+ * with a back control in the title row. Tabs appear only when opened without a specific page.
+ */
 export class CapabilitiesModal extends Modal {
-  private tab: "skills" | "mcp" = "skills";
+  private tab: Tab;
+  private view: View = "list";
   private query = "";
-  constructor(app: App, private readonly plugin: QiaomuAgentPlugin, initialTab: "skills" | "mcp" = "skills", private readonly onSelectSkill?: (skill: AgentSkill) => void) {
-    super(app); this.tab = initialTab;
+  private confirmRemove = "";
+  private readonly showTabs: boolean;
+
+  constructor(app: App, private readonly plugin: QiaomuAgentPlugin, initialTab?: Tab, private readonly onSelectSkill?: (skill: AgentSkill) => void, private readonly onChange?: () => void) {
+    super(app);
+    this.tab = initialTab ?? "skills";
+    this.showTabs = !initialTab && Platform.isDesktopApp;
   }
 
   override onOpen(): void {
     this.modalEl.addClass("qa-capabilities-modal");
     this.render();
   }
-  override onClose(): void { this.contentEl.empty(); }
+  override onClose(): void { this.contentEl.empty(); this.onChange?.(); }
+
+  private get settings() { return this.plugin.settings; }
+
+  private go(view: View): void { this.view = view; this.confirmRemove = ""; this.render(); }
 
   private render(): void {
+    const adding = this.view === "add";
+    this.titleEl.empty();
+    this.titleEl.addClass("qa-modal-title");
+    if (adding) iconAction(this.titleEl, "arrow-left", "返回", "qa-modal-back").addEventListener("click", () => this.go("list"));
+    this.titleEl.createSpan({ cls: "qa-modal-title-text", text: adding ? (this.tab === "skills" ? "添加技能" : "添加工具连接") : this.showTabs ? "技能与工具连接" : this.tab === "skills" ? "技能" : "工具连接" });
     const el = this.contentEl;
     el.empty();
-    el.createEl("h2", { text: "技能与工具连接" });
-    const tabs = el.createDiv({ cls: "qa-capability-tabs", attr: { role: "tablist", "aria-label": "能力类型" } });
-    for (const [id, label] of [["skills", "技能"], ["mcp", "工具连接"]] as const) {
-      const button = tabs.createEl("button", { text: label, attr: { type: "button", role: "tab", "aria-selected": String(this.tab === id) } });
-      button.addEventListener("click", () => { this.tab = id; this.render(); });
-      button.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault(); this.tab = this.tab === "skills" ? "mcp" : "skills"; this.render();
-        this.contentEl.querySelector<HTMLElement>(`[role=tab][aria-selected=true]`)?.focus();
-      });
-    }
-    const panel = el.createDiv({ cls: "qa-capability-panel", attr: { role: "tabpanel" } });
-    if (this.tab === "skills") this.renderSkills(panel);
-    else this.renderMcp(panel);
-  }
-
-  private renderSkills(el: HTMLElement): void {
-    el.createEl("p", { cls: "qa-capability-intro", text: "选择要在乔木 Agent 中使用的技能。技能是可重复使用的操作说明。" });
-    const actions = el.createDiv({ cls: "qa-capability-actions" });
-    const search = actions.createEl("input", { type: "search", placeholder: "搜索技能", attr: { "aria-label": "搜索技能" } });
-    search.value = this.query;
-    const list = el.createDiv({ cls: "qa-capability-list" });
-    search.addEventListener("input", () => { this.query = search.value.trim().toLowerCase(); this.renderSkillRows(list); });
-    const refresh = actions.createEl("button", { text: "刷新", attr: { type: "button" } });
-    refresh.addEventListener("click", async () => { refresh.disabled = true; await this.plugin.skillService.refresh(this.plugin.settings.skillDirectories); this.renderSkillRows(list); refresh.disabled = false; });
-    this.renderSkillRows(list);
-
-    if (!Platform.isDesktopApp) return;
-    const add = el.createEl("details", { cls: "qa-capability-add" });
-    add.createEl("summary", { text: "添加本地技能" });
-    add.createEl("p", { cls: "qa-capability-intro", text: "填写含 SKILL.md 的文件夹路径。导入后会保存到个人技能目录。" });
-    const row = add.createDiv({ cls: "qa-capability-actions" });
-    const path = row.createEl("input", { type: "text", placeholder: "技能文件夹的绝对路径", attr: { "aria-label": "技能文件夹的绝对路径" } });
-    const button = row.createEl("button", { text: "导入", attr: { type: "button" } });
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try {
-        this.importLocalSkill(path.value);
-        await this.plugin.skillService.refresh(this.plugin.settings.skillDirectories);
-        path.value = ""; add.open = false; this.renderSkillRows(list);
-        new Notice("技能已加入个人技能目录");
-      } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
-      finally { button.disabled = false; }
-    });
-    const advanced = el.createEl("details", { cls: "qa-capability-add" });
-    advanced.createEl("summary", { text: "扫描其他目录" });
-    new Setting(advanced).setName("额外目录").setDesc("每行一个绝对路径；仅供乔木 Agent 发现，不会移动文件。")
-      .addTextArea((control) => {
-        control.inputEl.rows = 3;
-        control.setValue(this.plugin.settings.skillDirectories.join("\n"));
-        control.onChange(async (value) => {
-          this.plugin.settings.skillDirectories = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-          await this.plugin.saveSettings();
-        });
-      });
-  }
-
-  private renderSkillRows(el: HTMLElement): void {
-    el.empty();
-    const skills = this.plugin.skillService.list().filter((skill) => `${skill.name} ${skill.description} ${skill.path}`.toLowerCase().includes(this.query));
-    if (!skills.length) { el.createEl("p", { cls: "qa-capability-empty", text: this.query ? "没有匹配的技能" : "尚未发现技能。可以导入本地技能，或点击刷新。" }); return; }
-    for (const skill of skills) {
-      const row = el.createDiv({ cls: "qa-capability-row" });
-      const copy = row.createDiv({ cls: "qa-capability-row-copy" });
-      copy.createEl("strong", { text: skill.name });
-      copy.createEl("span", { text: skill.description });
-      copy.createEl("small", { text: skill.source === "vault" ? `库内 · ${skill.path}` : skill.path });
-      new Setting(row).setName("在乔木中显示").addToggle((toggle) => toggle
-        .setTooltip(`${skill.name}：在乔木中显示`)
-        .setValue(!this.plugin.settings.disabledSkillPaths.includes(skill.path))
-        .onChange(async (enabled) => {
-          this.plugin.settings.disabledSkillPaths = enabled
-            ? this.plugin.settings.disabledSkillPaths.filter((path) => path !== skill.path)
-            : [...new Set([...this.plugin.settings.disabledSkillPaths, skill.path])];
-          await this.plugin.saveSettings();
-        }));
-      if (this.onSelectSkill) {
-        const choose = row.createEl("button", { text: "使用", attr: { type: "button", "aria-label": `使用技能 ${skill.name}` } });
-        choose.addEventListener("click", async () => {
-          if (this.plugin.settings.disabledSkillPaths.includes(skill.path)) {
-            this.plugin.settings.disabledSkillPaths = this.plugin.settings.disabledSkillPaths.filter((path) => path !== skill.path);
-            await this.plugin.saveSettings();
-          }
-          this.onSelectSkill?.(skill); this.close();
+    const root = el.createDiv({ cls: "qa-models qa-cap" });
+    if (this.showTabs && !adding) {
+      const tabs = root.createDiv({ cls: "qa-capability-tabs", attr: { role: "tablist", "aria-label": "能力类型" } });
+      for (const [id, label] of [["skills", "技能"], ["mcp", "工具连接"]] as const) {
+        const selected = this.tab === id;
+        const button = tabs.createEl("button", { text: label, attr: { type: "button", role: "tab", "aria-selected": String(selected), tabindex: selected ? "0" : "-1" } });
+        button.addEventListener("click", () => { this.tab = id; this.go("list"); });
+        button.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault(); this.tab = this.tab === "skills" ? "mcp" : "skills"; this.go("list");
+          this.contentEl.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
         });
       }
     }
-    el.createEl("p", { cls: "qa-capability-footnote", text: "这里控制乔木的技能菜单和主动附加。Codex、Claude Code 等本地 Agent 仍可能读取它们自己目录中的技能。" });
+    if (this.tab === "skills") { if (adding) this.renderSkillAdd(root); else this.renderSkills(root); }
+    else if (adding) this.renderMcpAdd(root);
+    else this.renderMcp(root);
+  }
+
+  // Skills
+
+  private renderSkills(el: HTMLElement): void {
+    const section = el.createDiv({ cls: "qa-ms-section" });
+    const toolbar = section.createDiv({ cls: "qa-cap-toolbar" });
+    const search = toolbar.createEl("input", { type: "search", cls: "qa-ms-input", attr: { placeholder: "搜索技能", "aria-label": "搜索技能" } });
+    search.value = this.query;
+    const refresh = iconAction(toolbar, "refresh-cw", "重新扫描技能目录");
+    if (Platform.isDesktopApp) actionButton(toolbar, "plus", "添加").addEventListener("click", () => this.go("add"));
+    const count = section.createDiv({ cls: "qa-cap-count" });
+    const list = section.createDiv({ cls: "qa-ms-list qa-cap-list" });
+    search.addEventListener("input", () => { this.query = search.value.trim().toLowerCase(); this.renderSkillRows(list, count); });
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true; refresh.addClass("is-busy");
+      await this.plugin.skillService.refresh(this.settings.skillDirectories);
+      this.renderSkillRows(list, count);
+      refresh.disabled = false; refresh.removeClass("is-busy");
+    });
+    this.renderSkillRows(list, count);
+    section.createDiv({ cls: "qa-ms-note", text: "开关决定技能是否出现在乔木的技能菜单里。Codex、Claude Code 等本机 Agent 仍会读取它们自己目录中的技能。" });
+    if (!this.onSelectSkill) window.setTimeout(() => search.focus());
+  }
+
+  private renderSkillRows(list: HTMLElement, count: HTMLElement): void {
+    list.empty();
+    const all = this.plugin.skillService.list();
+    const enabled = all.filter((skill) => !this.settings.disabledSkillPaths.includes(skill.path)).length;
+    count.setText(all.length ? `已启用 ${enabled} / ${all.length}` : "");
+    const skills = all.filter((skill) => `${skill.name} ${skill.description} ${skill.path}`.toLowerCase().includes(this.query));
+    if (!skills.length) {
+      list.createDiv({ cls: "qa-ms-list-empty", text: this.query ? "没有匹配的技能" : Platform.isDesktopApp ? "尚未发现技能。点“添加”导入本地技能，或点刷新重新扫描。" : "尚未发现技能。库内含 SKILL.md 的文件夹会自动出现在这里。" });
+      return;
+    }
+    for (const [source, label] of [["vault", "库内技能"], ["external", "本机技能目录"]] as const) {
+      const group = skills.filter((skill) => skill.source === source);
+      if (!group.length) continue;
+      list.createDiv({ cls: "qa-ms-list-label", text: `${label} · ${group.length}` });
+      for (const skill of group) this.skillRow(list, count, skill);
+    }
+  }
+
+  private skillRow(list: HTMLElement, count: HTMLElement, skill: AgentSkill): void {
+    const shown = !this.settings.disabledSkillPaths.includes(skill.path);
+    const row = list.createDiv({ cls: `qa-cap-row${shown ? "" : " is-off"}`, attr: { title: skill.path } });
+    const copy = row.createDiv({ cls: "qa-cap-row-text" });
+    copy.createDiv({ cls: "qa-ms-row-name", text: skill.name });
+    if (skill.description) copy.createDiv({ cls: "qa-cap-row-desc", text: skill.description });
+    if (this.onSelectSkill) {
+      const choose = actionButton(row, "corner-down-left", "使用");
+      choose.setAttribute("aria-label", `使用技能 ${skill.name}`);
+      choose.addEventListener("click", async () => {
+        if (!shown) { this.settings.disabledSkillPaths = this.settings.disabledSkillPaths.filter((path) => path !== skill.path); await this.plugin.saveSettings(); }
+        this.onSelectSkill?.(skill); this.close();
+      });
+    }
+    hostSwitch(row.createDiv({ cls: "qa-ms-row-switch" }), shown, `在乔木中显示 ${skill.name}`, async (on) => {
+      this.settings.disabledSkillPaths = on
+        ? this.settings.disabledSkillPaths.filter((path) => path !== skill.path)
+        : [...new Set([...this.settings.disabledSkillPaths, skill.path])];
+      row.toggleClass("is-off", !on);
+      await this.plugin.saveSettings();
+      const all = this.plugin.skillService.list();
+      count.setText(`已启用 ${all.filter((item) => !this.settings.disabledSkillPaths.includes(item.path)).length} / ${all.length}`);
+    });
+  }
+
+  private renderSkillAdd(el: HTMLElement): void {
+    const section = el.createDiv({ cls: "qa-ms-section" });
+    sectionHead(section, "导入技能文件夹", "选择含 SKILL.md 的文件夹，它会被复制到个人技能目录。");
+    const form = section.createDiv({ cls: "qa-ms-form" });
+    const row = form.createDiv({ cls: "qa-cap-toolbar" });
+    const path = row.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "技能文件夹的绝对路径", "aria-label": "技能文件夹的绝对路径", spellcheck: "false" } });
+    const picker = form.createEl("input", { type: "file", attr: { webkitdirectory: "", hidden: "", "aria-hidden": "true", tabindex: "-1" } });
+    actionButton(row, "folder-open", "选择…").addEventListener("click", () => picker.click());
+    const error = form.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
+    picker.addEventListener("change", () => {
+      const folder = pickedFolder(picker.files);
+      if (folder) { path.value = folder; error.setText(""); }
+      else error.setText("无法读取所选文件夹的路径，请直接粘贴路径。");
+      picker.value = "";
+    });
+    const actions = form.createDiv({ cls: "qa-ms-form-actions" });
+    const submit = actionButton(actions, "download", "导入", "is-primary");
+    submit.addEventListener("click", async () => {
+      submit.disabled = true; error.setText("");
+      try {
+        this.importLocalSkill(path.value);
+        await this.plugin.skillService.refresh(this.settings.skillDirectories);
+        new Notice("技能已加入个人技能目录");
+        this.go("list");
+      } catch (reason) { error.setText(reason instanceof Error ? reason.message : String(reason)); submit.disabled = false; }
+    });
+
+    const scan = el.createDiv({ cls: "qa-ms-section" });
+    sectionHead(scan, "扫描其他目录", "每行一个绝对路径。只用于发现技能，不会移动文件。");
+    const directories = scan.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "4", "aria-label": "额外技能目录", spellcheck: "false", placeholder: "/Users/me/skills" } });
+    directories.value = this.settings.skillDirectories.join("\n");
+    directories.addEventListener("change", async () => {
+      this.settings.skillDirectories = directories.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      await this.plugin.saveSettings();
+      await this.plugin.skillService.refresh(this.settings.skillDirectories);
+    });
   }
 
   private importLocalSkill(input: string): void {
@@ -133,119 +201,167 @@ export class CapabilitiesModal extends Modal {
       filter: (entry) => !fs.lstatSync(entry).isSymbolicLink() });
   }
 
+  // Tool connections (MCP)
+
+  private codexPath(): string | undefined {
+    return this.plugin.backendService.getDetections().find((agent) => agent.id === "codex" && agent.callable)?.path ?? undefined;
+  }
+
   private renderMcp(el: HTMLElement): void {
-    el.createEl("p", { cls: "qa-capability-intro", text: "工具连接让本地 Agent 使用外部服务。添加时选择保存到 Codex 或乔木。" });
-    let servers: McpServerEntry[];
-    try { servers = listMcpServers(this.plugin.settings.mcpConfig); }
-    catch (error) { el.createEl("p", { cls: "qa-capability-error", text: `当前配置无法读取：${error instanceof Error ? error.message : String(error)}` }); return; }
-    const codexPath = this.plugin.backendService.getDetections().find((agent) => agent.id === "codex" && agent.callable)?.path;
-    if (codexPath) this.renderCodexConnections(el, codexPath);
-    this.renderMcpAdd(el, codexPath);
-    el.createEl("h3", { cls: "qa-capability-subheading", text: "乔木连接" });
-    const list = el.createDiv({ cls: "qa-capability-list" });
-    if (!servers.length) list.createEl("p", { cls: "qa-capability-empty", text: "还没有乔木连接" });
-    for (const server of servers) {
-      const row = list.createDiv({ cls: "qa-capability-row" });
-      const copy = row.createDiv({ cls: "qa-capability-row-copy" });
-      copy.createEl("strong", { text: server.name });
-      copy.createEl("span", { text: server.kind === "http" ? "远程连接" : "本地程序" });
-      copy.createEl("small", { text: server.target });
-      new Setting(row).setName("启用").addToggle((toggle) => toggle
-        .setTooltip(`${server.name}：启用连接`)
-        .setValue(!this.plugin.settings.disabledMcpServers.includes(server.name))
-        .onChange(async (enabled) => {
-          this.plugin.settings.disabledMcpServers = enabled
-            ? this.plugin.settings.disabledMcpServers.filter((name) => name !== server.name)
-            : [...new Set([...this.plugin.settings.disabledMcpServers, server.name])];
-          await this.plugin.saveSettings();
-        }));
-      const remove = row.createEl("button", { text: "移除", attr: { type: "button", "aria-label": `移除 ${server.name}` } });
-      remove.addEventListener("click", async () => {
-        this.plugin.settings.mcpConfig = removeMcpServer(this.plugin.settings.mcpConfig, server.name);
-        await this.plugin.saveSettings(); this.render();
-      });
-      if (codexPath) {
-        const add = row.createEl("button", { text: "加入 Codex", attr: { type: "button", "aria-label": `将 ${server.name} 加入 Codex` } });
-        add.addEventListener("click", async () => {
-          add.disabled = true;
-          try {
-            const config = readMcpConfig(this.plugin.settings.mcpConfig).mcpServers as Record<string, Record<string, unknown>>;
-            const raw = config[server.name];
-            const supported = server.kind === "http" ? ["url"] : ["command", "args"];
-            if (!raw || Object.keys(raw).some((key) => !supported.includes(key))) throw new Error("此连接含认证或高级参数，请在 Codex 原生配置中添加");
-            await addCodexMcp(codexPath, server);
-            const ready = await this.plugin.backendService.refreshCodexMcp();
-            this.render(); new Notice(ready ? "已加入 Codex 配置；下一次对话将重新连接" : "已加入 Codex 配置；当前回复结束后请重载插件");
-          } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); add.disabled = false; }
-        });
-      }
+    const codexPath = this.codexPath();
+    const section = el.createDiv({ cls: "qa-ms-section" });
+    const actions = sectionHead(section, "乔木连接", "传给 Claude Code、Gemini 等通过 ACP / CLI 运行的本机 Agent。API 模型不使用这些连接。");
+    actionButton(actions, "plus", "添加连接").addEventListener("click", () => this.go("add"));
+    let servers: McpServerEntry[] = [];
+    let readError = "";
+    try { servers = listMcpServers(this.settings.mcpConfig); }
+    catch (error) { readError = error instanceof Error ? error.message : String(error); }
+    if (readError) section.createDiv({ cls: "qa-inline-error", attr: { role: "alert" }, text: `配置无法读取：${readError}。可在下方“编辑 JSON 配置”中修正。` });
+    else if (!servers.length) {
+      const empty = section.createDiv({ cls: "qa-ms-empty" });
+      empty.createDiv({ cls: "qa-ms-empty-title", text: "还没有工具连接" });
+      empty.createDiv({ cls: "qa-ms-empty-text", text: "连接远程 MCP 地址或本机程序，让 Agent 使用外部服务。" });
+    } else {
+      const list = section.createDiv({ cls: "qa-ms-list qa-cap-list" });
+      for (const server of servers) this.serverRow(list, server, codexPath);
     }
-    el.createEl("p", { cls: "qa-capability-footnote", text: "乔木开关控制传给 ACP / CLI 的连接；Codex 连接由 Codex 全局管理。API 模型不会读取这里的连接。" });
-    const advanced = el.createEl("details", { cls: "qa-capability-add" });
-    advanced.createEl("summary", { text: "高级：编辑 JSON 配置" });
-    const input = advanced.createEl("textarea", { cls: "qa-capability-json", attr: { "aria-label": "MCP JSON 配置" } });
-    input.value = this.plugin.settings.mcpConfig;
-    const save = advanced.createEl("button", { text: "验证并保存", attr: { type: "button" } });
+
+    if (codexPath) this.renderCodexConnections(el, codexPath);
+
+    const advanced = el.createEl("details", { cls: "qiaomu-agent-settings__advanced-settings qa-cap-json" });
+    const summary = advanced.createEl("summary", { cls: "qa-disclosure" });
+    summary.createSpan({ text: "编辑 JSON 配置" });
+    setIcon(summary.createSpan({ cls: "qa-disclosure-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+    if (readError) advanced.open = true;
+    const form = advanced.createDiv({ cls: "qa-ms-form" });
+    const input = form.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "10", "aria-label": "MCP JSON 配置", spellcheck: "false" } });
+    input.value = this.settings.mcpConfig;
+    const error = form.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
+    const save = actionButton(form.createDiv({ cls: "qa-ms-form-actions" }), "check", "验证并保存", "is-primary");
     save.addEventListener("click", async () => {
-      try { listMcpServers(input.value); this.plugin.settings.mcpConfig = input.value; await this.plugin.saveSettings(); this.render(); new Notice("配置已保存"); }
-      catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
+      try { listMcpServers(input.value); this.settings.mcpConfig = input.value; await this.plugin.saveSettings(); new Notice("配置已保存"); this.render(); }
+      catch (reason) { error.setText(reason instanceof Error ? reason.message : String(reason)); }
     });
   }
 
+  private serverRow(list: HTMLElement, server: McpServerEntry, codexPath?: string): void {
+    const on = !this.settings.disabledMcpServers.includes(server.name);
+    const row = list.createDiv({ cls: `qa-cap-row${on ? "" : " is-off"}` });
+    setIcon(row.createSpan({ cls: "qa-ms-row-icon", attr: { "aria-hidden": "true" } }), server.kind === "http" ? "globe" : "terminal");
+    const copy = row.createDiv({ cls: "qa-cap-row-text" });
+    copy.createDiv({ cls: "qa-ms-row-name", text: server.name });
+    copy.createDiv({ cls: "qa-cap-row-desc is-mono", text: `${server.kind === "http" ? "远程" : "本机程序"} · ${server.target}`, attr: { title: server.target } });
+    if (this.confirmRemove === server.name) {
+      const confirm = row.createDiv({ cls: "qa-cap-confirm" });
+      actionButton(confirm, "x", "取消").addEventListener("click", () => { this.confirmRemove = ""; this.render(); });
+      const remove = actionButton(confirm, "trash-2", "移除", "is-danger-strong");
+      remove.setAttribute("aria-label", `确认移除 ${server.name}`);
+      remove.addEventListener("click", async () => {
+        this.settings.mcpConfig = removeMcpServer(this.settings.mcpConfig, server.name);
+        this.settings.disabledMcpServers = this.settings.disabledMcpServers.filter((name) => name !== server.name);
+        this.confirmRemove = ""; await this.plugin.saveSettings(); this.render();
+      });
+      window.setTimeout(() => remove.focus());
+      return;
+    }
+    const more = iconAction(row, "more-horizontal", `${server.name} 的更多操作`);
+    more.addEventListener("click", () => {
+      const menu = new Menu();
+      if (codexPath) menu.addItem((item) => item.setTitle("加入 Codex").setIcon("copy-plus").onClick(() => void this.copyToCodex(codexPath, server)));
+      menu.addItem((item) => item.setTitle("移除").setIcon("trash-2").setWarning(true).onClick(() => { this.confirmRemove = server.name; this.render(); }));
+      const rect = more.getBoundingClientRect();
+      menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
+    });
+    hostSwitch(row.createDiv({ cls: "qa-ms-row-switch" }), on, `启用 ${server.name}`, async (enabled) => {
+      this.settings.disabledMcpServers = enabled
+        ? this.settings.disabledMcpServers.filter((name) => name !== server.name)
+        : [...new Set([...this.settings.disabledMcpServers, server.name])];
+      row.toggleClass("is-off", !enabled);
+      await this.plugin.saveSettings();
+    });
+  }
+
+  private async copyToCodex(codexPath: string, server: McpServerEntry): Promise<void> {
+    try {
+      const config = readMcpConfig(this.settings.mcpConfig).mcpServers as Record<string, Record<string, unknown>>;
+      const raw = config[server.name];
+      const supported = server.kind === "http" ? ["url"] : ["command", "args"];
+      if (!raw || Object.keys(raw).some((key) => !supported.includes(key))) throw new Error("此连接含认证或高级参数，请在 Codex 原生配置中添加");
+      await addCodexMcp(codexPath, server);
+      const ready = await this.plugin.backendService.refreshCodexMcp();
+      this.render(); new Notice(ready ? "已加入 Codex 配置；下一次对话将重新连接" : "已加入 Codex 配置；当前回复结束后请重载插件");
+    } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
+  }
+
   private renderCodexConnections(el: HTMLElement, executable: string): void {
-    el.createEl("h3", { cls: "qa-capability-subheading", text: "Codex 已有连接" });
-    const list = el.createDiv({ cls: "qa-capability-list qa-capability-native" });
-    const status = list.createEl("p", { cls: "qa-capability-empty", text: "正在读取 Codex 连接…" });
+    const section = el.createDiv({ cls: "qa-ms-section" });
+    sectionHead(section, "Codex 连接", "由 Codex 全局管理，与其他 Codex 客户端共用。");
+    const list = section.createDiv({ cls: "qa-ms-list" });
+    const status = list.createDiv({ cls: "qa-ms-list-empty", text: "正在读取 Codex 连接…" });
     void listCodexMcp(executable).then((servers) => {
       if (!list.isConnected) return;
       status.remove();
-      if (!servers.length) list.createEl("p", { cls: "qa-capability-empty", text: "Codex 还没有连接" });
+      if (!servers.length) list.createDiv({ cls: "qa-ms-list-empty", text: "Codex 还没有连接" });
       for (const server of servers) {
-        const row = list.createDiv({ cls: "qa-capability-native-row" });
-        row.createEl("span", { text: server.name });
-        row.createEl("small", { text: server.enabled ? "已配置" : "已关闭" });
+        const row = list.createDiv({ cls: `qa-cap-row${server.enabled ? "" : " is-off"}` });
+        setIcon(row.createSpan({ cls: "qa-ms-row-icon", attr: { "aria-hidden": "true" } }), "plug");
+        row.createDiv({ cls: "qa-cap-row-text" }).createDiv({ cls: "qa-ms-row-name", text: server.name });
+        row.createSpan({ cls: "qa-pill", text: server.enabled ? "已配置" : "已关闭" });
       }
     }).catch((error) => { if (list.isConnected) status.setText(`无法读取 Codex 连接：${error instanceof Error ? error.message : String(error)}`); });
   }
 
-  private renderMcpAdd(el: HTMLElement, codexPath?: string | null): void {
-    const add = el.createEl("details", { cls: "qa-capability-add" });
-    add.createEl("summary", { text: "添加工具连接" });
-    let scopeValue = codexPath ? "codex" : "qiaomu";
-    if (codexPath) new Setting(add).setName("保存到").setDesc("Codex 配置会在其他 Codex 客户端中共用。")
-      .addDropdown((dropdown) => dropdown.addOption("codex", "Codex（全局）").addOption("qiaomu", "乔木（其他本地 Agent）")
-        .onChange((value) => { scopeValue = value; }));
-    let kindValue = "http", nameValue = "", targetValue = "", argsValue = "";
-    const kind = new Setting(add).setName("连接方式").addDropdown((dropdown) => dropdown.addOption("http", "远程地址").addOption("stdio", "本地程序").onChange((value) => {
-      kindValue = value; target.nameEl.setText(value === "http" ? "地址" : "命令"); args.settingEl.toggle(value === "stdio");
-    }));
-    const name = new Setting(add).setName("名称").addText((text) => text.setPlaceholder("例如 notes-search").onChange((value) => { nameValue = value; }));
-    const target = new Setting(add).setName("地址").addText((text) => text.setPlaceholder("https://example.com/mcp").onChange((value) => { targetValue = value; }));
-    const args = new Setting(add).setName("参数（每行一个）").addTextArea((text) => { text.inputEl.rows = 3; text.onChange((value) => { argsValue = value; }); });
-    args.settingEl.hide();
-    const feedback = add.createDiv({ cls: "qa-capability-error", attr: { role: "status" } });
-    const button = add.createEl("button", { text: "添加", attr: { type: "button" } });
-    button.addEventListener("click", async () => {
+  private renderMcpAdd(el: HTMLElement): void {
+    const codexPath = this.codexPath();
+    const form = el.createDiv({ cls: "qa-ms-form" });
+    let scope: "codex" | "qiaomu" = codexPath ? "codex" : "qiaomu";
+    let kind: "http" | "stdio" = "http";
+    const segments = <T extends string>(parent: HTMLElement, label: string, options: Array<[T, string]>, value: T, onPick: (value: T) => void) => {
+      const group = parent.createDiv({ cls: "qa-segments", attr: { role: "radiogroup", "aria-label": label } });
+      const buttons = options.map(([id, text]) => {
+        const button = group.createEl("button", { text, attr: { type: "button", role: "radio", "aria-checked": String(id === value) } });
+        button.addEventListener("click", () => { for (const other of buttons) other.setAttribute("aria-checked", String(other === button)); onPick(id); });
+        return button;
+      });
+    };
+    const kindField = wideField(form, "连接方式");
+    const name = wideField(form, "名称", "英文字母开头，可含数字、- 和 _").createEl("input", { type: "text", cls: "qa-ms-input", attr: { placeholder: "例如 notes-search", "aria-label": "名称", spellcheck: "false" } });
+    const targetField = wideField(form, "地址");
+    const target = targetField.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "https://example.com/mcp", "aria-label": "地址", spellcheck: "false" } });
+    const argsField = wideField(form, "参数", "每行一个");
+    const args = argsField.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "3", "aria-label": "参数", spellcheck: "false" } });
+    argsField.hide();
+    segments(kindField, "连接方式", [["http", "远程地址"], ["stdio", "本机程序"]], kind, (value) => {
+      kind = value;
+      const remote = value === "http";
+      targetField.querySelector(".qa-ms-wide-label")?.setText(remote ? "地址" : "命令");
+      target.placeholder = remote ? "https://example.com/mcp" : "npx";
+      target.setAttribute("aria-label", remote ? "地址" : "命令");
+      argsField.toggle(!remote);
+    });
+    if (codexPath) segments(wideField(form, "保存到", "Codex 配置会在其他 Codex 客户端中共用"), "保存到", [["codex", "Codex（全局）"], ["qiaomu", "乔木（其他本机 Agent）"]], scope, (value) => { scope = value; });
+    const error = form.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
+    const submit = actionButton(form.createDiv({ cls: "qa-ms-form-actions" }), "plus", "添加", "is-primary");
+    submit.addEventListener("click", async () => {
+      error.setText("");
+      const entry: McpServerEntry = { name: name.value.trim(), kind, target: target.value.trim(), args: args.value.split(/\r?\n/).map((part) => part.trim()).filter(Boolean) };
       try {
-        const entry: McpServerEntry = {
-          name: nameValue, kind: kindValue as "http" | "stdio",
-          target: targetValue,
-          args: argsValue.split(/\r?\n/).map((part) => part.trim()).filter(Boolean),
-        };
-        if (scopeValue === "codex" && codexPath) {
+        if (scope === "codex" && codexPath) {
           saveMcpServer("{}", entry); // Validate before changing Codex's global configuration.
-          button.disabled = true;
+          submit.disabled = true;
           try {
             await addCodexMcp(codexPath, entry);
             const ready = await this.plugin.backendService.refreshCodexMcp();
-            this.render(); new Notice(ready ? "已加入 Codex 配置；下一次对话将重新连接" : "已加入 Codex 配置；当前回复结束后请重载插件");
-          } finally { button.disabled = false; }
+            new Notice(ready ? "已加入 Codex 配置；下一次对话将重新连接" : "已加入 Codex 配置；当前回复结束后请重载插件");
+          } finally { submit.disabled = false; }
         } else {
-          if (listMcpServers(this.plugin.settings.mcpConfig).some((item) => item.name === entry.name)) throw new Error("已有同名连接");
-          this.plugin.settings.mcpConfig = saveMcpServer(this.plugin.settings.mcpConfig, entry);
-          await this.plugin.saveSettings(); this.render();
+          if (listMcpServers(this.settings.mcpConfig).some((item) => item.name === entry.name)) throw new Error("已有同名连接");
+          this.settings.mcpConfig = saveMcpServer(this.settings.mcpConfig, entry);
+          await this.plugin.saveSettings();
         }
-      } catch (error) { feedback.setText(error instanceof Error ? error.message : String(error)); }
+        this.go("list");
+      } catch (reason) { error.setText(reason instanceof Error ? reason.message : String(reason)); }
     });
+    window.setTimeout(() => name.focus());
   }
 }

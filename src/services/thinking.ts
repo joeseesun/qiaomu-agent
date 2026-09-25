@@ -26,6 +26,12 @@ export function usesAdaptiveThinking(model: string): boolean {
 }
 
 export function thinkingRequest(connection: Pick<ApiConnection, "provider" | "protocol">, protocol: string, model: string, effort: string | undefined): ThinkingRequest {
+  if (connection.provider === "deepseek" && protocol === "openai-chat" && effort === "none") {
+    return { body: { thinking: { type: "disabled" } } };
+  }
+  if (connection.provider === "deepseek" && protocol === "openai-chat" && (effort === "low" || effort === "high" || effort === "max")) {
+    return { body: { thinking: { type: "enabled" }, reasoning_effort: effort } };
+  }
   if (effort !== "low" && effort !== "medium" && effort !== "high") return {};
   const level: Effort = effort;
   if (protocol === "anthropic") {

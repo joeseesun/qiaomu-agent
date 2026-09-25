@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectKey, recommendedModels } from "../src/services/key-detection";
+import { detectKey, isChatModel, recommendedModels } from "../src/services/key-detection";
 import { API_PROVIDERS } from "../src/services/api-providers";
 
 const m = (...ids: string[]) => ids.map((id) => ({ id, name: id, efforts: [] }));
@@ -28,6 +28,7 @@ describe("API key detection", () => {
     expect(detectKey("0123456789abcdef0123456789abcdef.AbCdEfGhIjKlMnOp")).toEqual({ kind: "ambiguous", candidates: ["glm", "zai"] });
     expect(detectKey("3f2b1c4d-1111-2222-3333-444455556666")).toEqual({ kind: "ambiguous", candidates: ["doubao"] });
     expect(detectKey("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig")).toEqual({ kind: "ambiguous", candidates: ["minimax"] });
+    expect(detectKey("AQ.0123456789abcdefghijklmnop")).toEqual({ kind: "ambiguous", candidates: ["google"] });
     expect(detectKey("sk-short")).toMatchObject({ kind: "ambiguous" });
     expect(detectKey("whatever-key")).toMatchObject({ kind: "ambiguous" });
     expect(detectKey("   ")).toEqual({ kind: "empty" });
@@ -47,7 +48,18 @@ describe("recommended models", () => {
     expect(recommendedModels("anthropic", m("claude-haiku-4-5", "claude-opus-5-5", "claude-opus-4-1", "claude-sonnet-5", "claude-sonnet-4-5")))
       .toEqual(["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"]);
     expect(recommendedModels("deepseek", m("deepseek-chat", "deepseek-reasoner"))).toEqual(["deepseek-chat", "deepseek-reasoner"]);
+    expect(recommendedModels("deepseek", m("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-flash")))
+      .toEqual(["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"]);
     expect(recommendedModels("openai", m("text-embedding-3-large", "gpt-5", "gpt-5-mini", "whisper-1", "tts-1", "gpt-6-astra"))).toEqual(["gpt-6-astra", "gpt-5", "gpt-5-mini"]);
+  });
+
+  it("skips speech and image models and only labels rule matches when padding is off", () => {
+    const stepfun = m("step-asr", "step-1o-turbo-vision", "step-2x-large", "step-1x-medium", "step-tts-mini", "step-1o-audio", "step-3", "step-5-preview");
+    expect(recommendedModels("stepfun", stepfun)).toEqual(["step-5-preview", "step-1o-turbo-vision", "step-3"]);
+    expect(recommendedModels("stepfun", stepfun, 3, { pad: false })).toEqual(["step-5-preview", "step-1o-turbo-vision"]);
+    expect(recommendedModels("unknown", m("a", "b"), 3, { pad: false })).toEqual([]);
+    expect(["step-asr", "stepaudio-2.5-asr", "step-tts-mini", "step-2x-large", "stepaudio-3-music-preview"].filter(isChatModel)).toEqual([]);
+    expect(["step-5-preview", "step-3.7-flash", "gpt-6-astra", "kimi-k3", "fastr-1"].every(isChatModel)).toBe(true);
   });
 
   it("falls back to the first chat models and honours a vendor default", () => {

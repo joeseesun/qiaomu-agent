@@ -1,0 +1,14 @@
+{
+  "id": "A",
+  "label": "A: 安静的模型卡",
+  "name": "安静的模型卡",
+  "notes": "",
+  "dials": {
+    "variance": 7,
+    "motion": 6,
+    "density": 5
+  },
+  "adjustments": "DeepSeek左侧应该用logo是吧",
+  "source": "click",
+  "receivedAt": "2026-09-25T13:27:12.093Z"
+}

@@ -1,6 +1,5 @@
 /* AI Elements' flat transcript and compound composer, scoped to the Obsidian leaf. */
 .qiaomu-agent--react { --qa-muted: var(--text-muted); --qa-chat-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif; background: var(--background-primary); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; padding: 0; font-family: var(--qa-chat-font); }
-.qiaomu-agent--react.qa-font-obsidian { --qa-chat-font: var(--font-interface); }
 .qiaomu-agent--react > * { min-width: 0; }
 .qiaomu-agent--react button { box-shadow: none; }
 .qiaomu-agent--react .qa-header { display: flex; align-items: center; gap: 6px; padding: 10px 14px; min-height: 48px; }
@@ -26,7 +25,7 @@
 .qiaomu-agent--react .qa-message-content { min-width: 0; overflow-wrap: anywhere; }
 .qiaomu-agent--react .qa-markdown-host { font-family: inherit; font-size: inherit; line-height: inherit; }
 .qiaomu-agent--react .qa-markdown-host :is(p, li, blockquote) { font-family: inherit; font-size: inherit; line-height: inherit; }
-.qiaomu-agent--react .qa-markdown-host :is(pre, code) { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: var(--qa-code-font-size, 13px); letter-spacing: 0; }
+.qiaomu-agent--react .qa-markdown-host :is(pre, code) { font-family: var(--qa-code-font, ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace); font-size: var(--qa-code-font-size, 13px); letter-spacing: 0; }
 .qiaomu-agent--react .qa-message-actions { display: flex; gap: 4px; }
 .qiaomu-agent--react .qa-message-actions button { width: 28px; height: 28px; }
 .qiaomu-agent--react .is-assistant:not(.is-latest) .qa-message-actions, .qiaomu-agent--react .qa-user-message-meta { opacity: 0; pointer-events: none; }
@@ -56,7 +55,7 @@
 .qiaomu-agent--react .qa-status { padding: 0 4px 8px; }
 .qiaomu-agent--react .qa-prompt,
 .qiaomu-agent--react .qa-prompt:hover,
-.qiaomu-agent--react .qa-prompt:focus-within { padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 20px; background: var(--background-primary); box-shadow: none; }
+.qiaomu-agent--react .qa-prompt:focus-within { container: qa-prompt / inline-size; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 20px; background: var(--background-primary); box-shadow: none; }
 .qiaomu-agent--react .qa-prompt:has(.qa-prompt-textarea:focus-visible) { outline: none; }
 .qiaomu-agent--react .qa-prompt-header { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
 .qiaomu-agent--react .qa-note { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 6px; border-radius: 6px; background: var(--background-secondary); color: var(--text-muted); font-size: 12px; }
@@ -67,7 +66,8 @@
 .qiaomu-agent--react .qa-prompt-textarea:focus,
 .qiaomu-agent--react .qa-prompt-textarea:focus-visible { background: transparent; border-color: transparent; box-shadow: none; outline: none; }
 .qiaomu-agent--react .qa-prompt-footer, .qiaomu-agent--react .qa-prompt-tools { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.qiaomu-agent--react .qa-prompt-footer { margin-top: 8px; flex-wrap: wrap; }
+.qiaomu-agent--react .qa-prompt-footer { margin-top: 8px; flex-wrap: nowrap; }
+.qiaomu-agent--react .qa-prompt-tools, .qiaomu-agent--react .qa-context-control { flex: none; }
 .qiaomu-agent--react .qa-prompt-footer button:not(.qa-submit), .qiaomu-agent--react .qa-prompt-footer select { display: flex; align-items: center; gap: 4px; min-height: 30px; height: auto; padding: 4px; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; }
 .qiaomu-agent--react .qa-model { min-width: 0; }
 .qiaomu-agent--react .qa-model span, .qiaomu-agent--react .qa-skill { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -80,8 +80,8 @@
 .qiaomu-agent--react .qa-submit:hover { background: var(--text-muted); }
 @media (pointer: coarse) { .qiaomu-agent--react button, .qiaomu-agent--react select { min-height: 40px; } }
 @media (pointer: coarse) { .qiaomu-agent--react .is-assistant .qa-message-actions, .qiaomu-agent--react .qa-user-message-meta { opacity: 1; pointer-events: auto; } }
-.qiaomu-agent--react .qa-permission-control .qa-control-trigger { gap: 4px; }
-.qiaomu-agent--react .qa-permission-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+/* Access is icon-only; full access keeps a warning tint so the risk stays visible without a label. */
+.qiaomu-agent--react .qa-prompt-footer .qa-permission-control.is-full .qa-control-trigger { color: var(--text-warning); }
 .qiaomu-agent--react .qa-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .qiaomu-agent--react .qa-attachment { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid var(--background-modifier-border); border-radius: 8px; max-width: 100%; font-size: 12px; }
 .qiaomu-agent--react .qa-attachment img { object-fit: cover; border-radius: 5px; flex-shrink: 0; }
@@ -101,7 +101,6 @@
 .qiaomu-agent--react .qa-command-menu button[aria-selected="true"] { background: var(--background-modifier-hover); }
 .qiaomu-agent--react .qa-command-menu button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qiaomu-agent--react button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
-.qiaomu-agent--react .qa-prompt-tools { flex-wrap: wrap; }
 .qiaomu-agent--react .qa-markdown-host pre, .qiaomu-agent--react .qa-markdown-host table { max-width: 100%; overflow: auto; }
 .qiaomu-agent--react .qa-markdown-host p:first-child { margin-top: 0; }
 .qiaomu-agent--react .qa-markdown-host p:last-child { margin-bottom: 0; }
@@ -132,7 +131,11 @@
 .qa-image-actions button { background: #262626; color: #f5f5f5; border: 1px solid #444; }
 .qa-image-target { padding: 9px 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; overflow-wrap: anywhere; }
 .qiaomu-agent--react .qa-control { min-width: 0; }
-.qiaomu-agent--react .qa-model-control { margin-left: auto; max-width: calc(100% - 124px); }
+.qiaomu-agent--react .qa-model-control { flex: 0 1 auto; margin-left: auto; }
+.qiaomu-agent--react .qa-model-control .qa-control-trigger { min-width: 0; }
+/* Narrow composers drop labels by their own width, never wrap: effort first, then the model name. */
+@container qa-prompt (max-width: 330px) { .qiaomu-agent--react .qa-model-control .qa-effort-label { display: none; } }
+@container qa-prompt (max-width: 250px) { .qiaomu-agent--react .qa-model-control .qa-model-name { display: none; } }
 .qiaomu-agent--react .qa-control-trigger { max-width: 100%; border-radius: 8px; }
 .qiaomu-agent--react .qa-control-trigger svg { flex-shrink: 0; stroke-width: 1.75; }
 .qiaomu-agent--react .qa-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

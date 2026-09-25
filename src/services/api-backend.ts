@@ -76,10 +76,17 @@ export class ApiBackend implements ChatBackend {
       : protocol === "google" ? { "x-goog-api-key": this.apiKey } : this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
     const response = await fetch(`${base}/models`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`无法获取模型列表（${response.status}），可继续使用已配置模型`);
-    const body = await response.json() as { data?: { id: string; display_name?: string }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
-    const models = body.data?.map((m) => ({ id: m.id, name: m.display_name || m.id, ...reportedCapabilities(m) }))
+    const body = await response.json() as { data?: { id: string; name?: string; display_name?: string; max_output_tokens?: number; effort?: { supported_levels?: string[] } }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
+    const models = body.data?.map((m) => ({ id: m.id, name: m.name || m.display_name || m.id,
+      ...(Number.isInteger(m.max_output_tokens) && m.max_output_tokens! > 0 ? { maxOutputTokens: m.max_output_tokens } : {}),
+      ...reportedCapabilities(m) }))
       ?? body.models?.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => ({ id: m.name.replace(/^models\//, ""), name: m.displayName || m.name, ...reportedCapabilities(m) })) ?? [];
-    return models.map((m) => ({ ...m, efforts: resolveModel({ provider, models: [{ ...m, efforts: [] }] }, m.id).efforts, isDefault: m.id === this.connection.model }));
+    return models.map((m) => {
+      const raw = body.data?.find((item) => item.id === m.id);
+      const allowedEfforts = provider === "deepseek" ? ["none", "low", "high", "max"] : ["low", "medium", "high"];
+      const reportedEfforts = raw?.effort?.supported_levels?.filter((level) => allowedEfforts.includes(level)) ?? [];
+      return { ...m, efforts: reportedEfforts.length ? reportedEfforts : resolveModel({ provider, models: [{ ...m, efforts: [] }] }, m.id).efforts, isDefault: m.id === this.connection.model };
+    });
   }
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
     if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("尚未配置 API Key，请打开连接设置");

@@ -27,17 +27,19 @@ export function reportedCapabilities(raw: Record<string, unknown>): Pick<ModelCh
   const architecture = raw.architecture && typeof raw.architecture === "object" ? raw.architecture as Record<string, unknown> : {};
   const inputs = [...strings(architecture.input_modalities), ...strings(raw.input_modalities), ...strings(raw.modalities)];
   const parameters = strings(raw.supported_parameters);
+  const effort = raw.effort && typeof raw.effort === "object" ? raw.effort as Record<string, unknown> : {};
   const result: Pick<ModelChoice, "contextWindow" | "vision" | "reasoning"> = {};
   if (contextWindow) result.contextWindow = contextWindow;
   if (inputs.length) result.vision = inputs.includes("image");
-  if (parameters.length || typeof raw.thinking === "boolean" || (raw.reasoning && typeof raw.reasoning === "object")) {
-    result.reasoning = parameters.includes("reasoning") || raw.thinking === true || Boolean(raw.reasoning && typeof raw.reasoning === "object");
+  if (parameters.length || typeof raw.thinking === "boolean" || (raw.reasoning && typeof raw.reasoning === "object") || Array.isArray(effort.supported_levels)) {
+    result.reasoning = parameters.includes("reasoning") || raw.thinking === true || Boolean(raw.reasoning && typeof raw.reasoning === "object") || strings(effort.supported_levels).length > 0;
   }
   return result;
 }
 
 /** Effort levels the vendor is known to accept for this model, before any user choice. */
 export function builtinEfforts(provider: string, model: string): string[] {
+  if (provider === "deepseek" && /^deepseek-(?:flash|v4-(?:flash(?:-vision-exp)?|pro))$/.test(model)) return ["none", "low", "high", "max"];
   if (provider === "openai" && /^(gpt-5|o[134])/.test(model)) return ["low", "medium", "high"];
   if (provider === "google" && /^gemini-3/.test(model)) return ["low", "high"];
   return [];
@@ -62,7 +64,7 @@ export function resolveModel(provider: Pick<ProviderConfig, "provider" | "models
     contextWindow: options.contextWindow ?? reported?.contextWindow,
     vision: options.vision ?? reported?.vision ?? (knownTextOnly(id) ? false : undefined),
     thinking,
-    efforts: thinking ? builtin.length ? builtin : DEFAULT_EFFORTS : [],
+    efforts: thinking ? reported?.efforts?.length ? (builtin.includes("none") ? ["none", ...reported.efforts.filter((level) => level !== "none")] : reported.efforts) : builtin.length ? builtin : DEFAULT_EFFORTS : [],
   };
 }
 
