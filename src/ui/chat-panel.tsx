@@ -26,7 +26,7 @@ interface Props {
   branch: { parentId: string; parentTitle: string; messageId: string } | null;
   onOpenParent: (id: string) => void; onForkMessage: (messageId: string) => void;
   imageTargetNote: TFile | null;
-  backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null;
+  backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
   statusText: string; prompts: string[]; prefill: string; prefillVersion: number; focusVersion?: number;
   onConnection: () => void; onNew: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
@@ -316,7 +316,7 @@ export function ChatPanel(props: Props) {
             {(close) => <>
               <button type="button" onClick={() => { close(); upload.current?.click(); }}><Paperclip size={16} />上传附件</button>
               <button type="button" onClick={() => { close(); props.onPickFile(addAttachment); }}><AtSign size={16} />选择库内文件</button>
-              {!props.note && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加当前笔记</button>}
+              {props.detachedNote && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FileText size={16} />附加「{props.detachedNote.basename}」</button>}
               <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
             </>}
           </ComposerPopover>

@@ -521,7 +521,7 @@ export class ChatView extends ItemView {
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
       onValidateAttachments: (attachments: ChatAttachment[]) => validateAttachments(attachments, this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner).id),
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
-      permission, fileAccessAvailable: !key.startsWith("api:"), fullAccessAvailable, note: this.attachNote ? file : null,
+      permission, fileAccessAvailable: !key.startsWith("api:"), fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
       prefill: this.prefill, prefillVersion: this.prefillVersion, focusVersion: this.focusVersion,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
