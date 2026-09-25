@@ -17,7 +17,7 @@ const context = await esbuild.context({
   outfile: "main.js",
   plugins: [{ name: "host-css", setup(build) {
     build.onStart(async () => {
-      const css = await Promise.all(["src/base.css", "src/chat-ui.css", "src/ui/models.css", "src/ui/review.css", "src/wechat/wechat.css"].map((path) => readFile(path, "utf8")));
+      const css = await Promise.all(["src/base.css", "src/chat-ui.css", "src/ui/models.css", "src/ui/review.css"].map((path) => readFile(path, "utf8")));
       await writeFile("styles.css", css.join("\n"));
     });
   } }],

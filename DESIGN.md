@@ -98,12 +98,6 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 - Do not silently auto-approve unexpected permission requests.
 - Do not copy AGPL implementation code into this MIT project; protocol behavior may be independently implemented from public specifications.
 
-### WeChat draft publishing
-
-- Entry: command palette and file menu (Lucide `send`). The reply action bar keeps its three icons.
-- A host Modal is the confirmation step: account, theme, title, author, digest, cover source, preflight checks (Lucide `circle-x` / `triangle-alert` / `info`), and a shadow-DOM preview isolated from Obsidian CSS. Publishing is disabled while any check is an error.
-- Only drafts are created (`publish_now: false`). Progress is announced in a polite live region; closing the modal cancels remaining uploads.
-
 ### Models (September 24, after magpie)
 
 - One picker for everything. The composer's model chip opens a non-modal popover: search (“筛选，或输入任意模型 ID”) on top, a vertical source rail (all, recent, each agent and provider by brand mark), and a list grouped by source with small uppercase headers. Choosing a model also chooses its source, so there is no separate connection step.

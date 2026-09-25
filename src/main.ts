@@ -1,4 +1,4 @@
-import { Menu, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo, type MarkdownView } from "obsidian";
+import { Menu, Notice, Platform, Plugin, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo, type MarkdownView } from "obsidian";
 import { ChatView, VIEW_TYPE_QIAOMU_AGENT } from "./chat-view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./defaults";
 import { BackendService } from "./services/backend-service";
@@ -7,7 +7,6 @@ import { SkillService } from "./services/skill-service";
 import { ObsidianCliService } from "./services/obsidian-cli";
 import { QiaomuSettingTab } from "./settings-tab";
 import type { QiaomuSettings } from "./types";
-import { WechatPublishModal } from "./wechat/publish-modal";
 import { InlineEditModal } from "./ui/inline-edit-modal";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
 import { ReadingContextService } from "./integrations/reading-context";
@@ -84,23 +83,6 @@ export default class QiaomuAgentPlugin extends Plugin {
         .setSection("action").onClick(() => this.openInlineEdit(editor, ctx)));
     }));
 
-    this.addCommand({
-      id: "publish-wechat-draft",
-      name: "发布当前笔记到公众号草稿箱",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (file?.extension !== "md") return false;
-        if (!checking) this.openWechatPublish(file);
-        return true;
-      },
-    });
-    this.registerEvent(
-      this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
-        if (!(file instanceof TFile) || file.extension !== "md") return;
-        menu.addItem((item) => item.setTitle("发布到公众号草稿箱").setIcon("send").setSection("action").onClick(() => this.openWechatPublish(file)));
-      })
-    );
-
     this.app.workspace.onLayoutReady(() => {
       this.rememberActiveMarkdownFile();
       this.eachView((view) => void view.ensureReady());
@@ -171,10 +153,6 @@ export default class QiaomuAgentPlugin extends Plugin {
       if (prefill) view.setComposer(prefill);
       else if (focus) view.focusComposer();
     }
-  }
-
-  openWechatPublish(file: TFile): void {
-    new WechatPublishModal(this.app, file, this.settings.wechat).open();
   }
 
   private openInlineEdit(editor: Editor, ctx: MarkdownView | MarkdownFileInfo): void {

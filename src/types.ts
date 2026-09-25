@@ -65,7 +65,6 @@ export interface QiaomuSettings {
   conversations?: ConversationRecord[];
   modelSelections?: Record<string, { model: string; effort: string }>;
   customPrompts?: PromptTemplate[];
-  wechat: WechatPublishSettings;
 }
 
 export interface ConversationIdentity {
@@ -77,18 +76,6 @@ export interface ConversationIdentity {
 
 export interface ConversationRecord extends ConversationIdentity {
   messages: ChatMessage[];
-}
-
-export interface WechatPublishSettings {
-  /** qmblog WeChat bridge base URL; the bearer token lives in SecretStorage under `secretId`. */
-  bridgeUrl: string;
-  secretId: string;
-  defaultAccountId: string;
-  themeId: string;
-  author: string;
-  openComment: boolean;
-  /** Write wechat_media_id / wechat_draft_at back to the note after a draft is created. */
-  recordInNote: boolean;
 }
 
 export interface PromptTemplate { id: string; name: string; body: string; }

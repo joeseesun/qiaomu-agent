@@ -42,15 +42,6 @@ export const DEFAULT_SETTINGS: QiaomuSettings = {
   agentModelCache: {},
   agentEnabledModels: { pi: [""] },
   agentCustomModels: {},
-  wechat: {
-    bridgeUrl: "",
-    secretId: "qiaomu-agent-wechat-bridge-token",
-    defaultAccountId: "",
-    themeId: "qiaomu-podcast",
-    author: "",
-    openComment: true,
-    recordInNote: true,
-  },
 };
 
 export function normalizeSettings(raw: unknown): QiaomuSettings {
@@ -59,6 +50,7 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
 
   return {
     ...DEFAULT_SETTINGS,
+    // Unknown keys are kept on purpose: Qiaomu Publish imports the old `wechat` block from here.
     ...data,
     schemaVersion: 1,
     permissionMode: data.permissionMode === "edit" || data.permissionMode === "full" ? data.permissionMode : "plan",
@@ -93,7 +85,6 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
     agentModelCache: normalizeModelCache(data.agentModelCache),
     agentEnabledModels: { pi: [""], ...normalizeAgentIds(data.agentEnabledModels) },
     agentCustomModels: normalizeAgentIds(data.agentCustomModels, false),
-    wechat: normalizeWechatSettings(data.wechat),
     quickPrompts: Array.isArray(data.quickPrompts)
       ? data.quickPrompts.filter((item): item is string => typeof item === "string").slice(0, 8)
       : [...DEFAULT_SETTINGS.quickPrompts],
@@ -117,22 +108,6 @@ function normalizeAgentIds(raw: unknown, allowDefault = true): Record<string, st
     .map(([agent, value]) => [agent, [...new Set((value as unknown[])
       .filter((id): id is string => typeof id === "string" && (allowDefault || Boolean(id.trim())))
       .map((id) => id.trim()))].slice(0, 200)]));
-}
-
-function normalizeWechatSettings(raw: unknown): QiaomuSettings["wechat"] {
-  const data = raw && typeof raw === "object" ? (raw as Partial<QiaomuSettings["wechat"]>) : {};
-  const text = (value: unknown, fallback: string) => (typeof value === "string" ? value : fallback);
-  const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
-  const defaults = DEFAULT_SETTINGS.wechat;
-  return {
-    bridgeUrl: text(data.bridgeUrl, defaults.bridgeUrl).trim(),
-    secretId: text(data.secretId, defaults.secretId) || defaults.secretId,
-    defaultAccountId: text(data.defaultAccountId, defaults.defaultAccountId),
-    themeId: text(data.themeId, defaults.themeId) || defaults.themeId,
-    author: text(data.author, defaults.author),
-    openComment: flag(data.openComment, defaults.openComment),
-    recordInNote: flag(data.recordInNote, defaults.recordInNote),
-  };
 }
 
 function normalizeModelCache(raw: unknown): QiaomuSettings["agentModelCache"] {
