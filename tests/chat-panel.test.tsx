@@ -205,3 +205,25 @@ it("shows reading context from another plugin as a removable chip and focuses wi
   fireEvent.click(screen.getByRole("button", { name: "不附加正在阅读的内容" }));
   expect(onDismissReading).toHaveBeenCalledOnce();
 });
+it("shows progress in the reply placeholder, then marks the finished reply as latest", async () => {
+  const { input, send, chat, container } = setup();
+  let finish!: () => void;
+  send.mockImplementationOnce(async (_request, callbacks) => {
+    callbacks.onActivity({ id: "read", label: "读取笔记", status: "running" });
+    await new Promise<void>((resolve) => { finish = resolve; });
+    callbacks.onText("完成");
+  });
+  fireEvent.change(input, { target: { value: "你好" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "读取笔记");
+  finish();
+  await waitFor(() => expect(chat.status).toBe("ready"));
+  const replies = container.querySelectorAll(".qa-message.is-assistant");
+  expect(replies[replies.length - 1]!.classList.contains("is-latest")).toBe(true);
+});
+it("labels write access next to the permission icon but not read-only", () => {
+  const { rerender, props } = setup();
+  expect(document.querySelector(".qa-permission-label")).toBeNull();
+  rerender(<ChatPanel {...props} permission="edit" />);
+  expect(document.querySelector(".qa-permission-label")?.textContent).toBe("可写当前库");
+});

@@ -29,8 +29,10 @@
 .qiaomu-agent--react .qa-markdown-host :is(pre, code) { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: var(--qa-code-font-size, 13px); letter-spacing: 0; }
 .qiaomu-agent--react .qa-message-actions { display: flex; gap: 4px; }
 .qiaomu-agent--react .qa-message-actions button { width: 28px; height: 28px; }
-.qiaomu-agent--react .is-assistant .qa-message-actions { opacity: 0; pointer-events: none; }
+.qiaomu-agent--react .is-assistant:not(.is-latest) .qa-message-actions, .qiaomu-agent--react .qa-user-message-meta { opacity: 0; pointer-events: none; }
 .qiaomu-agent--react .is-assistant:hover .qa-message-actions,
+.qiaomu-agent--react .qa-message:hover .qa-user-message-meta,
+.qiaomu-agent--react .qa-message:focus-within .qa-user-message-meta,
 .qiaomu-agent--react .is-assistant:focus-within .qa-message-actions { opacity: 1; pointer-events: auto; }
 .qiaomu-agent--react .qa-user-message-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .qiaomu-agent--react .qa-user-message-meta .qa-message-actions { gap: 2px; }
@@ -77,7 +79,9 @@
 .qiaomu-agent--react button:disabled { opacity: .45; }
 .qiaomu-agent--react .qa-submit:hover { background: var(--text-muted); }
 @media (pointer: coarse) { .qiaomu-agent--react button, .qiaomu-agent--react select { min-height: 40px; } }
-@media (pointer: coarse) { .qiaomu-agent--react .is-assistant .qa-message-actions { opacity: 1; pointer-events: auto; } }
+@media (pointer: coarse) { .qiaomu-agent--react .is-assistant .qa-message-actions, .qiaomu-agent--react .qa-user-message-meta { opacity: 1; pointer-events: auto; } }
+.qiaomu-agent--react .qa-permission-control .qa-control-trigger { gap: 4px; }
+.qiaomu-agent--react .qa-permission-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .qiaomu-agent--react .qa-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .qiaomu-agent--react .qa-attachment { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid var(--background-modifier-border); border-radius: 8px; max-width: 100%; font-size: 12px; }
 .qiaomu-agent--react .qa-attachment img { object-fit: cover; border-radius: 5px; flex-shrink: 0; }

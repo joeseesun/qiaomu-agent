@@ -114,6 +114,9 @@ export function ChatPanel(props: Props) {
   const locked = useRef(false);
   const inputId = useId();
   const running = status === "submitted" || status === "streaming";
+  // While the reply has no text yet, its placeholder carries the status instead of the composer.
+  const lastMessage = messages.at(-1);
+  const waitingText = running && lastMessage?.role === "assistant" && !messageText(lastMessage);
   const query = slashQuery(input);
   const promptChoices = [...props.prompts.map((body, i) => ({ id: `quick-${i}`, name: body, body })), ...props.customPrompts]
     .filter((p) => !query || `${p.name} ${p.body}`.toLocaleLowerCase().includes(query));
@@ -228,18 +231,19 @@ export function ChatPanel(props: Props) {
         event.preventDefault(); showConversationImageMenu(props.app, imageFromElement(image, 0), event.nativeEvent, props.imageTargetNote, addReferenceImage);
       }}>
         {!messages.length && <div className="qa-empty">
-          <h3>从一个想法开始</h3><p>围绕笔记提问、整理，或协作修改。</p>
+          <h3>从一个想法开始</h3><p>围绕笔记提问、整理，或协作修改。输入 / 使用 Prompt，@ 引用库内文件。</p>
           <div className="qa-suggestions">{props.prompts.slice(0, 3).map((prompt) => <button key={prompt} type="button" onClick={() => { setInput(prompt); textarea.current?.focus(); }}>{prompt}</button>)}</div>
         </div>}
         {messages.filter((m) => m.role !== "system").map((message, index, visible) => {
           const text = messageText(message);
-          const active = running && index === visible.length - 1 && message.role === "assistant";
+          const latest = index === visible.length - 1;
+          const active = running && latest && message.role === "assistant";
           const activities = message.parts.filter((p) => p.type === "data-activity").map((p) => p.data);
           const approvals = message.parts.filter((p) => p.type === "data-approval").map((p) => p.data);
           const changes = message.parts.find((p) => p.type === "data-changes");
           const messageAttachments = new Map((message.metadata?.attachments ?? []).map((attachment) => [attachment.id, attachment]));
           for (const part of message.parts) if (part.type === "data-attachment") messageAttachments.set(part.data.id, part.data);
-          return <Message key={message.id} from={message.role} className={editingId === message.id ? "is-editing" : ""}>
+          return <Message key={message.id} from={message.role} className={`${editingId === message.id ? "is-editing" : ""}${latest ? " is-latest" : ""}`}>
             <MessageContent>
               <Attachments files={[...messageAttachments.values()]} variant={message.role === "assistant" ? "grid" : "inline"}
                 onOpenImage={openRenderedImage}
@@ -251,7 +255,7 @@ export function ChatPanel(props: Props) {
                 <textarea id={`${inputId}-edit-${message.id}`} value={editText} onChange={(event) => setEditText(event.currentTarget.value)} autoFocus rows={3}
                   onKeyDown={(event) => { if (Platform.isDesktopApp && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submitEdit(message); } }} />
                 <div className="qa-message-editor-actions"><button type="button" onClick={() => setEditingId(null)}>取消</button><button type="submit" className="mod-cta" disabled={!editText.trim()}>发送</button></div>
-              </form> : text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking">正在处理…</div> : <div className="qa-thinking">没有文本回复</div>}
+              </form> : text ? <NoteMarkdown text={text} sourcePath={message.metadata?.sourcePath ?? ""} app={props.app} parent={props.parent} /> : active ? <div className="qa-thinking" role="status">{props.statusText || (activities.find((a) => a.status === "running")?.label ?? "正在思考…")}</div> : <div className="qa-thinking">没有文本回复</div>}
               {changes?.type === "data-changes" && changes.data.files.length > 0 && <ChangeSummary changes={changes.data} disabled={running}
                 onOpen={props.onOpenFile} onRevert={() => props.onRevertChanges(message.id)} />}
             </MessageContent>
@@ -281,7 +285,7 @@ export function ChatPanel(props: Props) {
         {promptChoices.map((p, index) => <button type="button" role="option" aria-selected={index === menuIndex} id={`${inputId}-option-${index}`} key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(index)}><Slash size={15} /><span>{p.name}</span></button>)}
         <button type="button" role="option" aria-selected={menuIndex === promptChoices.length} id={`${inputId}-option-${promptChoices.length}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(promptChoices.length)}><Plus size={15} /><span>管理自定义 Prompt…</span></button>
       </div>}
-      {running && props.statusText && <div className="qa-status" role="status">{props.statusText}</div>}
+      {running && props.statusText && waitingText === false && <div className="qa-status" role="status">{props.statusText}</div>}
       {attachmentError && <div className="qa-error" role="alert">{attachmentError}</div>}
       <PromptInput onSubmit={(event) => { event.preventDefault(); void submit(input); }} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); void addFiles(Array.from(e.dataTransfer.files)); } }}>
         <input type="file" multiple hidden ref={upload} onChange={(e) => { void addFiles(Array.from(e.currentTarget.files ?? [])); e.currentTarget.value = ""; }} />
@@ -309,7 +313,7 @@ export function ChatPanel(props: Props) {
             if (startsFileMention(value, cursor) && !(event.nativeEvent as InputEvent).isComposing) props.onPickFile((file) => { addAttachment(file); setInput((current) => current === value ? value.slice(0, cursor - 1) + value.slice(cursor) : current); textarea.current?.focus(); });
           }}
           onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { if (!e.clipboardData.getData("text/plain")) e.preventDefault(); void addFiles(files); } }}
-          placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息，/ 选择 Prompt，@ 引用文件…"} />
+          placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息…"} />
         <PromptInputFooter><PromptInputTools>
           <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} disabled={running}>
             {(close) => <>
@@ -319,7 +323,7 @@ export function ChatPanel(props: Props) {
               <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} />{props.skillLabel}</button>
             </>}
           </ComposerPopover>
-          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
+          {props.fileAccessAvailable && <ComposerPopover className="qa-permission-control" label={`访问权限：${permissionLabel}`} trigger={<><PermissionIcon size={18} />{props.permission !== "plan" && !imageEditing && <span className="qa-permission-label">{permissionLabel}</span>}</>} disabled={running || imageEditing}>
             {(close) => <>
               <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
               <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
