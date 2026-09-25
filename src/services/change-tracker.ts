@@ -8,6 +8,13 @@ export const MAX_TRACKED_BYTES = 512 * 1024;
 /** Plugin-owned output (generated images) is never reported as an agent change. */
 const IGNORED_PREFIXES = [".qiaomu-agent/", ".trash/"];
 
+/** Files outside the vault, reached through Node on desktop. `read` gives null for a missing file. */
+export interface ExternalFiles {
+  read(path: string): Promise<string | null>;
+  write(path: string, content: string): Promise<void>;
+  trash(path: string): Promise<void>;
+}
+
 export function isTextPath(path: string): boolean {
   return TEXT_EXTENSIONS.has(path.split(".").pop()?.toLowerCase() ?? "");
 }
@@ -33,6 +40,8 @@ export class TurnChangeTracker {
   private readonly before = new Map<string, string | null>();
   private readonly touched = new Set<string>();
   private readonly outside = new Set<string>();
+  /** Outside-the-vault files whose before-content the writer handed us; these can be restored. */
+  private readonly outsideBefore = new Map<string, string | null>();
   /** Unified diffs reported with the write (Codex), used when our read landed after the write. */
   private readonly patches = new Map<string, string[]>();
   /** Paths whose before-content came from our own read; an agent-reported value is more exact. */
@@ -40,7 +49,7 @@ export class TurnChangeTracker {
   private readonly pending: Promise<void>[] = [];
   private readonly refs: EventRef[] = [];
 
-  constructor(private readonly app: App, private readonly vaultRoot: string | null, snapshots: Map<string, string> = new Map()) {
+  constructor(private readonly app: App, private readonly vaultRoot: string | null, snapshots: Map<string, string> = new Map(), private readonly external: ExternalFiles | null = null) {
     for (const [path, content] of snapshots) this.snapshots.set(path, content);
   }
   private readonly snapshots = new Map<string, string>();
@@ -70,7 +79,11 @@ export class TurnChangeTracker {
   /** The agent is about to write `path`; record its current content unless already known. */
   intent(path: string, knownBefore?: string | null, patch?: string): void {
     const relative = toVaultPath(path, this.vaultRoot);
-    if (relative === null) { this.outside.add(path); return; }
+    if (relative === null) {
+      if (knownBefore !== undefined && this.external) { if (!this.outsideBefore.has(path)) this.outsideBefore.set(path, knownBefore); }
+      else if (!this.outsideBefore.has(path)) this.outside.add(path);
+      return;
+    }
     if (IGNORED_PREFIXES.some((prefix) => relative.startsWith(prefix))) return;
     this.touched.add(relative);
     if (patch) this.patches.set(relative, [...(this.patches.get(relative) ?? []), patch]);
@@ -128,7 +141,12 @@ export class TurnChangeTracker {
       if (known && before === after) continue;
       changes.push({ path, before: known ? before : null, after, tracked: known });
     }
-    for (const path of [...this.outside].sort()) changes.push({ path, before: null, after: null, tracked: false, outside: true });
+    for (const [path, before] of [...this.outsideBefore].sort(([a], [b]) => a.localeCompare(b))) {
+      let after: string | null;
+      try { after = await this.external!.read(path); } catch { changes.push({ path, before: null, after: null, tracked: false, outside: true }); continue; }
+      if (before !== after) changes.push({ path, before, after, tracked: true, outside: true });
+    }
+    for (const path of [...this.outside].sort()) if (!this.outsideBefore.has(path)) changes.push({ path, before: null, after: null, tracked: false, outside: true });
     return changes;
   }
 
@@ -142,13 +160,15 @@ export type RollbackClass = "safe" | "conflict" | "untracked";
 export interface RollbackItem { change: FileChange; kind: RollbackClass; }
 
 /** Classifies each change: safe (still exactly what the agent left), conflict (edited since), untracked. */
-export async function planRollback(app: App, changes: FileChange[]): Promise<RollbackItem[]> {
+export async function planRollback(app: App, changes: FileChange[], external: ExternalFiles | null = null): Promise<RollbackItem[]> {
   const items: RollbackItem[] = [];
   for (const change of changes) {
     if (change.reverted) continue;
-    if (!change.tracked || change.outside || change.binary) { items.push({ change, kind: "untracked" }); continue; }
-    const adapter = app.vault.adapter;
-    const current = await adapter.exists(change.path) ? await adapter.read(change.path) : null;
+    if (!change.tracked || change.binary || (change.outside && !external)) { items.push({ change, kind: "untracked" }); continue; }
+    let current: string | null;
+    if (change.outside) {
+      try { current = await external!.read(change.path); } catch { items.push({ change, kind: "untracked" }); continue; }
+    } else current = await app.vault.adapter.exists(change.path) ? await app.vault.adapter.read(change.path) : null;
     // Already back to its before-state (restored earlier, or undone by hand): nothing to do.
     if (current === change.before) continue;
     items.push({ change, kind: current === change.after ? "safe" : "conflict" });
@@ -163,11 +183,18 @@ async function ensureFolder(app: App, path: string): Promise<void> {
 }
 
 /** Restores the before-state of the given changes. Deleting a created file goes to the trash. */
-export async function applyRollback(app: App, changes: FileChange[]): Promise<{ restored: string[]; failed: Array<{ path: string; error: string }> }> {
+export async function applyRollback(app: App, changes: FileChange[], external: ExternalFiles | null = null): Promise<{ restored: string[]; failed: Array<{ path: string; error: string }> }> {
   const restored: string[] = [];
   const failed: Array<{ path: string; error: string }> = [];
   for (const change of changes) {
     try {
+      if (change.outside) {
+        if (!external) throw new Error("此设备无法访问库外文件");
+        if (change.before === null) { if (await external.read(change.path).catch(() => "") !== null) await external.trash(change.path); }
+        else await external.write(change.path, change.before);
+        restored.push(change.path);
+        continue;
+      }
       const file = app.vault.getAbstractFileByPath(change.path);
       if (change.before === null) {
         if (file instanceof TFile) await app.fileManager.trashFile(file);

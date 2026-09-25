@@ -43,6 +43,8 @@ export interface QiaomuSettings {
   backendKind: BackendKind;
   preferredCli: string;
   permissionMode: PermissionMode;
+  /** The user accepted the full-access warning once; it is not shown again. */
+  fullAccessAcknowledged?: boolean;
   api: ApiConnection;
   apiProfiles?: Record<string, ApiConnection>;
   /** Every configured model provider; `api` mirrors the active one. */

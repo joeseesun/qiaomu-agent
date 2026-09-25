@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { ItemView, MarkdownView, Menu, Notice, Platform, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
 import { readingLabel } from "./integrations/reading-prompt";
 import type { ContextSnapshot } from "./integrations/qiaomu-context";
 import type { ReadingChip } from "./ui/chat-panel";
@@ -8,11 +8,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { Chat } from "@ai-sdk/react";
 import type QiaomuAgentPlugin from "./main";
 import type { AgentSkill, PermissionMode, ChatAttachment, ChatMessage, ChatRequest, EditorSelectionContext, GeneratedAttachment, ModelChoice } from "./types";
-import { FilePicker, PromptManager, AppendDialog } from "./ui/host-dialogs";
+import { FilePicker, PromptManager, AppendDialog, FullAccessDialog } from "./ui/host-dialogs";
 import { readAttachment, validateAttachments, MAX_ATTACHMENT_BYTES } from "./services/attachments";
 import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage, type TurnHooks } from "./services/chat-transport";
 import { TurnChangeTracker, toVaultPath } from "./services/change-tracker";
 import { RevertDialog } from "./ui/revert-dialog";
+import { externalFiles } from "./services/local-host";
 import { ChatPanel } from "./ui/chat-panel";
 import { ModelManagerModal } from "./settings-tab";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
@@ -75,7 +76,7 @@ export class ChatView extends ItemView {
         if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
         const imageEdit = last.metadata?.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
         // Image editing produces a chat artifact; inserting it into a note is a separate, confirmed action.
-        const permissionMode = imageEdit ? "plan" : settings.permissionMode === "full" && backend.id !== "cli:codex" ? "edit" : settings.permissionMode;
+        const permissionMode = imageEdit ? "plan" : settings.permissionMode === "full" && !fullAccessFor(backend.id) ? "edit" : settings.permissionMode;
         const file = !imageEdit && this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
         const parsed: unknown = backend.id === "api" ? {} : enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
@@ -113,7 +114,7 @@ export class ChatView extends ItemView {
         const activeFileContent = file ? await this.app.vault.cachedRead(file) : undefined;
         signal.throwIfAborted();
         let turn: TurnHooks | undefined;
-        if (backend.id.startsWith("cli:")) {
+        if (backend.id.startsWith("cli:") || (backend.id === "api" && permissionMode !== "plan")) {
           const snapshots = await this.mentionedSnapshots(request.prompt, file?.path ?? "");
           if (file && activeFileContent !== undefined) snapshots.set(file.path, activeFileContent);
           signal.throwIfAborted();
@@ -320,7 +321,7 @@ export class ChatView extends ItemView {
   /** Tracks what an agent turn changes, routes ACP file access through the vault, and asks for approvals. */
   private turnHooks(snapshots: Map<string, string>): TurnHooks {
     const root = this.plugin.skillService.getVaultRoot();
-    const tracker = new TurnChangeTracker(this.app, root, snapshots);
+    const tracker = new TurnChangeTracker(this.app, root, snapshots, externalFiles());
     tracker.start();
     const inVault = (path: string) => {
       const relative = toVaultPath(path, root);
@@ -510,7 +511,7 @@ export class ChatView extends ItemView {
     const picked = this.pickerSelection();
     const source = sources.find((item) => item.key === picked?.source);
     const model = source?.models.find((m) => m.id === picked?.model) ?? this.models.find((m) => m.id === picked?.model);
-    const fullAccessAvailable = key === "cli:codex";
+    const fullAccessAvailable = fullAccessFor(key.startsWith("api:") ? "api" : key);
     const permission = this.plugin.settings.permissionMode === "full" && !fullAccessAvailable ? "edit" : this.plugin.settings.permissionMode;
     this.root.render(createElement(ChatPanel, {
       chat: this.chat, app: this.app, parent: this,
@@ -535,7 +536,7 @@ export class ChatView extends ItemView {
         if (provider) checkImageInput(resolveModel(provider, modelId), attachments);
       },
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
-      permission, fileAccessAvailable: !key.startsWith("api:"), fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
+      permission, fileAccessAvailable: true, fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
       prefill: this.prefill, prefillVersion: this.prefillVersion, focusVersion: this.focusVersion,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
@@ -547,10 +548,13 @@ export class ChatView extends ItemView {
       onEditMessage: () => this.plugin.backendService.resetSessions(this.backendOwner),
       onPermission: (mode: PermissionMode) => {
         if (this.running() || this.plugin.settings.permissionMode === mode) return;
-        this.plugin.settings.permissionMode = mode;
-        this.plugin.backendService.resetSessions(this.backendOwner);
-        void this.plugin.saveSettings(); this.render();
-        if (mode === "full") new Notice("已为后续对话开启完全访问，请确认路径后再写入");
+        const apply = () => {
+          this.plugin.settings.permissionMode = mode;
+          this.plugin.backendService.resetSessions(this.backendOwner);
+          void this.plugin.saveSettings(); this.render();
+        };
+        if (mode !== "full" || this.plugin.settings.fullAccessAcknowledged) { apply(); return; }
+        new FullAccessDialog(this.app, () => { this.plugin.settings.fullAccessAcknowledged = true; apply(); }).open();
       },
       onToggleNote: () => { this.attachNote = !this.attachNote; this.render(); },
       editorSelection: editorSelection ? { label: `选中 ${editorSelection.endLine - editorSelection.startLine + 1} 行 · ${editorSelection.path.split("/").pop()?.replace(/\.md$/, "")}`, detail: editorSelection.text } : null,
@@ -572,4 +576,9 @@ function readingChip(snapshot: ContextSnapshot | null): ReadingChip | null {
   const origin = [snapshot.sourceName, snapshot.title, snapshot.location].filter(Boolean).join(" · ");
   const preview = (snapshot.selection?.text ?? snapshot.text ?? "").slice(0, 400);
   return { label: readingLabel(snapshot), detail: preview ? `${origin}\n\n${preview}` : origin, kind: snapshot.kind, selected: Boolean(snapshot.selection) };
+}
+
+/** Codex enforces full access in its own sandbox; API models get it through the plugin's desktop tools. */
+function fullAccessFor(backendId: string): boolean {
+  return backendId === "cli:codex" || (backendId === "api" && Platform.isDesktopApp);
 }

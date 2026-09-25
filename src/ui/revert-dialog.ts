@@ -1,12 +1,12 @@
 import { Modal, Notice, Setting, type App } from "obsidian";
 import type { FileChange } from "../types";
 import { applyRollback, planRollback, type RollbackItem } from "../services/change-tracker";
+import { externalFiles } from "../services/local-host";
 
 function describe(change: FileChange): string {
-  if (change.outside) return "库外文件";
   if (change.binary) return "非文本或过大";
-  if (!change.tracked) return "未记录修改前内容";
-  return change.before === null ? "将移到回收站" : change.after === null ? "将重新创建" : "恢复到修改前";
+  if (!change.tracked) return change.outside ? "库外文件" : "未记录修改前内容";
+  return (change.outside ? "库外 · " : "") + (change.before === null ? "将移到回收站" : change.after === null ? "将重新创建" : "恢复到修改前");
 }
 
 /**
@@ -23,7 +23,7 @@ export class RevertDialog extends Modal {
     this.setTitle("撤销这一轮的修改");
     this.contentEl.addClass("qa-revert");
     this.contentEl.createDiv({ cls: "qa-revert-status", text: "正在检查文件当前状态…" });
-    void planRollback(this.app, this.changes).then((items) => { this.items = items; this.draw(); }, (error: unknown) => {
+    void planRollback(this.app, this.changes, externalFiles()).then((items) => { this.items = items; this.draw(); }, (error: unknown) => {
       this.contentEl.empty();
       this.contentEl.createDiv({ cls: "qa-revert-status", text: `检查失败：${error instanceof Error ? error.message : String(error)}` });
     });
@@ -75,7 +75,7 @@ export class RevertDialog extends Modal {
         button.setButtonText(targets.length ? `恢复 ${targets.length} 个文件` : "没有可恢复的文件").setWarning().setDisabled(!targets.length);
         button.onClick(async () => {
           button.setDisabled(true).setButtonText("正在恢复…");
-          const result = await applyRollback(this.app, targets.map((item) => item.change));
+          const result = await applyRollback(this.app, targets.map((item) => item.change), externalFiles());
           if (result.failed.length) new Notice(`有 ${result.failed.length} 个文件恢复失败：${result.failed.map((f) => `${f.path}（${f.error}）`).join("；")}`);
           else new Notice(`已恢复 ${result.restored.length} 个文件`);
           this.done(result.restored);

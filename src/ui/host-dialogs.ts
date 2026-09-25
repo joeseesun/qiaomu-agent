@@ -65,3 +65,24 @@ export class AppendDialog extends Modal {
   }
   override onClose(): void { this.contentEl.empty(); }
 }
+
+/** Shown once, the first time full access is turned on: what it allows and what still asks. */
+export class FullAccessDialog extends Modal {
+  constructor(app: App, private readonly accept: () => void) { super(app); }
+  override onOpen(): void {
+    this.setTitle("开启完全访问");
+    this.contentEl.addClass("qa-full-access-dialog");
+    this.contentEl.createEl("p", { text: "Agent 将可以不经询问地读写这台电脑上的文件并运行命令，像在终端里工作一样。" });
+    const list = this.contentEl.createEl("ul");
+    for (const line of [
+      "读到的文件内容和命令输出会发送给当前模型服务商。",
+      "每一轮修改都会记录，可以一键撤销；删除会移到废纸篓。",
+      "读取凭据、改动启动项、删除大范围目录或运行破坏性命令时，仍会先问你。",
+      "网页或文件里的恶意指令可能诱导 Agent 行事，只在你信任当前任务时开启。",
+    ]) list.createEl("li", { text: line });
+    new Setting(this.contentEl)
+      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()))
+      .addButton((button) => button.setButtonText("开启完全访问").setWarning().onClick(() => { this.close(); this.accept(); }));
+  }
+  override onClose(): void { this.contentEl.empty(); }
+}
