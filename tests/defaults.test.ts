@@ -19,4 +19,14 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ permissionMode: "full" }).permissionMode).toBe("full");
     expect(normalizeSettings({ permissionMode: "unrestricted" }).permissionMode).toBe("plan");
   });
+  it("keeps saved prompts and normalizes the pinned state", () => {
+    expect(normalizeSettings({ customPrompts: [
+      { id: "1", name: "总结", body: "总结笔记", pinned: true },
+      { id: "2", name: "整理", body: "整理选区", pinned: "yes" },
+      { id: 3, name: "坏数据", body: "忽略" },
+    ] }).customPrompts).toEqual([
+      { id: "1", name: "总结", body: "总结笔记", pinned: true },
+      { id: "2", name: "整理", body: "整理选区", pinned: false },
+    ]);
+  });
 });

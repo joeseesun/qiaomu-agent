@@ -16,8 +16,6 @@
 .qiaomu-agent--react .qa-empty { margin-block: auto; padding: 36px 0; }
 .qiaomu-agent--react .qa-empty h3 { font-size: 19px; margin: 0 0 8px; font-weight: 600; }
 .qiaomu-agent--react .qa-empty p { font-size: 14px; line-height: 1.7; color: var(--text-muted); }
-.qiaomu-agent--react .qa-suggestions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 20px; }
-.qiaomu-agent--react .qa-suggestions button { height: auto; white-space: normal; padding: 8px 12px; background: transparent; border: 1px solid var(--background-modifier-border); border-radius: 10px; text-align: left; font-size: 13px; }
 .qiaomu-agent--react .qa-message { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-family: var(--qa-chat-font); font-size: var(--qa-chat-font-size, 15px); line-height: 1.75; letter-spacing: .01em; }
 .qiaomu-agent--react .qa-message.is-user { align-self: flex-end; max-width: 90%; }
 .qiaomu-agent--react .qa-message.is-user.is-editing { width: 100%; max-width: 100%; }
@@ -52,6 +50,12 @@
 .qiaomu-agent--react .qa-working-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
 .qiaomu-agent--react .qa-scroll-bottom { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
 .qiaomu-agent--react .qa-composer { padding: 8px 12px 14px; position: relative; }
+.qiaomu-agent--react .qa-prompt-strip { display: flex; align-items: center; gap: 6px; overflow-x: auto; margin-bottom: 8px; scrollbar-width: thin; }
+.qiaomu-agent--react .qa-prompt-strip button { flex: none; min-height: 30px; max-width: 170px; overflow: hidden; padding: 4px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; box-shadow: none; }
+.qiaomu-agent--react .qa-prompt-strip button:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.qiaomu-agent--react .qa-prompt-strip button:focus-visible { outline: 2px solid var(--text-normal); outline-offset: -2px; }
+.qiaomu-agent--react .qa-prompt-strip .qa-prompt-strip-manage { display: inline-flex; align-items: center; justify-content: center; width: 30px; padding: 0; }
+.qiaomu-agent--react .qa-command-empty { padding: 9px; color: var(--text-muted); font-size: 13px; }
 .qiaomu-agent--react .qa-status { padding: 0 4px 8px; }
 .qiaomu-agent--react .qa-prompt,
 .qiaomu-agent--react .qa-prompt:hover,

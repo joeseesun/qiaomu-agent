@@ -48,6 +48,23 @@ it("slash Enter inserts a template, Escape preserves draft, and IME Enter does n
   fireEvent.change(input, { target: { value: "/" } }); fireEvent.keyDown(input, { key: "Escape" }); expect(screen.queryByRole("listbox")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("/");
   fireEvent.compositionStart(input); fireEvent.keyDown(input, { key: "Enter", isComposing: true }); expect(send).not.toHaveBeenCalled(); fireEvent.compositionEnd(input);
 });
+it("pinned prompts and quick prompts fill the composer without sending or losing a draft", () => {
+  const { input, props } = setup();
+  fireEvent.change(input, { target: { value: "已有问题" } });
+  fireEvent.click(screen.getByRole("button", { name: "总结" }));
+  expect((input as HTMLTextAreaElement).value).toBe("已有问题\n\n总结");
+  expect(props.onManagePrompts).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "管理 Prompt 库" }));
+  expect(props.onManagePrompts).toHaveBeenCalledOnce();
+});
+it("save current draft opens Prompt editor and leaves the draft untouched", () => {
+  const { input, props } = setup();
+  fireEvent.change(input, { target: { value: "请总结这份笔记" } });
+  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  fireEvent.click(screen.getByRole("button", { name: "将当前草稿保存为 Prompt" }));
+  expect(props.onManagePrompts).toHaveBeenCalledWith("请总结这份笔记");
+  expect((input as HTMLTextAreaElement).value).toBe("请总结这份笔记");
+});
 it("pasted images become removable attachments and reach the request", async () => {
   const { input, container, send, chat, props } = setup();
   const image = new File([new Uint8Array([1, 2, 3])], "test.png", { type: "image/png" });
