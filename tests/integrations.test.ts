@@ -168,7 +168,7 @@ describe("sanitize and prompt", () => {
 describe("agent api and discovery", () => {
   it("pins sanitized context and opens with a bounded draft", async () => {
     const pin = vi.fn(), open = vi.fn(async () => undefined);
-    const api = createAgentApi({ pin, open });
+    const api = createAgentApi({ pin, open, compose: vi.fn() });
     await api.ask({ context: { sourceId: "r", sourceName: "R", kind: "article", title: "T", url: "ftp://x" }, prompt: "p".repeat(5000) });
     expect(pin.mock.calls[0]![0]).toMatchObject({ title: "T", url: undefined });
     expect((open.mock.calls[0] as unknown as [string])[0]).toHaveLength(4000);
@@ -176,8 +176,18 @@ describe("agent api and discovery", () => {
     expect(Object.isFrozen(api)).toBe(true);
   });
 
+  it("composes a trimmed, capped question for Qiaomu Home and sends only when asked", async () => {
+    const compose = vi.fn(async () => undefined);
+    const api = createAgentApi({ pin: vi.fn(), open: vi.fn(), compose });
+    await api.compose!({ prompt: `  ${"q".repeat(5000)}  `, submit: true });
+    expect(compose).toHaveBeenCalledWith("q".repeat(4000), true);
+    await api.compose!({ prompt: "hi" });
+    expect(compose).toHaveBeenLastCalledWith("hi", false);
+    await expect(api.compose!({ prompt: "   " })).rejects.toThrow();
+  });
+
   it("finds only compatible peers", () => {
-    const api = createAgentApi({ pin: vi.fn(), open: vi.fn() });
+    const api = createAgentApi({ pin: vi.fn(), open: vi.fn(), compose: vi.fn() });
     const app = { plugins: { plugins: { "qiaomu-agent": { api }, rss: { qiaomuContext: { protocol: "qiaomu-context", version: 1, snapshot: () => null } }, old: { qiaomuContext: { protocol: "qiaomu-context", version: 0, snapshot: () => null } } } } } as never;
     expect(findAgent(app)).toBe(api);
     expect(findContextProviders(app).map(([id]) => id)).toEqual(["rss"]);

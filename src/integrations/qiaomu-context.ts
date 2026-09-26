@@ -72,6 +72,16 @@ export interface AgentApi {
   version: number;
   /** Opens the agent with this context attached and focuses the composer. */
   ask(request: AgentAskRequest): Promise<void>;
+  /**
+   * Optional (added in v1): starts a fresh conversation with this draft and no attached context.
+   * `submit: true` sends it right away; use it only when the user already pressed send in the caller (e.g. Qiaomu Home's search box).
+   */
+  compose?(request: AgentComposeRequest): Promise<void>;
+}
+
+export interface AgentComposeRequest {
+  prompt: string;
+  submit?: boolean;
 }
 
 interface PluginRegistry {
