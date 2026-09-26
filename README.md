@@ -2,7 +2,7 @@
 
 **把 AI 放进 Obsidian 笔记旁边。**
 
-**中文** | [English](#english) · [下载 0.2.1](https://github.com/joeseesun/qiaomu-agent/releases/tag/0.2.1) · [安装方法](#安装) · [反馈问题](https://github.com/joeseesun/qiaomu-agent/issues)
+**中文** | [English](#english) · [下载 0.2.2](https://github.com/joeseesun/qiaomu-agent/releases/tag/0.2.2) · [安装方法](#安装) · [反馈问题](https://github.com/joeseesun/qiaomu-agent/issues)
 
 读笔记时直接提问，选中一段话请 Agent 改写，再检查改动并决定是否保留。你可以接入本机已有的 Codex、Claude Code 等 Agent，也可以使用自己的模型 API Key；对话、资料和修改都留在 Obsidian 的工作流里。
 
@@ -46,9 +46,9 @@
 
 ## 安装
 
-当前公开版本为 **0.2.1**，要求 Obsidian **1.11.4 或更新版本**。该版本已提交 Obsidian 社区目录审核；在目录可搜索到之前，请使用 GitHub Release 安装：
+当前公开版本为 **0.2.2**，要求 Obsidian **1.11.4 或更新版本**。社区目录的审核与可安装状态以[官方插件页面](https://community.obsidian.md/plugins/qiaomu-agent)为准；在目录可搜索到之前，请使用 GitHub Release 安装：
 
-1. 从 [0.2.1 Release](https://github.com/joeseesun/qiaomu-agent/releases/tag/0.2.1) 下载同一版本的 `main.js`、`manifest.json`、`styles.css`。
+1. 从 [0.2.2 Release](https://github.com/joeseesun/qiaomu-agent/releases/tag/0.2.2) 下载同一版本的 `main.js`、`manifest.json`、`styles.css`。
 2. 把三个文件放进你要使用的库的 `.obsidian/plugins/qiaomu-agent/` 文件夹；没有该文件夹就新建。
 3. 重启 Obsidian，在「设置 → 第三方插件」启用 **Qiaomu Agent**，打开右侧的 Agent 侧边栏。
 4. 选择已安装并登录的本机 Agent，或在插件设置中添加模型服务商及 API Key。先保持「只读」，试着问一句「总结当前笔记」。
@@ -86,7 +86,7 @@
 
 **Qiaomu Agent** is an Obsidian sidebar for working with your notes using a local AI agent or your own model API key. Ask about the current note, attach vault files, folders, web pages or images, rewrite a selected passage, review file changes, and send useful replies to your daily note or another note. The real Obsidian screenshots above show a selection rewrite and model sources; they were captured in a test vault running 0.2.1.
 
-**Install:** Download `main.js`, `manifest.json`, and `styles.css` from the same [0.2.1 release](https://github.com/joeseesun/qiaomu-agent/releases/tag/0.2.1). Put them in `<vault>/.obsidian/plugins/qiaomu-agent/`, restart Obsidian, and enable the plugin under Community plugins. Obsidian 1.11.4+ is required. The community directory submission is under review; use the Release until it is searchable there.
+**Install:** Download `main.js`, `manifest.json`, and `styles.css` from the same [0.2.2 release](https://github.com/joeseesun/qiaomu-agent/releases/tag/0.2.2). Put them in `<vault>/.obsidian/plugins/qiaomu-agent/`, restart Obsidian, and enable the plugin under Community plugins. Obsidian 1.11.4+ is required. Check the [official plugin page](https://community.obsidian.md/plugins/qiaomu-agent) for directory availability; use the Release until it is searchable there.
 
 **Try it:** Connect a logged-in local agent or add your provider API key. With the default read-only permission, ask “Summarize the current note.” To try editing, select text in a test note, switch permission to “modify current vault,” ask for a rewrite, and review the recorded change. Local agents follow their own approval settings.
 

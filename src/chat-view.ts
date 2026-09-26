@@ -429,7 +429,7 @@ export class ChatView extends ItemView {
       const cached = settings.agentModelCache[d.id]?.models;
       const models = currentKey === key && this.models.length ? this.models : cached ?? [];
       const state = this.sourceState.get(key) ?? (currentKey === key ? { loading: this.modelLoading, error: this.modelError } : {});
-      return { key, kind: "agent", label: d.label, icon: agentIconKey(d.id), ...visibleAgentModels(settings, d.id, models), allowCustom: !Object.hasOwn(settings.agentEnabledModels, d.id), canListModels: Boolean(nativeTransportFor(d.id) || d.id === "antigravity" || d.id === "pi"), loaded: Boolean(cached?.length) || (currentKey === key && this.models.length > 0), ...state };
+      return { key, kind: "agent", label: d.label, icon: agentIconKey(d.id), ...visibleAgentModels(settings, d.id, models), allowCustom: !Object.hasOwn(settings.agentEnabledModels, d.id), canListModels: Boolean(nativeTransportFor(d.id, d.nativePath) || d.id === "antigravity" || d.id === "pi"), loaded: Boolean(cached?.length) || (currentKey === key && this.models.length > 0), ...state };
     });
     const providers: ModelSource[] = settings.providers
       .filter((p) => p.showInPicker !== false && (Boolean(this.app.secretStorage.getSecret(p.secretId)) || permitsEmptyKey(p)))

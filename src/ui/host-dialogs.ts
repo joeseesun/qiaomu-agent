@@ -122,7 +122,10 @@ export class WebPageDialog extends Modal {
   private controller: AbortController | null = null;
   override onOpen(): void {
     this.setTitle("添加网页");
-    const input = this.contentEl.createEl("input", { cls: "qa-web-page-input", type: "url", attr: { placeholder: "https://", "aria-label": "网页地址" } });
+    const label = this.contentEl.createEl("label", { cls: "qiaomu-agent__sr-only", text: "网页地址" });
+    const input = this.contentEl.createEl("input", { cls: "qa-web-page-input", type: "url", attr: { placeholder: "https://" } });
+    input.id = `qa-web-url-${crypto.randomUUID()}`;
+    label.htmlFor = input.id;
     const status = this.contentEl.createEl("p", { cls: "qa-web-page-status", attr: { role: "status" } });
     let submit: ButtonComponent | null = null;
     const start = () => {

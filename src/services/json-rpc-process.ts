@@ -56,6 +56,8 @@ export class JsonRpcProcess {
   private nextId = 1;
   private pending = new Map<number | string, PendingRequest>();
   private stdoutBuffer = "";
+  private stdoutDecoder = new TextDecoder();
+  private stderrDecoder = new TextDecoder();
   private stderrTail = "";
   private closing = false;
 
@@ -72,6 +74,8 @@ export class JsonRpcProcess {
     const childProcess = require("child_process") as ChildProcessModule;
     this.closing = false;
     this.stdoutBuffer = "";
+    this.stdoutDecoder = new TextDecoder();
+    this.stderrDecoder = new TextDecoder();
     this.stderrTail = "";
     const child = childProcess.spawn(this.options.executablePath, this.options.args, {
       ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
@@ -81,9 +85,9 @@ export class JsonRpcProcess {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
-    child.stdout.on("data", (chunk) => this.consumeStdout(new TextDecoder().decode(chunk)));
+    child.stdout.on("data", (chunk) => this.consumeStdout(this.stdoutDecoder.decode(chunk, { stream: true })));
     child.stderr.on("data", (chunk) => {
-      const text = new TextDecoder().decode(chunk).trim();
+      const text = this.stderrDecoder.decode(chunk, { stream: true }).trim();
       if (!text) return;
       this.stderrTail = `${this.stderrTail}\n${text}`.slice(-12_000).trim();
       this.options.onLog?.(text);

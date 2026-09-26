@@ -15,7 +15,7 @@ export function ContextRing({ usage, onNew, disabled }: { usage: ContextUsage; o
   const warning = share >= CONTEXT_WARNING;
   const radius = 7;
   const circumference = 2 * Math.PI * radius;
-  return <ComposerPopover className={`qa-context-control${warning ? " is-warning" : ""}`} label={`上下文已用 ${percent}%`}
+  return <ComposerPopover className={`qa-context-control${warning ? " is-warning" : ""}`} label={`上下文已用 ${percent}%`} iconOnly
     trigger={<svg className="qa-context-ring" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <circle cx="9" cy="9" r={radius} className="qa-context-track" />
       <circle cx="9" cy="9" r={radius} className="qa-context-value" strokeDasharray={`${share * circumference} ${circumference}`} transform="rotate(-90 9 9)" />

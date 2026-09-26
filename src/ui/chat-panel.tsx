@@ -327,13 +327,15 @@ export function ChatPanel(props: Props) {
       <ConversationScrollButton />
     </Conversation>
     <div className="qa-composer">
-      <div className="qa-prompt-strip" role="group" aria-label="常用 Prompt">
+      <div className="qa-prompt-strip" role="group" aria-labelledby={`${inputId}-quick-label`}>
+        <span id={`${inputId}-quick-label`} className="qiaomu-agent__sr-only">常用 Prompt</span>
         {[...props.customPrompts.filter((p) => p.pinned).map((p) => ({ id: p.id, name: p.name, body: p.body })),
           ...props.prompts.slice(0, 3).map((body, index) => ({ id: `quick-${index}`, name: body, body }))].slice(0, 5)
           .map((prompt) => <button key={prompt.id} type="button" onClick={() => insertPrompt(prompt.body)}>{prompt.name}</button>)}
         <button type="button" className="qa-prompt-strip-manage" onClick={() => props.onManagePrompts()} aria-label="管理 Prompt 库"><Plus size={14} /></button>
       </div>
-      {menuOpen && <div className="qa-command-menu" id={`${inputId}-menu`} role="listbox" aria-label="Prompt 菜单">
+      {menuOpen && <div className="qa-command-menu" id={`${inputId}-menu`} role="listbox" aria-labelledby={`${inputId}-menu-label`}>
+        <span id={`${inputId}-menu-label`} className="qiaomu-agent__sr-only">Prompt 菜单</span>
         {promptChoices.map((p, index) => <button type="button" role="option" aria-selected={index === menuIndex} id={`${inputId}-option-${index}`} key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(index)}><Slash size={15} /><span>{p.name}</span></button>)}
         {!promptChoices.length && <div className="qa-command-empty">没有匹配的 Prompt</div>}
         <button type="button" role="option" aria-selected={menuIndex === promptChoices.length} id={`${inputId}-option-${promptChoices.length}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choosePrompt(promptChoices.length)}><Plus size={15} /><span>管理自定义 Prompt…</span></button>
@@ -347,9 +349,9 @@ export function ChatPanel(props: Props) {
         {!imageEditing && (props.note || props.editorSelection || props.reading) && <PromptInputHeader>
           {props.note && <span className="qa-note"><FileText size={13} /><span>{props.note.basename}</span>
             <button type="button" disabled={running} onClick={props.onToggleNote}><X size={12} /><span className="qiaomu-agent__sr-only">不附加当前笔记</span></button></span>}
-          {props.editorSelection && <span className="qa-note qa-selection-chip" title={props.editorSelection.detail.slice(0, 400)}><TextSelect size={13} /><span>{props.editorSelection.label}</span>
+          {props.editorSelection && <span className="qa-note qa-selection-chip"><TextSelect size={13} /><span>{props.editorSelection.label}</span>
             <button type="button" disabled={running} onClick={props.onDismissSelection}><X size={12} /><span className="qiaomu-agent__sr-only">不附加选中的文字</span></button></span>}
-          {props.reading && <span className="qa-note qa-reading-chip" title={props.reading.detail}><ReadingIcon chip={props.reading} /><span>{props.reading.label}</span>
+          {props.reading && <span className="qa-note qa-reading-chip"><ReadingIcon chip={props.reading} /><span>{props.reading.label}</span>
             <button type="button" disabled={running} onClick={props.onDismissReading}><X size={12} /><span className="qiaomu-agent__sr-only">不附加正在阅读的内容</span></button></span>}
         </PromptInputHeader>}
         <label htmlFor={inputId} className="qiaomu-agent__sr-only">给 Agent 的消息</label>
@@ -372,26 +374,26 @@ export function ChatPanel(props: Props) {
           onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { if (!e.clipboardData.getData("text/plain")) e.preventDefault(); void addFiles(files); } }}
           placeholder={imageEditing ? "描述要如何修改这张图片…" : "输入消息…"} />
         <PromptInputFooter><PromptInputTools>
-          <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} disabled={running}>
+          <ComposerPopover label="添加附件与工具" trigger={<Plus size={18} />} iconOnly disabled={running}>
             {(close) => <div className="qa-add-menu">
               <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-add`}>
                 <div className="qa-add-heading" id={`${inputId}-add`}>添加</div>
-                <button type="button" aria-label="上传文件或图片" onClick={() => { close(); runAdd("upload"); }}><Paperclip size={16} /><span>文件或图片</span><span className="qa-add-hint">也可拖入</span><AddKey keys={props.addHotkeys?.upload} /></button>
-                <button type="button" aria-label="选择库内文件" onClick={() => { close(); runAdd("file"); }}><FileText size={16} /><span>库内文件</span><AddKey keys={props.addHotkeys?.file || "@"} /></button>
-                <button type="button" aria-label="选择库内文件夹" onClick={() => { close(); runAdd("folder"); }}><Folder size={16} /><span>库内文件夹</span><span className="qa-add-hint">附加其中的笔记</span><AddKey keys={props.addHotkeys?.folder} /></button>
-                {props.onPickWebPage && <button type="button" aria-label="添加网页" onClick={() => { close(); props.onPickWebPage!(addAttachment); }}><Link size={16} /><span>网页</span><span className="qa-add-hint">读取正文</span></button>}
-                {props.detachedNote && <button type="button" aria-label={`附加当前笔记「${props.detachedNote.basename}」`} onClick={() => { close(); props.onToggleNote(); }}><FilePlus size={16} /><span>当前笔记</span><span className="qa-add-hint">{props.detachedNote.basename}</span></button>}
+                <button type="button" onClick={() => { close(); runAdd("upload"); }}><Paperclip size={16} /><span>文件或图片</span><span className="qa-add-hint">也可拖入</span><AddKey keys={props.addHotkeys?.upload} /></button>
+                <button type="button" onClick={() => { close(); runAdd("file"); }}><FileText size={16} /><span>库内文件</span><AddKey keys={props.addHotkeys?.file || "@"} /></button>
+                <button type="button" onClick={() => { close(); runAdd("folder"); }}><Folder size={16} /><span>库内文件夹</span><span className="qa-add-hint">附加其中的笔记</span><AddKey keys={props.addHotkeys?.folder} /></button>
+                {props.onPickWebPage && <button type="button" onClick={() => { close(); props.onPickWebPage!(addAttachment); }}><Link size={16} /><span>网页</span><span className="qa-add-hint">读取正文</span></button>}
+                {props.detachedNote && <button type="button" onClick={() => { close(); props.onToggleNote(); }}><FilePlus size={16} /><span>当前笔记</span><span className="qa-add-hint">{props.detachedNote.basename}</span></button>}
               </div>
               <div className="qa-add-group" role="group" aria-labelledby={`${inputId}-use`}>
                 <div className="qa-add-heading" id={`${inputId}-use`}>使用</div>
-                <button type="button" aria-label="使用 Prompt" onClick={() => { close(); if (input && draftBeforePrompts.current === null) draftBeforePrompts.current = input; setInput("/"); setMenuDismissed(false); setMenuIndex(0); textarea.current?.focus(); }}><Slash size={16} /><span>Prompt</span><AddKey keys="/" /></button>
-                {input.trim() && <button type="button" aria-label="将当前草稿保存为 Prompt" onClick={() => { close(); props.onManagePrompts(input); }}><BookOpen size={16} /><span>保存为 Prompt</span></button>}
-                <button type="button" aria-label={props.skillLabel === "技能" ? "选择技能" : `技能：${props.skillLabel}`} onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} /><span>技能</span><span className="qa-add-hint">{props.skillLabel === "技能" ? "选择要用的技能" : props.skillLabel}</span><ChevronRight size={14} /></button>
-                {props.webSearch !== undefined && <button type="button" aria-label="联网搜索" aria-pressed={props.webSearch} onClick={props.onToggleWebSearch}><Globe size={16} /><span>联网搜索</span><span className="qa-add-hint">{props.webSearch ? "需要时自动搜索" : "已关闭"}</span><span className="qa-add-switch" aria-hidden="true" /></button>}
+                <button type="button" onClick={() => { close(); if (input && draftBeforePrompts.current === null) draftBeforePrompts.current = input; setInput("/"); setMenuDismissed(false); setMenuIndex(0); textarea.current?.focus(); }}><Slash size={16} /><span>Prompt</span><AddKey keys="/" /></button>
+                {input.trim() && <button type="button" onClick={() => { close(); props.onManagePrompts(input); }}><BookOpen size={16} /><span>保存为 Prompt</span></button>}
+                <button type="button" onClick={(event) => { close(); props.onSkill(event.nativeEvent); }}><Sparkles size={16} /><span>技能</span><span className="qa-add-hint">{props.skillLabel === "技能" ? "选择要用的技能" : props.skillLabel}</span><ChevronRight size={14} /></button>
+                {props.webSearch !== undefined && <button type="button" aria-pressed={props.webSearch} onClick={props.onToggleWebSearch}><Globe size={16} /><span>联网搜索</span><span className="qa-add-hint">{props.webSearch ? "需要时自动搜索" : "已关闭"}</span><span className="qa-add-switch" aria-hidden="true" /></button>}
               </div>
             </div>}
           </ComposerPopover>
-          {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}`} label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} disabled={running || imageEditing}>
+          {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}`} label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} iconOnly disabled={running || imageEditing}>
             {(close) => <>
               <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
               <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>

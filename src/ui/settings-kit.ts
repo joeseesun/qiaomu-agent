@@ -20,8 +20,9 @@ export function actionButton(parent: HTMLElement, icon: string, text: string, cl
 export function hostSwitch(parent: HTMLElement, checked: boolean, label: string, onChange: (value: boolean) => void): ToggleComponent {
   const toggle = new ToggleComponent(parent).setValue(checked).onChange(onChange);
   toggle.toggleEl.addClass("qa-ms-switch");
-  toggle.toggleEl.querySelector("input")?.setAttribute("aria-label", label);
-  toggle.toggleEl.setAttribute("aria-label", label);
+  const name = parent.createSpan({ cls: "qiaomu-agent__sr-only", text: label });
+  name.id = `qa-switch-${crypto.randomUUID()}`;
+  toggle.toggleEl.querySelector("input")?.setAttribute("aria-labelledby", name.id);
   return toggle;
 }
 
@@ -46,7 +47,7 @@ export interface NavRowOptions {
 /** A full-width row that opens a detail page; returns the row so callers can add a trailing control. */
 export function navRow(list: HTMLElement, options: NavRowOptions): HTMLElement {
   const entry = list.createDiv({ cls: "qa-ms-row" });
-  const main = entry.createEl("button", { cls: "qa-ms-row-main", attr: { type: "button", "aria-label": options.sub ? `${options.name}：${options.sub}` : options.name } });
+  const main = entry.createEl("button", { cls: "qa-ms-row-main", attr: { type: "button" } });
   setIcon(main.createSpan({ cls: "qa-ms-row-icon", attr: { "aria-hidden": "true" } }), options.icon);
   const text = main.createDiv({ cls: "qa-ms-row-text" });
   text.createDiv({ cls: "qa-ms-row-name", text: options.name });
@@ -63,6 +64,14 @@ export function wideField(parent: HTMLElement, label: string, hint?: string): HT
   head.createDiv({ cls: "qa-ms-wide-label", text: label });
   if (hint) head.createDiv({ cls: "qa-ms-wide-hint", text: hint });
   return wrapper;
+}
+
+/** Give a form control the name already shown above it, without a hover tooltip. */
+export function labelField(field: HTMLElement, control: HTMLElement): void {
+  const label = field.querySelector<HTMLElement>(".qa-ms-wide-label");
+  if (!label) return;
+  label.id ||= `qa-field-${crypto.randomUUID()}`;
+  control.setAttribute("aria-labelledby", label.id);
 }
 
 /** A row with a host switch on the right and no detail page. */
