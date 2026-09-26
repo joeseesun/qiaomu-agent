@@ -45,6 +45,7 @@ export class ChatView extends ItemView {
   private shownSelection = "";
   private prefill = "";
   private prefillVersion = 0;
+  private submitVersion = 0;
   private focusVersion = 0;
   private addRequest: { kind: AddKind; version: number } = { kind: "upload", version: 0 };
   private statusText = "";
@@ -149,6 +150,18 @@ export class ChatView extends ItemView {
   }
 
   setComposer(text: string): void { this.prefill = text; this.prefillVersion++; this.render(); }
+  /** A question from outside (Qiaomu Home): new conversation, draft it, and send when asked and idle. */
+  compose(text: string, submit: boolean): void {
+    if (!this.running() && this.chat.messages.length) this.newConversation();
+    this.prefill = text; this.prefillVersion++;
+    if (submit && !this.running()) this.submitVersion++;
+    this.render();
+  }
+  /** Shows an archived conversation, or the active one, e.g. when chosen on Qiaomu Home. */
+  showConversationById(id: string): void {
+    if (activeIdentity(this.plugin.settings).id === id) { this.focusComposer(); return; }
+    this.openConversation(id);
+  }
   /** Focuses the composer without touching a draft the user is writing. */
   focusComposer(): void { this.focusVersion++; this.render(); }
   /** Runs a composer add action (from a command hotkey) as if chosen from the add menu. */
@@ -581,7 +594,7 @@ export class ChatView extends ItemView {
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
       permission, fileAccessAvailable: true, fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
-      prefill: this.prefill, prefillVersion: this.prefillVersion, focusVersion: this.focusVersion, addRequest: this.addRequest,
+      prefill: this.prefill, prefillVersion: this.prefillVersion, submitVersion: this.submitVersion, focusVersion: this.focusVersion, addRequest: this.addRequest,
       addHotkeys: Object.fromEntries(Object.entries(ADD_COMMANDS).map(([kind, command]) => [kind, commandHotkey(this.app, this.plugin.manifest.id, command.id, Platform.isMacOS)])) as Record<AddKind, string>,
       onConnection: () => this.openConnection(), onNew: () => this.newConversation(), onOpenSettings: () => this.openSettings(),
       onHistory: (event: MouseEvent) => this.openHistory(event),

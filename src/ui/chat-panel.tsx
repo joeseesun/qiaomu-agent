@@ -30,7 +30,7 @@ interface Props {
   onOpenParent: (id: string) => void; onForkMessage: (messageId: string) => void;
   imageTargetNote: TFile | null;
   backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
-  statusText: string; prompts: string[]; prefill: string; prefillVersion: number; focusVersion?: number;
+  statusText: string; prompts: string[]; prefill: string; prefillVersion: number; submitVersion?: number; focusVersion?: number;
   addRequest?: { kind: AddKind; version: number }; addHotkeys?: Partial<Record<AddKind, string>>;
   onConnection: () => void; onNew: () => void; onOpenSettings: () => void; onHistory: (event: MouseEvent) => void;
   onSkill: (event: MouseEvent) => void; onPermission: (mode: PermissionMode) => void;
@@ -211,6 +211,8 @@ export function ChatPanel(props: Props) {
     try { await sendMessage({ text: text.trim() || "请分析这些附件。", metadata: { createdAt: Date.now(), sourcePath: props.note?.path, attachments: sent } }); }
     finally { locked.current = false; await props.onPersist(); }
   };
+  // Qiaomu Home sends a question the user already submitted there; runs once per request, after the draft is set.
+  useEffect(() => { if (props.submitVersion && props.prefill.trim()) void submit(props.prefill); }, [props.submitVersion]);
   const retry = async () => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;

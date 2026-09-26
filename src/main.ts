@@ -12,6 +12,8 @@ import { InlineEditModal } from "./ui/inline-edit-modal";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
 import { ReadingContextService } from "./integrations/reading-context";
 import { createAgentApi } from "./integrations/agent-api";
+import { createHomeProvider } from "./integrations/home";
+import { notifyHomeChanged, type HomeProvider } from "./integrations/qiaomu-home";
 import type { AgentApi } from "./integrations/qiaomu-context";
 
 export default class QiaomuAgentPlugin extends Plugin {
@@ -23,6 +25,8 @@ export default class QiaomuAgentPlugin extends Plugin {
   reading!: ReadingContextService;
   /** Found by other plugins at `app.plugins.plugins["qiaomu-agent"].api` (Qiaomu Context Protocol). */
   api!: AgentApi;
+  /** Recent conversations and a "new conversation" action on Qiaomu Home (see integrations/qiaomu-home.ts). */
+  qiaomuHome?: HomeProvider;
 
   override async onload(): Promise<void> {
     this.settings = normalizeSettings(await this.loadData());
@@ -40,7 +44,12 @@ export default class QiaomuAgentPlugin extends Plugin {
     this.api = createAgentApi({
       pin: (snapshot) => this.reading.pin(snapshot),
       open: (prompt) => this.activateView(prompt, true),
+      compose: async (prompt, submit) => {
+        await this.activateView();
+        this.firstView()?.compose(prompt, submit);
+      },
     });
+    this.qiaomuHome = createHomeProvider(this);
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
 
     this.addRibbonIcon("tree-deciduous", "打开乔木 Agent", () => void this.activateView());
@@ -122,6 +131,7 @@ export default class QiaomuAgentPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    notifyHomeChanged(this.app, this.manifest.id);
     this.eachView((view) => view.refreshControls());
   }
 
@@ -171,6 +181,11 @@ export default class QiaomuAgentPlugin extends Plugin {
   getActiveMarkdownFile(): TFile | null {
     const leaf = this.app.workspace.getMostRecentLeaf(this.app.workspace.rootSplit);
     return leaf?.view instanceof MarkdownView && leaf.view.file?.extension === "md" ? leaf.view.file : null;
+  }
+
+  firstView(): ChatView | null {
+    const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_QIAOMU_AGENT)[0]?.view;
+    return view instanceof ChatView ? view : null;
   }
 
   private eachView(callback: (view: ChatView) => void): void {

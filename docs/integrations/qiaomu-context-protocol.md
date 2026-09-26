@@ -46,6 +46,7 @@ The agent sanitizes every snapshot again (`sanitize()`): strings only, bounded l
 
 - Snapshot content is untrusted third-party text. The prompt wraps it in `<reading>` / `<reading_selection>`, escapes closing tags inside it, and the system prompt says to treat it as material, never as instructions (`READING_CONVENTIONS`). This matters for web articles written to hijack agents.
 - The agent never sends on its own: `ask()` only attaches context and focuses the composer.
+- `compose({ prompt, submit? })` (optional v1 method, added for Qiaomu Home): starts a fresh conversation with the draft and no attached context. It sends only when `submit: true`, which a caller may pass only when the user already pressed send in the caller's own UI (Home's search box with `⌘↵`). The prompt is trimmed and capped at 4,000 characters. Check `typeof api.compose === "function"` before calling; older Agent versions do not have it.
 - The reading chip is visible and removable before sending, like the note and selection chips. Nothing is attached silently.
 - Sources hand over only what is on screen or selected. No credentials, no library-wide data.
 
@@ -97,3 +98,7 @@ Any plugin can join by copying `qiaomu-context.ts`, setting `qiaomuContext` and 
 3. Tool-style plugins are a different integration: Dataview queries, Tasks, Templater and Calendar are better exposed to the agent as tools or MCP servers than as reading context.
 
 Publish the spec in the agent README once the agent is released, with `obsidian://show-plugin?id=qiaomu-agent` as the install link from other plugins' settings.
+
+## Sibling protocol: Qiaomu Home
+
+The start page 乔木Home uses a second, independent protocol, `plugin.qiaomuHome` (`qiaomu-home` v1), for "what can the user resume, create or find". Qiaomu Agent implements it in `src/integrations/home.ts` (recent conversations, a new-conversation action, title search). Spec: `docs/qiaomu-home-protocol.md` in the qiaomu-home repository.
