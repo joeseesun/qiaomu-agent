@@ -621,7 +621,7 @@ class AgentModal extends Modal {
     const models = [...reported, ...custom.filter((id) => !reported.some((model) => model.id === id)).map((id) => ({ id, name: id, efforts: [] }))];
     const visible = settings.agentEnabledModels[this.agent.id];
     const isVisible = (id: string) => !visible || visible.includes(id);
-    const canList = Boolean(nativeTransportFor(this.agent.id)) || this.agent.id === "antigravity" || this.agent.id === "pi";
+    const canList = Boolean(nativeTransportFor(this.agent.id, this.agent.nativePath)) || this.agent.id === "antigravity" || this.agent.id === "pi";
     const section = contentEl.createDiv({ cls: "qa-ms-section" });
     const count = models.filter((model) => isVisible(model.id)).length + Number(isVisible(""));
     const actions = sectionHead(section, "模型", `打开的模型会出现在对话的模型菜单里 · 已启用 ${count} / ${models.length + 1}`);

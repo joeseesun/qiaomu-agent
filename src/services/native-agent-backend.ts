@@ -15,16 +15,18 @@ import type {
 import { promptWithContext } from "./cli-profiles";
 import { acpContextUsage, codexContextUsage } from "./context-usage";
 import { JsonRpcProcess } from "./json-rpc-process";
+import { getRuntimeRequire } from "./runtime-require";
 
 const ACP_AGENTS = new Set(["gemini", "opencode", "qwen", "kimi", "cursor", "cline", "auggie", "hermes", "openclaw"]);
 
-export function nativeTransportFor(agentId: string): "app-server" | "acp" | null {
+export function nativeTransportFor(agentId: string, nativePath?: string): "app-server" | "acp" | null {
   if (agentId === "codex") return "app-server";
+  if ((agentId === "claude" || agentId === "grok") && nativePath) return "acp";
   return ACP_AGENTS.has(agentId) ? "acp" : null;
 }
 
-export function nativeTransportLabel(agentId: string): string | null {
-  const transport = nativeTransportFor(agentId);
+export function nativeTransportLabel(agentId: string, nativePath?: string): string | null {
+  const transport = nativeTransportFor(agentId, nativePath);
   return transport === "app-server" ? "App Server" : transport === "acp" ? "ACP" : null;
 }
 
@@ -76,6 +78,8 @@ function effectivePrompt(request: ChatRequest, includeSystemPrompt: boolean): st
 }
 
 export function acpLaunch(agentId: string, permissionMode: PermissionMode): string[] {
+  if (agentId === "grok") return ["--no-auto-update", "agent", "stdio"];
+  if (agentId === "claude") return [];
   if (["kimi", "opencode", "cursor", "hermes", "openclaw"].includes(agentId)) return ["acp"];
   if (["cline", "auggie"].includes(agentId)) return ["--acp"];
   if (agentId === "qwen") return ["--acp", "--approval-mode", permissionMode !== "plan" ? "auto-edit" : "plan"];
@@ -117,6 +121,8 @@ export class NativeAgentBackend implements ChatBackend {
   private ready = false;
   private activeTurnId: string | null = null;
   private configOptions: Record<string, unknown>[] = [];
+  private acpModes: string[] = [];
+  private acpCurrentMode: string | null = null;
   private legacyModels: ModelChoice[] = [];
   private imageInput = false;
   private prompted = false;
@@ -144,6 +150,7 @@ export class NativeAgentBackend implements ChatBackend {
       return models;
     }
     await this.ensureAcpSession(request);
+    await this.ensureClaudeMode(request.permissionMode);
     return this.acpModels();
   }
 
@@ -168,13 +175,24 @@ export class NativeAgentBackend implements ChatBackend {
     this.mcpSignature = signature;
     this.configOptions = arrayAt(result, "configOptions").map(record).filter((o): o is Record<string, unknown> => !!o);
     this.legacyModels = arrayAt(result, "models", "availableModels").map((m) => ({ id: stringAt(m, "modelId") || "", name: stringAt(m, "name") || "", efforts: [] })).filter((m) => !!m.id);
+    this.acpModes = arrayAt(result, "modes", "availableModes").map((mode) => stringAt(mode, "id")).filter((id): id is string => !!id);
+    this.acpCurrentMode = stringAt(result, "modes", "currentModeId");
     this.prompted = false;
   }
 
+  private async ensureClaudeMode(permissionMode: PermissionMode): Promise<void> {
+    if (this.detection.id !== "claude" || !this.process || !this.sessionId) return;
+    const desired = permissionMode === "plan" ? "plan" : permissionMode === "edit" ? "acceptEdits" : "bypassPermissions";
+    if (!this.acpModes.includes(desired)) throw new Error(`Claude ACP 未提供 ${desired} 权限模式`);
+    if (this.acpCurrentMode === desired) return;
+    await this.process.request("session/set_mode", { sessionId: this.sessionId, modeId: desired }, 15_000);
+    this.acpCurrentMode = desired;
+  }
+
   constructor(private readonly detection: CliDetection) {
-    if (!detection.path || !nativeTransportFor(detection.id)) throw new Error("该 Agent 没有可用的原生协议");
+    if (!detection.path || !nativeTransportFor(detection.id, detection.nativePath)) throw new Error("该 Agent 没有可用的原生协议");
     this.id = `cli:${detection.id}`;
-    this.label = `${detection.label} · ${nativeTransportLabel(detection.id)}`;
+    this.label = `${detection.label} · ${nativeTransportLabel(detection.id, detection.nativePath)}`;
   }
 
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
@@ -190,6 +208,7 @@ export class NativeAgentBackend implements ChatBackend {
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
+      callbacks.onStatus(`正在连接 ${this.detection.label}…`);
       await this.ensureConnected(request);
       signal.throwIfAborted();
       if (!this.process) throw new Error("原生 Agent 连接未建立");
@@ -213,6 +232,7 @@ export class NativeAgentBackend implements ChatBackend {
 
   resetSession(): void {
     this.sessionId = null;
+    this.acpCurrentMode = null;
     this.lastUsage = null;
     this.prompted = false;
   }
@@ -228,20 +248,21 @@ export class NativeAgentBackend implements ChatBackend {
   }
 
   private async ensureConnected(request: ChatRequest): Promise<void> {
-    const path = this.detection.path;
+    const path = this.detection.nativePath ?? this.detection.path;
     if (!path) throw new Error(`${this.detection.label} 当前不可用`);
-    const transport = nativeTransportFor(this.detection.id);
-    const modeChanged = transport === "acp" && this.connectedMode !== null && this.connectedMode !== request.permissionMode;
+    const transport = nativeTransportFor(this.detection.id, this.detection.nativePath);
+    const modeChanged = transport === "acp" && this.connectedMode !== null
+      && JSON.stringify(acpLaunch(this.detection.id, this.connectedMode)) !== JSON.stringify(acpLaunch(this.detection.id, request.permissionMode));
     if (modeChanged) await this.shutdown();
     if (this.process?.running && this.ready) return;
     const args = transport === "app-server"
       ? ["app-server", "--listen", "stdio://"]
-      : acpLaunch(this.detection.id, request.permissionMode);
+      : [...(this.detection.nativeArgsPrefix ?? []), ...acpLaunch(this.detection.id, request.permissionMode)];
     const process = new JsonRpcProcess({
       executablePath: path,
       args,
       ...(request.cwd ? { cwd: request.cwd } : {}),
-      env: (window as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env,
+      env: { ...(getRuntimeRequire()?.("process") as { env?: Record<string, string | undefined> } | undefined)?.env, ...this.detection.env },
       includeJsonRpc: transport === "acp",
       onNotification: (method, params) => this.handleNotification(method, params),
       onServerRequest: (id, method, params) => this.handleServerRequest(id, method, params),
@@ -258,24 +279,36 @@ export class NativeAgentBackend implements ChatBackend {
     });
     this.process = process;
     process.start();
-    if (transport === "app-server") {
-      await process.request("initialize", {
-        clientInfo: { name: "qiaomu_agent_obsidian", title: "Qiaomu Agent for Obsidian", version: "0.1.0" },
-      }, 15_000);
-      process.notify("initialized", {});
-    } else {
-      const initialized = await process.request("initialize", {
-        protocolVersion: 1,
-        // Reads and writes go through Obsidian so the turn can be reviewed and rolled back.
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-        clientInfo: { name: "qiaomu-agent", title: "Qiaomu Agent for Obsidian", version: "0.1.0" },
-      }, 15_000);
-      const protocolVersion = record(initialized)?.protocolVersion;
-      this.imageInput = record(record(record(initialized)?.agentCapabilities)?.promptCapabilities)?.image === true;
-      if (protocolVersion !== 1) throw new Error(`不支持 ACP 协议版本 ${String(protocolVersion)}`);
+    try {
+      if (transport === "app-server") {
+        await process.request("initialize", {
+          clientInfo: { name: "qiaomu_agent_obsidian", title: "Qiaomu Agent for Obsidian", version: "0.1.0" },
+        }, 15_000);
+        process.notify("initialized", {});
+      } else {
+        const initialized = await process.request("initialize", {
+          protocolVersion: 1,
+          // Reads and writes go through Obsidian so the turn can be reviewed and rolled back.
+          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+          clientInfo: { name: "qiaomu-agent", title: "Qiaomu Agent for Obsidian", version: "0.1.0" },
+        }, 15_000);
+        const protocolVersion = record(initialized)?.protocolVersion;
+        this.imageInput = record(record(record(initialized)?.agentCapabilities)?.promptCapabilities)?.image === true;
+        if (protocolVersion !== 1) throw new Error(`不支持 ACP 协议版本 ${String(protocolVersion)}`);
+        if (this.detection.id === "grok") {
+          const authMethods = arrayAt(initialized, "authMethods").map((method) => stringAt(method, "id"));
+          const methodId = authMethods.includes("cached_token") ? "cached_token" : authMethods.includes("xai.api_key") ? "xai.api_key" : null;
+          if (!methodId) throw new Error("Grok 尚未登录，请先运行 grok login");
+          await process.request("authenticate", { methodId, _meta: { headless: true } }, 15_000);
+        }
+      }
+      this.ready = true;
+      this.connectedMode = request.permissionMode;
+    } catch (error) {
+      if (this.process === process) this.process = null;
+      await process.stop();
+      throw error;
     }
-    this.ready = true;
-    this.connectedMode = request.permissionMode;
   }
 
   private async sendCodex(request: ChatRequest, signal: AbortSignal): Promise<void> {
@@ -318,6 +351,7 @@ export class NativeAgentBackend implements ChatBackend {
   private async sendAcp(request: ChatRequest): Promise<void> {
     if (!this.process) return;
     await this.ensureAcpSession(request);
+    await this.ensureClaudeMode(request.permissionMode);
     const firstPrompt = !this.prompted;
     for (const [category, value] of [["model", request.model], ["thought_level", request.reasoningEffort]]) {
       if (!value) continue;

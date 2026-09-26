@@ -3,12 +3,13 @@ import type { ChatBackend, CliDetection, QiaomuSettings } from "../types";
 import { ApiBackend } from "./api-backend";
 import { CliBackend } from "./cli-backend";
 import { ZcodeBackend } from "./zcode-backend";
+import { PiRpcBackend } from "./pi-rpc-backend";
 import { NativeAgentBackend, nativeTransportFor, nativeTransportLabel } from "./native-agent-backend";
 import { WEB_SEARCH_SECRET_ID } from "./web-search";
 
 export class BackendService {
   private detections: CliDetection[] = [];
-  private readonly nativeBackends = new Map<string, NativeAgentBackend | ZcodeBackend>();
+  private readonly nativeBackends = new Map<string, NativeAgentBackend | ZcodeBackend | PiRpcBackend>();
 
   constructor(
     private readonly app: App,
@@ -28,8 +29,8 @@ export class BackendService {
       .filter((detection) => detection.callable)
       .map((detection) => ({
         value: `cli:${detection.id}`,
-        label: nativeTransportLabel(detection.id)
-          ? `${detection.label} · ${nativeTransportLabel(detection.id)}`
+        label: detection.id === "pi" ? "Pi · RPC" : detection.id === "zcode" && detection.nativePath ? "ZCode · App Server" : nativeTransportLabel(detection.id, detection.nativePath)
+          ? `${detection.label} · ${nativeTransportLabel(detection.id, detection.nativePath)}`
           : detection.label,
         ready: true,
       }));
@@ -91,13 +92,19 @@ export class BackendService {
   }
 
   private localBackend(detection: CliDetection, owner: string): ChatBackend {
+    if (detection.id === "pi") {
+      const key = JSON.stringify([owner, detection.id]);
+      let backend = this.nativeBackends.get(key);
+      if (!backend) { backend = new PiRpcBackend(detection); this.nativeBackends.set(key, backend); }
+      return backend;
+    }
     if (detection.id === "zcode") {
       const key = JSON.stringify([owner, detection.id]);
       let backend = this.nativeBackends.get(key);
       if (!backend) { backend = new ZcodeBackend(detection); this.nativeBackends.set(key, backend); }
       return backend;
     }
-    if (!nativeTransportFor(detection.id)) return new CliBackend(detection);
+    if (!nativeTransportFor(detection.id, detection.nativePath)) return new CliBackend(detection);
     const key = JSON.stringify([owner, detection.id]);
     let backend = this.nativeBackends.get(key);
     if (!backend) {

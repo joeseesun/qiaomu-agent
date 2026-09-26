@@ -15,6 +15,9 @@ describe("native agent transports", () => {
     expect(nativeTransportFor("cursor")).toBe("acp");
     expect(nativeTransportFor("cline")).toBe("acp");
     expect(nativeTransportFor("claude")).toBeNull();
+    expect(nativeTransportFor("claude", "/bin/claude-agent-acp")).toBe("acp");
+    expect(nativeTransportFor("grok")).toBeNull();
+    expect(nativeTransportFor("grok", "/bin/grok")).toBe("acp");
     expect(nativeTransportLabel("codex")).toBe("App Server");
   });
 
@@ -26,6 +29,8 @@ describe("native agent transports", () => {
     expect(acpLaunch("qwen", "plan")).toEqual(["--acp", "--approval-mode", "plan"]);
     expect(acpLaunch("gemini", "edit")).toEqual(["--acp", "--approval-mode", "auto_edit"]);
     expect(acpLaunch("gemini", "full")).toEqual(["--acp", "--approval-mode", "auto_edit"]);
+    expect(acpLaunch("grok", "plan")).toEqual(["--no-auto-update", "agent", "stdio"]);
+    expect(acpLaunch("claude", "edit")).toEqual([]);
   });
 
   it("converts stdio and HTTP MCP servers into ACP descriptors", () => {

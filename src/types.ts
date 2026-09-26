@@ -268,6 +268,9 @@ export interface CliDetection {
   /** Runtime arguments/environment for bundled Node CLIs. */
   argsPrefix?: string[];
   env?: Record<string, string>;
+  /** Optional separately installed ACP adapter, e.g. Claude Agent ACP. */
+  nativePath?: string;
+  nativeArgsPrefix?: string[];
   id: string;
   label: string;
   command: string;

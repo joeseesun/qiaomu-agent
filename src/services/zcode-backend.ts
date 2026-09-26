@@ -1,6 +1,9 @@
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection } from "../types";
 import { promptWithContext } from "./cli-profiles";
 import { getRuntimeRequire } from "./runtime-require";
+import { ZcodeAppServer } from "./zcode-app-server";
+import { zcodeError } from "./zcode-errors";
+export { zcodeError } from "./zcode-errors";
 
 export function zcodeArgs(request: ChatRequest): string[] {
   if (request.model?.trim()) throw new Error("请在 ZCode 中选择模型，插件使用它的默认模型");
@@ -18,13 +21,6 @@ export function zcodeResponse(stdout: string): string {
   return value.response;
 }
 
-export function zcodeError(stderr: string, fallback: string): string {
-  if (stderr.includes("1309") || stderr.includes("套餐已到期")) return "ZCode 当前模型的 GLM Coding Plan 套餐已到期，请在 ZCode 中切换可用模型或续订后重试";
-  // Never render provider stacks, headers or cookies in chat.
-  const line = stderr.split(/\r?\n/).find(line => /^(Error:|ProviderBusinessError:)/.test(line));
-  return (line || fallback).slice(0, 600);
-}
-
 interface Child { kill(signal: string): boolean; exitCode?: number | null; }
 interface Processes {
   execFile(command: string, args: string[], options: object, callback: (error: Error | null, stdout: string, stderr: string) => void): Child;
@@ -35,11 +31,21 @@ export class ZcodeBackend implements ChatBackend {
   readonly id = "cli:zcode";
   readonly label = "ZCode";
   private active = new Set<AbortController>();
-  constructor(private readonly detection: CliDetection) {}
-  resetSession(): void { /* Every request carries conversation context explicitly. */ }
-  async shutdown(): Promise<void> { for (const controller of this.active) controller.abort(); }
+  private native: ZcodeAppServer | null;
+  constructor(private readonly detection: CliDetection) { this.native = detection.nativePath ? new ZcodeAppServer(detection) : null; }
+  resetSession(): void { this.native?.resetSession(); }
+  async shutdown(): Promise<void> { for (const controller of this.active) controller.abort(); await this.native?.shutdown(); }
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
+    if (this.native) {
+      try { await this.native.send(request, callbacks, signal); return; }
+      catch (error) {
+        if (!this.native.canFallback || signal.aborted) throw error;
+        await this.native.shutdown();
+        this.native = null;
+        callbacks.onStatus("ZCode App Server 不可用，改用 CLI…");
+      }
+    }
     const require = getRuntimeRequire();
     if (!require || !this.detection.path) throw new Error("ZCode 需要桌面端的可用 CLI");
     const args = [...(this.detection.argsPrefix ?? []), ...zcodeArgs(request)];
