@@ -33,6 +33,7 @@ export class ZcodeBackend implements ChatBackend {
   private active = new Set<AbortController>();
   private native: ZcodeAppServer | null;
   constructor(private readonly detection: CliDetection) { this.native = detection.nativePath ? new ZcodeAppServer(detection) : null; }
+  async prepare(request: ChatRequest): Promise<void> { await this.native?.prepare(request); }
   resetSession(): void { this.native?.resetSession(); }
   async shutdown(): Promise<void> { for (const controller of this.active) controller.abort(); await this.native?.shutdown(); }
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {

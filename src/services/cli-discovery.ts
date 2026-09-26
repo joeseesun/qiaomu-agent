@@ -36,7 +36,7 @@ function knownPaths(profile: CliProfile, home: string, join: PathModule["join"],
     ...nvmBins.map((bin) => join(bin, name)),
   ]);
   if (profile.id === "codex") {
-    paths.unshift("/Applications/ChatGPT.app/Contents/Resources/codex");
+    paths.unshift("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex", "/Applications/ChatGPT.app/Contents/Resources/codex");
   }
   return paths;
 }
@@ -64,7 +64,18 @@ async function probe(
   });
 }
 
+let discovery: Promise<CliDetection[]> | null = null;
+
+/** Concurrent refreshes share work; completed scans are never cached indefinitely. */
 export async function discoverLocalClis(): Promise<CliDetection[]> {
+  if (discovery) return discovery;
+  const pending = scanLocalClis();
+  discovery = pending;
+  try { return await pending; }
+  finally { if (discovery === pending) discovery = null; }
+}
+
+async function scanLocalClis(): Promise<CliDetection[]> {
   if (!Platform.isDesktopApp) return [];
   const require = getRuntimeRequire();
   if (!require) return [];
@@ -80,13 +91,19 @@ export async function discoverLocalClis(): Promise<CliDetection[]> {
   const nvmBins = versions.map((version) => path.join(nvm, version, "bin"));
   const nodePaths = ["node", "/opt/homebrew/bin/node", "/usr/local/bin/node", ...nvmBins.map((bin) => path.join(bin, "node"))];
 
-  const detections: CliDetection[] = [];
-  for (const profile of CLI_PROFILES) {
+  const probes = new Map<string, ReturnType<typeof probe>>();
+  const cachedProbe = (exec: ChildProcessModule["execFile"], command: string, args: string[]) => {
+    const key = JSON.stringify([command, args]);
+    let result = probes.get(key);
+    if (!result) { result = probe(exec, command, args); probes.set(key, result); }
+    return result;
+  };
+  const detect = async (profile: CliProfile): Promise<CliDetection> => {
     const candidates = [...profile.commands, ...knownPaths(profile, home, path.join, nvmBins)];
     let detection: CliDetection | null = null;
     for (const candidate of Array.from(new Set(candidates))) {
       if (candidate.includes("/") && !fs.existsSync(candidate)) continue;
-      const result = await probe(childProcess.execFile, candidate, profile.versionArgs);
+      const result = await cachedProbe(childProcess.execFile, candidate, profile.versionArgs);
       if (!result.ok) continue;
       if (profile.id === "cursor" && candidate.split("/").at(-1) === "agent" && !/cursor/i.test(result.version ?? "")) continue;
       detection = {
@@ -103,12 +120,12 @@ export async function discoverLocalClis(): Promise<CliDetection[]> {
     if (profile.id === "claude" && detection) {
       for (const candidate of ["claude-agent-acp", ...knownPaths({ ...profile, commands: ["claude-agent-acp"] }, home, path.join, nvmBins)]) {
         if (candidate.includes("/") && !fs.existsSync(candidate)) continue;
-        const result = await probe(childProcess.execFile, candidate, ["--version"]);
+        const result = await cachedProbe(childProcess.execFile, candidate, ["--version"]);
         if (result.ok) { detection.nativePath = candidate; break; }
         if (!candidate.includes("/")) continue;
         for (const node of nodePaths) {
           if (node.includes("/") && !fs.existsSync(node)) continue;
-          const viaNode = await probe(childProcess.execFile, node, [candidate, "--version"]);
+          const viaNode = await cachedProbe(childProcess.execFile, node, [candidate, "--version"]);
           if (viaNode.ok) {
             detection.nativePath = node;
             detection.nativeArgsPrefix = [candidate];
@@ -119,11 +136,10 @@ export async function discoverLocalClis(): Promise<CliDetection[]> {
       }
     }
     if (profile.id === "grok" && detection) {
-      const native = await probe(childProcess.execFile, detection.path!, ["agent", "--help"]);
+      const native = await cachedProbe(childProcess.execFile, detection.path!, ["agent", "--help"]);
       if (native.ok && /stdio/.test(native.output)) detection.nativePath = detection.path!;
     }
-    detections.push(
-      detection ?? {
+    return detection ?? {
         id: profile.id,
         label: profile.label,
         command: profile.commands[0] ?? profile.id,
@@ -131,18 +147,26 @@ export async function discoverLocalClis(): Promise<CliDetection[]> {
         version: null,
         available: false,
         callable: false,
-      }
-    );
-  }
+      };
+  };
+  // Keep output/auto-selection order stable while bounding concurrent CLI startups.
+  const detections = new Array<CliDetection>(CLI_PROFILES.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (next < CLI_PROFILES.length) {
+      const index = next++;
+      detections[index] = await detect(CLI_PROFILES[index]!);
+    }
+  }));
 
   const zcode: CliDetection = { id: "zcode", label: "ZCode", command: "zcode", path: null, version: null, available: false, callable: false };
   // Prefer a standalone CLI. A desktop launcher must not be mistaken for a CLI.
   for (const candidate of [path.join(home, ".local/bin/zcode"), "/opt/homebrew/bin/zcode", "/usr/local/bin/zcode"]) {
     if (!fs.existsSync(candidate)) continue;
-    const result = await probe(childProcess.execFile, candidate, ["--help"]);
+    const result = await cachedProbe(childProcess.execFile, candidate, ["--help"]);
     if (result.ok && result.version?.match(/^zcode \d/i)) {
       Object.assign(zcode, { path: candidate, version: result.version, available: true, callable: true });
-      const native = await probe(childProcess.execFile, candidate, ["app-server", "--help"]);
+      const native = await cachedProbe(childProcess.execFile, candidate, ["app-server", "--help"]);
       if (native.ok && /app-server/i.test(native.output)) zcode.nativePath = candidate;
       break;
     }
@@ -156,14 +180,14 @@ export async function discoverLocalClis(): Promise<CliDetection[]> {
     if (!fs.existsSync(script) || !fs.existsSync(config)) continue;
     for (const node of nodePaths) {
       if (node.includes("/") && !fs.existsSync(node)) continue;
-      const runtime = await probe(childProcess.execFile, node, ["--version"]);
+      const runtime = await cachedProbe(childProcess.execFile, node, ["--version"]);
       if (!runtime.ok || Number(runtime.version?.match(/^v(\d+)/)?.[1] ?? 0) < 24) continue;
-      const cli = await probe(childProcess.execFile, node, [script, "--version"]);
+      const cli = await cachedProbe(childProcess.execFile, node, [script, "--version"]);
       if (!cli.ok) continue;
       Object.assign(zcode, { path: node, argsPrefix: [script], version: cli.version, callable: true,
         env: { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: config, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: path.join(home, ".zcode/v2/provider_config.json") },
         note: "使用 ZCode 当前模型" });
-      const native = await probe(childProcess.execFile, node, [script, "app-server", "--help"]);
+      const native = await cachedProbe(childProcess.execFile, node, [script, "app-server", "--help"]);
       if (native.ok && /app-server/i.test(native.output)) zcode.nativePath = node;
       break;
     }

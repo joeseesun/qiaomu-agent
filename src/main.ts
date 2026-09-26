@@ -136,14 +136,17 @@ export default class QiaomuAgentPlugin extends Plugin {
   }
 
   async refreshIntegrations(): Promise<void> {
-    const [detections, skills] = await Promise.all([
-      discoverLocalClis(),
-      this.skillService.refresh(this.settings.skillDirectories),
+    await Promise.all([
+      discoverLocalClis().then((detections) => {
+        this.backendService.setDetections(detections);
+        this.eachView((view) => view.refreshControls());
+      }),
+      this.skillService.refresh(this.settings.skillDirectories).then((skills) => {
+        if (skills.length > 0) console.debug(`Qiaomu Agent: loaded ${skills.length} skills`);
+        this.eachView((view) => view.refreshControls());
+      }),
       this.obsidianCliService.detect(),
     ]);
-    this.backendService.setDetections(detections);
-    this.eachView((view) => view.refreshControls());
-    if (skills.length > 0) console.debug(`Qiaomu Agent: loaded ${skills.length} skills`);
   }
 
   async activateView(prefill?: string, focus = false): Promise<void> {

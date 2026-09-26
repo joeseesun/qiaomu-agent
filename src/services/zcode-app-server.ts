@@ -21,10 +21,13 @@ export class ZcodeAppServer {
 
   constructor(private readonly detection: CliDetection) {}
 
+  async prepare(request: ChatRequest): Promise<void> { await this.connect(request); }
+
   resetSession(): void { this.sessionId = null; this.prompted = false; }
 
   async shutdown(): Promise<void> {
     this.resetSession();
+    this.turnReject?.(new Error("ZCode 连接已关闭"));
     const process = this.process;
     this.process = null;
     await process?.stop();
@@ -36,7 +39,7 @@ export class ZcodeAppServer {
     signal.throwIfAborted();
     this.canFallback = true;
     this.callbacks = callbacks;
-    callbacks.onStatus("正在连接 ZCode App Server…");
+    if (!this.process?.running) callbacks.onStatus("正在连接 ZCode App Server…");
     const abort = () => {
       if (this.sessionId) try { this.process?.notify("session/stop", { sessionId: this.sessionId }); } catch { /* already disconnected */ }
       this.turnReject?.(new DOMException("已取消", "AbortError"));
@@ -100,9 +103,9 @@ export class ZcodeAppServer {
       cwd: request.cwd ?? undefined,
       env: { ...(require("process") as { env: Record<string, string | undefined> }).env, ...this.detection.env },
       includeJsonRpc: false,
-      onNotification: (method, params) => this.handleNotification(method, params),
-      onServerRequest: (id, method, params) => this.handleServerRequest(id, method, params),
-      onClose: (reason) => { this.sessionId = null; this.turnReject?.(new Error(`ZCode 连接中断：${reason}`)); },
+      onNotification: (method, params) => { if (this.process === process) this.handleNotification(method, params); },
+      onServerRequest: (id, method, params) => { if (this.process === process) this.handleServerRequest(id, method, params); },
+      onClose: (reason) => { if (this.process !== process) return; this.process = null; this.resetSession(); this.turnReject?.(new Error(`ZCode 连接中断：${reason}`)); },
     });
     this.process = process;
     process.start();

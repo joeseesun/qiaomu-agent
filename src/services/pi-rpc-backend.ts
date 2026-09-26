@@ -32,13 +32,18 @@ export class PiRpcBackend implements ChatBackend {
   private turnReject: ((error: Error) => void) | null = null;
   private resetNeeded = false;
   private prompted = false;
+  private connecting: Promise<void> | null = null;
+  private generation = 0;
 
   constructor(private readonly detection: CliDetection) {}
+
+  async prepare(request: ChatRequest): Promise<void> { await this.ensureConnected(request); }
 
   listModels(): Promise<ModelChoice[]> { return new CliBackend(this.detection).listModels(); }
   resetSession(): void { this.resetNeeded = true; this.prompted = false; }
 
   async shutdown(): Promise<void> {
+    this.generation++;
     const child = this.child;
     this.child = null;
     this.signature = "";
@@ -54,14 +59,14 @@ export class PiRpcBackend implements ChatBackend {
     if (this.callbacks) throw new Error("Pi 正在处理另一条消息");
     signal.throwIfAborted();
     this.callbacks = callbacks;
-    callbacks.onStatus("正在连接 Pi RPC…");
+    if (!this.child) callbacks.onStatus("正在连接 Pi RPC…");
     const abort = () => {
       this.turnReject?.(new DOMException("已取消", "AbortError"));
       void this.shutdown();
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
-      await this.connect(request);
+      await this.ensureConnected(request);
       if (this.resetNeeded) {
         await this.command("new_session", {}, 15_000);
         this.resetNeeded = false;
@@ -89,6 +94,16 @@ export class PiRpcBackend implements ChatBackend {
     }
   }
 
+  private async ensureConnected(request: ChatRequest): Promise<void> {
+    const generation = this.generation;
+    while (this.connecting) await this.connecting;
+    if (generation !== this.generation) throw new Error("Pi RPC 已关闭");
+    const pending = this.connect(request);
+    this.connecting = pending;
+    try { await pending; }
+    finally { if (this.connecting === pending) this.connecting = null; }
+  }
+
   private async connect(request: ChatRequest): Promise<void> {
     const signature = JSON.stringify([request.cwd, request.model, request.reasoningEffort, request.permissionMode, request.systemPrompt]);
     if (this.child && this.child.exitCode === null && this.signature === signature) return;
@@ -111,12 +126,13 @@ export class PiRpcBackend implements ChatBackend {
     });
     this.child = child;
     child.stdout.on("data", (chunk) => {
+      if (this.child !== child) return;
       const parsed = splitJsonLines(this.buffer, this.decoder.decode(chunk, { stream: true }));
       this.buffer = parsed.rest;
       for (const line of parsed.lines) try { this.handle(JSON.parse(line) as Message); } catch { /* diagnostics are on stderr */ }
     });
     child.stderr.on("data", (chunk) => { this.stderrTail = `${this.stderrTail}${new TextDecoder().decode(chunk)}`.slice(-1_000); });
-    child.on("error", (error: Error) => { if (this.child === child) this.fail(error); });
+    child.on("error", (error: Error) => { if (this.child === child) { this.child = null; this.fail(error); } });
     child.on("exit", () => {
       if (this.child !== child) return;
       this.child = null;

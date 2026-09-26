@@ -38,6 +38,8 @@ it("streams ZCode events and reuses one subscribed session", async () => {
   state.calls = []; state.notifications = []; state.failTurn = false;
   const backend = new ZcodeAppServer(detection);
   const onText = vi.fn();
+  await backend.prepare(request);
+  expect(state.calls).toEqual([]);
   await backend.send(request, { onText, onStatus: vi.fn() }, new AbortController().signal);
   await backend.send({ ...request, prompt: "继续" }, { onText, onStatus: vi.fn() }, new AbortController().signal);
   expect(onText).toHaveBeenCalledTimes(2);
