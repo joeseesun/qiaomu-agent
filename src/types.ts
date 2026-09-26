@@ -234,6 +234,7 @@ export interface ChatBackend {
   send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void>;
   resetSession?(): void;
   shutdown?(): Promise<void>;
+  prepare?(request: ChatRequest): Promise<void>;
   listModels?(request: ChatRequest): Promise<ModelChoice[]>;
 }
 

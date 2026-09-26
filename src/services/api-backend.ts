@@ -201,6 +201,7 @@ export class ApiBackend implements ChatBackend {
     const sources = new Map<string, string>();
     let answer = "";
     for await (const part of stream) {
+      if (part.type === "start-step" || part.type === "reasoning-start") callbacks.onStatus(`${this.label} 正在思考…`);
       if (part.type === "text-delta") { answer += part.text; callbacks.onText(part.text); }
       if (part.type === "source" && part.sourceType === "url") {
         const url = safeSourceUrl(part.url);

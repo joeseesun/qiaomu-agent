@@ -65,22 +65,25 @@ export class CliBackend implements ChatBackend {
   }
 
   async send(request: ChatRequest, callbacks: ChatCallbacks, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
     const require = getRuntimeRequire();
     if (!require || !this.detection.path) throw new Error("本地 CLI 只支持桌面版 Obsidian");
     const childProcess = require("child_process") as ChildProcessModule;
     const temporaryMcpFile = this.createTemporaryMcpFile(require, request);
-    const args = this.profile.buildArgs(request, temporaryMcpFile ?? undefined);
+    const args = [...(this.detection.argsPrefix ?? []), ...this.profile.buildArgs(request, temporaryMcpFile ?? undefined)];
     callbacks.onStatus(`正在通过 ${this.profile.label} 处理…`);
 
     try {
       await new Promise<void>((resolve, reject) => {
         const processHandle = childProcess.spawn(this.detection.path!, args, {
           ...(request.cwd ? { cwd: request.cwd } : {}),
-          env: (window as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env,
+          env: { ...(require("process") as { env: Record<string, string | undefined> }).env, ...this.detection.env },
           windowsHide: true,
           shell: false,
         });
         let stdoutBuffer = "";
+        const stdoutDecoder = new TextDecoder();
+        const stderrDecoder = new TextDecoder();
         let stderr = "";
         let emitted = false;
         let terminalReceived = false;
@@ -93,7 +96,7 @@ export class CliBackend implements ChatBackend {
         signal.addEventListener("abort", abort, { once: true });
 
         processHandle.stdout.on("data", (chunk) => {
-          stdoutBuffer += new TextDecoder().decode(chunk);
+          stdoutBuffer += stdoutDecoder.decode(chunk, { stream: true });
           const lines = stdoutBuffer.split(/\r?\n/);
           stdoutBuffer = lines.pop() ?? "";
           for (const line of lines) {
@@ -111,7 +114,7 @@ export class CliBackend implements ChatBackend {
           }
         });
         processHandle.stderr.on("data", (chunk) => {
-          stderr += new TextDecoder().decode(chunk);
+          stderr += stderrDecoder.decode(chunk, { stream: true });
           if (stderr.length > 16_000) stderr = stderr.slice(-16_000);
         });
         processHandle.on("error", (error) => reject(error));

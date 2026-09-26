@@ -34,6 +34,8 @@ it("keeps Pi RPC alive between prompts and streams deltas", async () => {
   });
   const backend = new PiRpcBackend(detection);
   const onText = vi.fn();
+  await backend.prepare(request);
+  expect(mock.commands).toEqual([]);
   await backend.send(request, { onText, onStatus: vi.fn() }, new AbortController().signal);
   await backend.send({ ...request, prompt: "继续" }, { onText, onStatus: vi.fn() }, new AbortController().signal);
   expect(mock.spawn).toHaveBeenCalledTimes(1);

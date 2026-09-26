@@ -71,10 +71,10 @@ export function codexGeneratedAttachment(item: Record<string, unknown>): Generat
   return { id, name, mediaType, size: result ? Math.floor(result.length * 0.75) : 0, base64: result, localPath: savedPath };
 }
 
-function effectivePrompt(request: ChatRequest, includeSystemPrompt: boolean): string {
+function effectivePrompt(request: ChatRequest, includeHistory: boolean, includeSystemPrompt = includeHistory): string {
   const prompt = promptWithContext(request);
   const history = request.history.slice(-20).filter((m) => m.role !== "status").map((m) => `${m.role}: ${m.content}`).join("\n\n");
-  return includeSystemPrompt ? `${request.systemPrompt}\n\n${history ? `<prior_conversation>\n${history}\n</prior_conversation>\n\n` : ""}${prompt}` : prompt;
+  return includeHistory ? `${includeSystemPrompt ? `${request.systemPrompt}\n\n` : ""}${history ? `<prior_conversation>\n${history}\n</prior_conversation>\n\n` : ""}${prompt}` : prompt;
 }
 
 export function acpLaunch(agentId: string, permissionMode: PermissionMode): string[] {
@@ -119,6 +119,10 @@ export class NativeAgentBackend implements ChatBackend {
   private activePermissionMode: PermissionMode = "plan";
   private connectedMode: PermissionMode | null = null;
   private ready = false;
+  private connecting: Promise<void> | null = null;
+  private sessionCreating: Promise<void> | null = null;
+  private sessionGeneration = 0;
+  private legacyModelId: string | null = null;
   private activeTurnId: string | null = null;
   private configOptions: Record<string, unknown>[] = [];
   private acpModes: string[] = [];
@@ -130,6 +134,11 @@ export class NativeAgentBackend implements ChatBackend {
   private emittedMedia = new Set<string>();
 
   isBusy(): boolean { return this.activeCallbacks !== null; }
+
+  /** Only starts the transport: no prompt, empty thread, or model request. */
+  async prepare(request: ChatRequest): Promise<void> {
+    await this.ensureConnected(request);
+  }
 
   async listModels(request: ChatRequest): Promise<ModelChoice[]> {
     if (this.activeCallbacks) throw new Error("请等当前回复结束后切换模型");
@@ -165,12 +174,25 @@ export class NativeAgentBackend implements ChatBackend {
   }
 
   private async ensureAcpSession(request: ChatRequest): Promise<void> {
+    while (this.sessionCreating) await this.sessionCreating;
+    const creating = this.createAcpSession(request);
+    this.sessionCreating = creating;
+    try { await creating; }
+    finally { if (this.sessionCreating === creating) this.sessionCreating = null; }
+  }
+
+  private async createAcpSession(request: ChatRequest): Promise<void> {
     const servers = acpMcpServers(request.mcpConfig);
-    const signature = JSON.stringify(servers);
+    const signature = JSON.stringify([request.cwd, servers]);
     if (this.sessionId && this.mcpSignature !== signature) this.resetSession();
     if (this.sessionId) return;
-    const result = await this.process!.request("session/new", { cwd: request.cwd, mcpServers: servers }, 30_000);
+    const generation = this.sessionGeneration;
+    const process = this.process;
+    if (!process) throw new Error("Agent 连接已关闭");
+    const result = await process.request("session/new", { cwd: request.cwd, mcpServers: servers }, 30_000);
+    if (this.process !== process || generation !== this.sessionGeneration) throw new Error("Agent 会话已重置");
     this.sessionId = stringAt(result, "sessionId");
+    this.legacyModelId = stringAt(result, "models", "currentModelId");
     if (!this.sessionId) throw new Error("ACP Agent 未返回 sessionId");
     this.mcpSignature = signature;
     this.configOptions = arrayAt(result, "configOptions").map(record).filter((o): o is Record<string, unknown> => !!o);
@@ -208,7 +230,8 @@ export class NativeAgentBackend implements ChatBackend {
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
-      callbacks.onStatus(`正在连接 ${this.detection.label}…`);
+      signal.throwIfAborted();
+      if (!this.ready) callbacks.onStatus(`正在连接 ${this.detection.label}…`);
       await this.ensureConnected(request);
       signal.throwIfAborted();
       if (!this.process) throw new Error("原生 Agent 连接未建立");
@@ -231,6 +254,8 @@ export class NativeAgentBackend implements ChatBackend {
   }
 
   resetSession(): void {
+    this.sessionGeneration++;
+    this.legacyModelId = null;
     this.sessionId = null;
     this.acpCurrentMode = null;
     this.lastUsage = null;
@@ -238,8 +263,10 @@ export class NativeAgentBackend implements ChatBackend {
   }
 
   async shutdown(): Promise<void> {
-    this.sessionId = null;
-    this.lastUsage = null;
+    this.resetSession();
+    this.activeTurnId = null;
+    this.turnReject?.(new Error("Agent 连接已关闭"));
+    this.turnResolve = null; this.turnReject = null;
     this.ready = false;
     this.connectedMode = null;
     const process = this.process;
@@ -248,6 +275,18 @@ export class NativeAgentBackend implements ChatBackend {
   }
 
   private async ensureConnected(request: ChatRequest): Promise<void> {
+    // Model discovery and the first send can arrive while initialization is pending.
+    // All callers must use the same process, including a background preparation.
+    const generation = this.sessionGeneration;
+    while (this.connecting) await this.connecting;
+    if (generation !== this.sessionGeneration) throw new Error("Agent 会话已重置");
+    const connection = this.connect(request);
+    this.connecting = connection;
+    try { await connection; }
+    finally { if (this.connecting === connection) this.connecting = null; }
+  }
+
+  private async connect(request: ChatRequest): Promise<void> {
     const path = this.detection.nativePath ?? this.detection.path;
     if (!path) throw new Error(`${this.detection.label} 当前不可用`);
     const transport = nativeTransportFor(this.detection.id, this.detection.nativePath);
@@ -264,10 +303,13 @@ export class NativeAgentBackend implements ChatBackend {
       ...(request.cwd ? { cwd: request.cwd } : {}),
       env: { ...(getRuntimeRequire()?.("process") as { env?: Record<string, string | undefined> } | undefined)?.env, ...this.detection.env },
       includeJsonRpc: transport === "acp",
-      onNotification: (method, params) => this.handleNotification(method, params),
-      onServerRequest: (id, method, params) => this.handleServerRequest(id, method, params),
+      onNotification: (method, params) => { if (this.process === process) this.handleNotification(method, params); },
+      onServerRequest: (id, method, params) => { if (this.process === process) this.handleServerRequest(id, method, params); },
       onLog: (message) => console.debug(`Qiaomu Agent ${this.detection.id}: ${message}`),
       onClose: (reason) => {
+        if (this.process !== process) return;
+        this.process = null;
+        this.resetSession();
         this.ready = false;
         this.turnReject?.(new Error(reason));
         this.turnResolve = null; this.turnReject = null;
@@ -278,8 +320,8 @@ export class NativeAgentBackend implements ChatBackend {
       },
     });
     this.process = process;
-    process.start();
     try {
+      process.start();
       if (transport === "app-server") {
         await process.request("initialize", {
           clientInfo: { name: "qiaomu_agent_obsidian", title: "Qiaomu Agent for Obsidian", version: "0.1.0" },
@@ -302,6 +344,7 @@ export class NativeAgentBackend implements ChatBackend {
           await process.request("authenticate", { methodId, _meta: { headless: true } }, 15_000);
         }
       }
+      if (this.process !== process || !process.running) throw new Error("Agent 连接已关闭");
       this.ready = true;
       this.connectedMode = request.permissionMode;
     } catch (error) {
@@ -314,8 +357,10 @@ export class NativeAgentBackend implements ChatBackend {
   private async sendCodex(request: ChatRequest, signal: AbortSignal): Promise<void> {
     if (!this.process) return;
     if (!this.sessionId) {
+      this.activeCallbacks?.onStatus("正在准备 Codex 会话…");
       const result = await this.process.request("thread/start", {
         cwd: request.cwd,
+        ...(request.model ? { model: request.model } : {}),
         approvalPolicy: codexApprovalPolicy(request.permissionMode),
         sandbox: request.permissionMode === "full" ? "danger-full-access" : request.permissionMode === "edit" ? "workspace-write" : "read-only",
         developerInstructions: request.systemPrompt,
@@ -326,7 +371,7 @@ export class NativeAgentBackend implements ChatBackend {
     }
     const params = {
       threadId: this.sessionId,
-      input: [{ type: "text", text: effectivePrompt(request, !this.prompted), text_elements: [] },
+      input: [{ type: "text", text: effectivePrompt(request, !this.prompted, false), text_elements: [] },
         ...(request.attachments ?? []).filter((a) => a.mediaType.startsWith("image/")).map((a) => ({ type: "image", url: a.url }))],
       ...(request.model ? { model: request.model } : {}),
       ...(request.reasoningEffort ? { effort: request.reasoningEffort } : {}),
@@ -338,6 +383,8 @@ export class NativeAgentBackend implements ChatBackend {
           ? { type: "workspaceWrite", writableRoots: request.cwd ? [request.cwd] : [], networkAccess: false }
           : { type: "readOnly" },
     };
+    signal.throwIfAborted();
+    this.activeCallbacks?.onStatus("Codex 正在思考…");
     const completion = this.waitForTurn();
     try {
       const result = await this.process.request("turn/start", params, 30_000);
@@ -357,14 +404,18 @@ export class NativeAgentBackend implements ChatBackend {
       if (!value) continue;
       const config = this.configOptions.find((o) => o.category === category || o.id === category);
       if (config) {
+        if (config.currentValue === value) continue;
         const updated = await this.process.request("session/set_config_option", { sessionId: this.sessionId, configId: config.id, value }, 15_000);
         this.configOptions = arrayAt(updated, "configOptions").map(record).filter((o): o is Record<string, unknown> => !!o);
       } else if (category === "model" && this.legacyModels.length) {
+        if (this.legacyModelId === value) continue;
         await this.process.request("session/set_model", { sessionId: this.sessionId, modelId: value }, 15_000);
+        this.legacyModelId = value;
       } else throw new Error("此 ACP 连接未提供对应的模型或推理设置");
     }
     const images = (request.attachments ?? []).filter((a) => a.mediaType.startsWith("image/"));
     if (images.length && !this.imageInput) throw new Error("当前 ACP 连接未声明图片能力，请移除图片或切换连接");
+    this.activeCallbacks?.onStatus(`${this.detection.label} 正在思考…`);
     await this.process.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text: effectivePrompt(request, firstPrompt) }, ...images.map((a) => ({ type: "image", mimeType: a.mediaType, data: a.url?.split(",")[1] }))],

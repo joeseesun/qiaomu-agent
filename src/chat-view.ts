@@ -50,9 +50,6 @@ export class ChatView extends ItemView {
   private addRequest: { kind: AddKind; version: number } = { kind: "upload", version: 0 };
   private statusText = "";
   private models: ModelChoice[] = [];
-  private modelLoading = false;
-  private modelError = "";
-  private modelGeneration = 0;
   private capabilitiesKey = "";
   private connectionIdentity = "";
   private persistQueue: Promise<void> = Promise.resolve();
@@ -97,11 +94,11 @@ export class ChatView extends ItemView {
         const effort = settings.modelSelections?.[this.selectionKey()]?.effort || undefined;
         if (capabilities && effort && !capabilities.efforts.includes(effort)) throw new Error("这个模型没有开启思考模式，请把推理强度改为默认，或在模型设置中开启思考模式");
         if (capabilities) checkImageInput(capabilities, last.metadata?.attachments ?? []);
-        const vaultInstructions = backend.id === "api" ? await this.vaultInstructions() : undefined;
+        const systemPrompt = settings.systemPrompt;
         const request = {
           prompt: imageEdit && backend.id === "cli:codex"
             ? `请使用图像编辑或生成工具，以附带图片为参考生成修改后的图片，并在回复中展示结果。不要修改笔记或其他文件。用户的修改要求：${messageText(last)}`
-            : messageText(last), systemPrompt: buildSystemPrompt(settings.systemPrompt, vaultInstructions),
+            : messageText(last), systemPrompt: buildSystemPrompt(systemPrompt),
           selection: selection ?? undefined,
           reading: reading ?? undefined,
           cwd: this.plugin.skillService.getVaultRoot(),
@@ -117,16 +114,19 @@ export class ChatView extends ItemView {
           history: messages.slice(0, -1).map(toStoredMessage),
         };
         validateAttachments(request.attachments ?? [], backend.id);
-        const activeFileContent = file ? await this.app.vault.cachedRead(file) : undefined;
+        const trackChanges = backend.id.startsWith("cli:") || (backend.id === "api" && permissionMode !== "plan");
+        const [vaultInstructions, activeFileContent, snapshots] = await Promise.all([
+          backend.id === "api" ? this.vaultInstructions() : undefined,
+          file ? this.app.vault.cachedRead(file) : undefined,
+          trackChanges ? this.mentionedSnapshots(request.prompt, file?.path ?? "") : undefined,
+        ]);
         signal.throwIfAborted();
         let turn: TurnHooks | undefined;
-        if (backend.id.startsWith("cli:") || (backend.id === "api" && permissionMode !== "plan")) {
-          const snapshots = await this.mentionedSnapshots(request.prompt, file?.path ?? "");
+        if (snapshots) {
           if (file && activeFileContent !== undefined) snapshots.set(file.path, activeFileContent);
-          signal.throwIfAborted();
           turn = this.turnHooks(snapshots);
         }
-        return { backend, request: { ...request, activeFileContent }, turn };
+        return { backend, request: { ...request, systemPrompt: buildSystemPrompt(systemPrompt, vaultInstructions), activeFileContent }, turn };
       }, (attachment) => this.storeGeneratedAttachment(attachment)),
       onData: (part) => {
         if (part.type === "data-status") { this.statusText = part.data; this.render(); }
@@ -139,7 +139,6 @@ export class ChatView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
-    this.modelGeneration++;
     this.highlightSelection(false);
     if (!this.chat) return;
     await this.chat.stop();
@@ -203,43 +202,36 @@ export class ChatView extends ItemView {
     const settings = this.plugin.settings;
     const selected = this.plugin.backendService.effectiveSelection(settings.backendKind === "cli" && settings.preferredCli ? `cli:${settings.preferredCli}` : settings.backendKind);
     const identity = `${selected}:${settings.api.provider}:${settings.api.baseUrl}:${settings.api.protocol}:${settings.api.secretId}`;
-    if (identity !== this.connectionIdentity) { this.models = []; this.modelError = ""; this.capabilitiesKey = ""; this.modelGeneration++; this.modelLoading = false; }
+    if (identity !== this.connectionIdentity) { this.models = []; this.capabilitiesKey = ""; }
     this.connectionIdentity = identity;
     this.selectedBackend = selected;
     this.render();
     const ready = this.plugin.backendService.getBackendOptions().find((option) => option.value === selected)?.ready;
-    if (this.root && ready && !this.running() && !this.modelLoading) {
+    if (this.root && ready && !this.running()) {
+      const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
       const key = this.selectionKey();
-      if (this.capabilitiesKey !== key && this.plugin.settings.modelSelections?.[key]) { this.capabilitiesKey = key; void this.openModels(); }
+      const selection = settings.modelSelections?.[key];
+      // Only the selected persistent transport is prepared. No inference or note reads.
+      void backend.prepare?.({
+        prompt: "", systemPrompt: buildSystemPrompt(settings.systemPrompt), history: [],
+        model: selection?.model, reasoningEffort: selection?.effort || undefined,
+        cwd: this.plugin.skillService.getVaultRoot(),
+        permissionMode: settings.permissionMode === "full" && !fullAccessFor(backend.id) ? "edit" : settings.permissionMode,
+      }).catch((error: unknown) => console.debug("Qiaomu Agent: preparation failed; send will retry", error));
+      if (this.capabilitiesKey !== key) {
+        this.capabilitiesKey = key;
+        this.models = key.startsWith("cli:")
+          ? settings.agentModelCache[key.slice(4)]?.models ?? []
+          : activeProvider(settings)?.models ?? [];
+        this.render();
+      }
     }
   }
+
   private selectionKey(): string {
     const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
     const api = this.plugin.settings.api;
     return backend.id === "api" ? `api:${api.provider}:${api.baseUrl}` : backend.id;
-  }
-  private async openModels(): Promise<void> {
-    if (this.running() || this.modelLoading) return;
-    const generation = ++this.modelGeneration;
-    this.modelLoading = true; this.render();
-    try {
-      const backend = this.plugin.backendService.resolve(this.selectedBackend, this.backendOwner);
-      const settings = this.plugin.settings;
-      const key = this.selectionKey();
-        const request: ChatRequest = { prompt: "", systemPrompt: settings.systemPrompt, cwd: this.plugin.skillService.getVaultRoot(), permissionMode: settings.permissionMode, history: [], mcpConfig: backend.id === "api" ? {} : enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers) };
-      let choices: ModelChoice[] = [];
-      try { choices = await backend.listModels?.(request) ?? []; }
-      catch { if (generation === this.modelGeneration) this.modelError = "无法获取模型，请重试或手动输入 ID"; }
-      if (generation !== this.modelGeneration || !this.root) return;
-      const configured = settings.modelSelections?.[key]?.model || (backend.id === "api" ? settings.api.model : "");
-      if (configured && !choices.some((m) => m.id === configured)) choices.unshift({ id: configured, name: configured, efforts: [] });
-      this.models = choices;
-      if (backend.id.startsWith("cli:") && choices.length) {
-        settings.agentModelCache[backend.id.slice(4)] = { models: choices.map(({ id, name, efforts }) => ({ id, name, efforts })), fetchedAt: Date.now() };
-        void this.plugin.saveSettings();
-      }
-    } catch (e) { new Notice(String(e)); }
-    finally { if (generation === this.modelGeneration) { this.modelLoading = false; this.render(); } }
   }
   private chooseFile(choose: (attachment: ChatAttachment) => void): void {
     new FilePicker(this.app, (file) => {
@@ -441,7 +433,7 @@ export class ChatView extends ItemView {
       const key = `cli:${d.id}`;
       const cached = settings.agentModelCache[d.id]?.models;
       const models = currentKey === key && this.models.length ? this.models : cached ?? [];
-      const state = this.sourceState.get(key) ?? (currentKey === key ? { loading: this.modelLoading, error: this.modelError } : {});
+      const state = this.sourceState.get(key) ?? {};
       return { key, kind: "agent", label: d.label, icon: agentIconKey(d.id), ...visibleAgentModels(settings, d.id, models), allowCustom: !Object.hasOwn(settings.agentEnabledModels, d.id), canListModels: Boolean(nativeTransportFor(d.id, d.nativePath) || d.id === "antigravity" || d.id === "pi"), loaded: Boolean(cached?.length) || (currentKey === key && this.models.length > 0), ...state };
     });
     const providers: ModelSource[] = settings.providers
@@ -565,8 +557,8 @@ export class ChatView extends ItemView {
       conversationId: activeIdentity(this.plugin.settings).id,
       imageTargetNote: file,
       conversationTitle: this.plugin.settings.activeConversation?.title ?? "",
-      backendLabel: this.modelLoading && !model ? "加载模型…" : model?.name || picked?.model || (source ? source.label : sources.length ? label : "添加模型"), skillLabel: this.selectedSkill && !this.plugin.settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill.name : "技能",
-      efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: this.modelLoading,
+      backendLabel: model?.name || picked?.model || (source ? source.label : sources.length ? label : "添加模型"), skillLabel: this.selectedSkill && !this.plugin.settings.disabledSkillPaths.includes(this.selectedSkill.path) ? this.selectedSkill.name : "技能",
+      efforts: model?.efforts ?? (selection?.effort ? [selection.effort] : []), effort: selection?.effort ?? "", modelLoading: false,
       sources, selection: picked, recentModels: this.plugin.settings.recentModels,
       onPickModel: (sourceKey: string, modelId: string) => this.pickModel(sourceKey, modelId),
       onLoadModels: (sourceKey: string) => void this.loadSourceModels(sourceKey),
