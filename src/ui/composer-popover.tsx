@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 /** Non-modal, leaf-local controls: no portal, focus trap, or hover-only actions. */
-export function ComposerPopover({ label, trigger, disabled, className = "", children }: {
-  label: string; trigger: ReactNode; disabled?: boolean; className?: string;
+export function ComposerPopover({ label, trigger, iconOnly = false, disabled, className = "", children }: {
+  label: string; trigger: ReactNode; iconOnly?: boolean; disabled?: boolean; className?: string;
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -27,7 +27,7 @@ export function ComposerPopover({ label, trigger, disabled, className = "", chil
   }} onKeyDown={(event) => {
     if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
   }}>
-    <button ref={button} type="button" className="qa-control-trigger" aria-label={label} data-tooltip-position="top" aria-expanded={open}
+    <button ref={button} type="button" className="qa-control-trigger" aria-label={iconOnly ? label : undefined} data-tooltip-position={iconOnly ? "top" : undefined} aria-expanded={open}
       aria-haspopup="dialog" aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{trigger}</button>
     {open && <div ref={panel} id={id} role="dialog" aria-labelledby={`${id}-label`} className="qa-control-popover"><span id={`${id}-label`} className="qiaomu-agent__sr-only">{label}</span>{children(close)}</div>}
   </div>;

@@ -1,7 +1,7 @@
 {
   "id": "qiaomu-agent",
   "name": "Qiaomu Agent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.11.4",
   "description": "Chat with your vault using local AI agents or model APIs.",
   "author": "向阳乔木",

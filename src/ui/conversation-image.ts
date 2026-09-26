@@ -127,9 +127,9 @@ export class ConversationImageLightbox extends Modal {
     const footer = this.contentEl.createDiv({ cls: "qa-image-footer" });
     footer.createSpan({ text: `${this.index + 1} / ${this.images.length}` });
     const actions = footer.createDiv({ cls: "qa-image-actions" });
-    actions.createEl("button", { text: "下载", attr: { "aria-label": "下载图片" } }).onclick = () => void downloadConversationImage(this.app, image).catch((error) => new Notice(`下载失败：${String(error)}`));
-    actions.createEl("button", { text: "插入到当前笔记", attr: { "aria-label": "插入到当前笔记" } }).onclick = () => new ImageInsertDialog(this.app, image, this.note).open();
-    actions.createEl("button", { text: "作为参考图", attr: { "aria-label": "作为参考图加入对话" } }).onclick = () => { this.onReference(image); this.close(); };
+    actions.createEl("button", { text: "下载" }).onclick = () => void downloadConversationImage(this.app, image).catch((error) => new Notice(`下载失败：${String(error)}`));
+    actions.createEl("button", { text: "插入到当前笔记" }).onclick = () => new ImageInsertDialog(this.app, image, this.note).open();
+    actions.createEl("button", { text: "作为参考图" }).onclick = () => { this.onReference(image); this.close(); };
   }
   override onClose(): void { this.contentEl.empty(); }
 }

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { ChevronRight, FileDiff, ShieldQuestion, Undo2 } from "lucide-react";
 import type { ApprovalState, FileChange, TurnChanges } from "../types";
 import { diffLines, diffStats, hunks } from "../services/line-diff";
@@ -24,7 +24,7 @@ function FileRow({ change, onOpen }: { change: FileChange; onOpen: (path: string
     <summary>
       <span className={`qa-change-kind is-${kind}`}>{kind}</span>
       {change.reverted && <span className="qa-changes-reverted">已恢复</span>}
-      <span className="qa-change-path" title={change.path}>{change.path}</span>
+      <span className="qa-change-path">{change.path}</span>
       {change.tracked && !change.binary && <span className="qa-change-stats"><span className="is-add">+{stats.added}</span><span className="is-del">−{stats.removed}</span></span>}
       <ChevronRight className="qa-chevron" size={13} aria-hidden="true" />
     </summary>
@@ -32,7 +32,7 @@ function FileRow({ change, onOpen }: { change: FileChange; onOpen: (path: string
       {canOpen && <button type="button" className="qa-change-open" onClick={() => onOpen(change.path)}>打开文件</button>}
       {!change.tracked || change.binary
         ? <p className="qa-change-note">{change.outside ? "库外文件，只列出路径。" : change.binary ? "非文本或过大，不显示差异。" : "没有记录到修改前的内容，无法显示差异或自动恢复。"}</p>
-        : <pre className="qa-diff" aria-label={`${change.path} 的差异`}>{shown.slice(0, MAX_DIFF_LINES).map((line, index) => line.type === "gap"
+        : <pre className="qa-diff">{shown.slice(0, MAX_DIFF_LINES).map((line, index) => line.type === "gap"
           ? <span key={index} className="qa-diff-gap">… {line.count} 行未改动</span>
           : <span key={index} className={`qa-diff-${line.type}`}>{line.type === "add" ? "+" : line.type === "del" ? "−" : " "} {line.text}</span>)}
           {shown.length > MAX_DIFF_LINES && <span className="qa-diff-gap">… 还有 {shown.length - MAX_DIFF_LINES} 行，打开文件查看</span>}</pre>}
@@ -68,11 +68,12 @@ const DECIDED: Record<string, string> = { allow_once: "已允许一次", allow_a
 
 /** Inline approval: the agent waits until one option is chosen. */
 export function ApprovalCard({ approval, onChoose }: { approval: ApprovalState; onChoose: (choice: string | null) => void }) {
+  const titleId = useId();
   const pending = approval.status === "pending";
   const chosen = approval.options.find((option) => option.id === approval.chosen);
   const ordered = [...approval.options].sort((a, b) => ["allow_once", "allow_always", "reject_once", "reject_always"].indexOf(a.kind) - ["allow_once", "allow_always", "reject_once", "reject_always"].indexOf(b.kind));
-  return <div className={`qa-approval${pending ? " is-pending" : ""}`} role="group" aria-label={`审批：${approval.title}`}>
-    <div className="qa-approval-head"><ShieldQuestion size={15} aria-hidden="true" /><span>{approval.title}</span></div>
+  return <div className={`qa-approval${pending ? " is-pending" : ""}`} role="group" aria-labelledby={titleId}>
+    <div className="qa-approval-head"><ShieldQuestion size={15} aria-hidden="true" /><span id={titleId}>{approval.title}</span></div>
     {approval.detail && <pre className="qa-approval-detail">{approval.detail}</pre>}
     {pending ? <div className="qa-approval-actions">
       {ordered.map((option) => <button key={option.id} type="button" className={option.kind === "allow_once" ? "mod-cta" : option.kind.startsWith("reject") ? "is-reject" : undefined}

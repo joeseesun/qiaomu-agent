@@ -61,7 +61,7 @@ it("save current draft opens Prompt editor and leaves the draft untouched", () =
   const { input, props } = setup();
   fireEvent.change(input, { target: { value: "请总结这份笔记" } });
   fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
-  fireEvent.click(screen.getByRole("button", { name: "将当前草稿保存为 Prompt" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存为 Prompt" }));
   expect(props.onManagePrompts).toHaveBeenCalledWith("请总结这份笔记");
   expect((input as HTMLTextAreaElement).value).toBe("请总结这份笔记");
 });
@@ -84,7 +84,7 @@ it("unsupported file upload is explicit and does not erase text", async () => {
 });
 it("model/effort actions and icon-only reply actions invoke the right callbacks", async () => {
   const { input, container, props } = setup();
-  fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
+  fireEvent.click(document.querySelector(".qa-model-control .qa-control-trigger")!);
   expect(container.querySelector(".lucide-brain")).toBeNull();
   expect(container.querySelector(".qa-effort-label")).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "低" })); expect(props.onEffort).toHaveBeenCalledWith("low");
@@ -122,13 +122,13 @@ it("composer popovers close with Escape, outside click and focus departure witho
   fireEvent.change(input, { target: { value: "保留草稿" } });
   const trigger = screen.getByRole("button", { name: "添加附件与工具" });
   fireEvent.click(trigger);
-  expect(screen.getByRole("button", { name: "上传文件或图片" })).toBe(document.activeElement);
+  expect(screen.getByRole("button", { name: /文件或图片/ })).toBe(document.activeElement);
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   expect(screen.queryByRole("dialog")).toBeNull(); expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger); fireEvent.pointerDown(input); expect(screen.queryByRole("dialog")).toBeNull();
-  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "选择库内文件" }));
+  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: /^库内文件(?!夹)/ }));
   expect(props.onPickFile).toHaveBeenCalledOnce(); expect(screen.queryByRole("dialog")).toBeNull();
-  fireEvent.click(trigger); fireEvent.blur(screen.getByRole("button", { name: "上传文件或图片" }), { relatedTarget: input });
+  fireEvent.click(trigger); fireEvent.blur(screen.getByRole("button", { name: /文件或图片/ }), { relatedTarget: input });
   expect(screen.queryByRole("dialog")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
 });
 
@@ -136,9 +136,9 @@ it("add menu opens the prompt list and folder picker, keeping the draft on Escap
   const { input, props } = setup();
   fireEvent.change(input, { target: { value: "保留草稿" } });
   const trigger = screen.getByRole("button", { name: "添加附件与工具" });
-  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "选择库内文件夹" }));
+  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: /库内文件夹/ }));
   expect(props.onPickFolder).toHaveBeenCalledOnce();
-  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: "使用 Prompt" }));
+  fireEvent.click(trigger); fireEvent.click(screen.getByRole("button", { name: /^Prompt/ }));
   expect((input as HTMLTextAreaElement).value).toBe("/");
   expect(screen.getByRole("listbox", { name: "Prompt 菜单" })).toBeTruthy();
   fireEvent.keyDown(input, { key: "Escape" });
@@ -151,23 +151,23 @@ it("runs add commands once per request and shows bound hotkeys", () => {
   rerender(<ChatPanel {...props} addRequest={{ kind: "folder", version: 1 }} addHotkeys={{ folder: "⇧⌘F" }} />);
   expect(props.onPickFolder).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
-  expect(screen.getByRole("button", { name: "选择库内文件夹" }).textContent).toContain("⇧⌘F");
+  expect(screen.getByRole("button", { name: /库内文件夹/ }).textContent).toContain("⇧⌘F");
 });
 
 it("shows web page and web search only where they work", () => {
   const { props, rerender } = setup();
   const trigger = screen.getByRole("button", { name: "添加附件与工具" });
   fireEvent.click(trigger);
-  expect(screen.queryByRole("button", { name: "添加网页" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "联网搜索" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /网页/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /联网搜索/ })).toBeNull();
   const onPickWebPage = vi.fn(); const onToggleWebSearch = vi.fn();
   rerender(<ChatPanel {...props} onPickWebPage={onPickWebPage} webSearch={true} onToggleWebSearch={onToggleWebSearch} />);
-  const search = screen.getByRole("button", { name: "联网搜索" });
+  const search = screen.getByRole("button", { name: /联网搜索/ });
   expect(search.getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(search);
   expect(onToggleWebSearch).toHaveBeenCalledOnce();
   expect(screen.getByRole("dialog")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "添加网页" }));
+  fireEvent.click(screen.getByRole("button", { name: /网页/ }));
   expect(onPickWebPage).toHaveBeenCalledOnce();
 });
 
@@ -203,11 +203,11 @@ it("does not imply that a plain model API has local file tools", () => {
 it("does not invent reasoning capabilities and keeps controls available while loading", () => {
   const { props, rerender } = setup();
   rerender(<ChatPanel {...props} efforts={[]} />);
-  fireEvent.click(screen.getByRole("button", { name: "模型与推理" }));
+  fireEvent.click(document.querySelector(".qa-model-control .qa-control-trigger")!);
   expect(screen.queryByRole("radiogroup", { name: "推理强度" })).toBeNull();
   rerender(<ChatPanel {...props} modelLoading />);
   expect(screen.queryByRole("dialog")).not.toBeNull();
-  expect((screen.getByRole("button", { name: "模型与推理" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((document.querySelector(".qa-model-control .qa-control-trigger")! as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("shows an approval card that resolves the agent's request, and a reviewable change summary", async () => {
@@ -225,7 +225,7 @@ it("shows an approval card that resolves the agent's request, and a reviewable c
     ] },
   ];
   rerender(<ChatPanel {...props} />);
-  const card = await screen.findByRole("group", { name: "审批：Codex 请求执行命令" });
+  const card = await screen.findByRole("group", { name: "Codex 请求执行命令" });
   expect(card.textContent).toContain("npm test");
   const buttons = Array.from(card.querySelectorAll("button")).map((b) => b.textContent);
   expect(buttons).toEqual(["允许一次", "拒绝"]);
@@ -233,7 +233,7 @@ it("shows an approval card that resolves the agent's request, and a reviewable c
   expect(props.onApprove).toHaveBeenCalledWith("p1", "allow_once");
   expect(screen.getByText("修改了 2 个文件")).toBeTruthy();
   expect(screen.getByText("没有记录到修改前的内容，无法显示差异或自动恢复。")).toBeTruthy();
-  expect(screen.getByLabelText("notes/a.md 的差异").textContent).toContain("− two");
+  expect(document.querySelector(".qa-diff")!.textContent).toContain("− two");
   fireEvent.click(screen.getByRole("button", { name: /撤销这些修改/ }));
   expect(props.onRevertChanges).toHaveBeenCalledWith("a");
   fireEvent.click(screen.getAllByRole("button", { name: "打开文件" })[0]!);
@@ -256,7 +256,7 @@ it("shows reading context from another plugin as a removable chip and focuses wi
   const reading = { label: "选中 12 字 · 深度工作", detail: "乔木 RSS · 深度工作\n\n一段话", kind: "article" as const, selected: true };
   const onDismissReading = vi.fn();
   rerender(<ChatPanel {...props} reading={reading} onDismissReading={onDismissReading} focusVersion={1} />);
-  expect(screen.getByText("选中 12 字 · 深度工作").closest("[title]")?.getAttribute("title")).toContain("一段话");
+  expect(screen.getByText("选中 12 字 · 深度工作").closest(".qa-reading-chip")?.hasAttribute("title")).toBe(false);
   await waitFor(() => expect(document.activeElement).toBe(input));
   expect((input as HTMLTextAreaElement).value).toBe("写到一半的问题");
   fireEvent.click(screen.getByRole("button", { name: "不附加正在阅读的内容" }));

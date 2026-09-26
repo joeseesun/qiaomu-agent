@@ -61,10 +61,13 @@ export class InlineEditModal extends Modal {
     this.contentEl.empty();
     this.titleEl.setText("改写选中内容");
     this.contentEl.createDiv({ cls: "qa-inline-edit-context", text: this.contextLabel() });
+    const label = this.contentEl.createEl("label", { cls: "qiaomu-agent__sr-only", text: "改写要求" });
     const input = this.contentEl.createEl("textarea", {
       cls: "qa-inline-edit-input",
-      attr: { placeholder: "例如：写得更正式，保留原意", "aria-label": "改写要求", rows: "3" },
+      attr: { placeholder: "例如：写得更正式，保留原意", rows: "3" },
     });
+    input.id = `qa-inline-edit-${crypto.randomUUID()}`;
+    label.htmlFor = input.id;
     input.value = this.instruction;
     input.addEventListener("input", () => { this.instruction = input.value; this.error = ""; });
     input.addEventListener("keydown", (event) => {
@@ -140,11 +143,15 @@ export class InlineEditModal extends Modal {
     this.contentEl.empty();
     this.titleEl.setText("确认改写");
     this.contentEl.createDiv({ cls: "qa-inline-edit-context", text: this.contextLabel() });
-    const preview = this.contentEl.createDiv({ cls: "qa-inline-edit-preview", attr: { "aria-label": "改写差异" } });
+    const preview = this.contentEl.createDiv({ cls: "qa-inline-edit-preview" });
     for (const change of diffWords(this.target.original, this.replacement)) {
       const span = preview.createSpan({ text: change.text, cls: `qa-inline-edit-${change.type}` });
-      if (change.type === "del") span.setAttribute("aria-label", `删除：${change.text}`);
-      if (change.type === "add") span.setAttribute("aria-label", `新增：${change.text}`);
+      if (change.type === "del" || change.type === "add") {
+        const prefix = document.createElement("span");
+        prefix.className = "qiaomu-agent__sr-only";
+        prefix.textContent = change.type === "del" ? "删除：" : "新增：";
+        span.prepend(prefix);
+      }
     }
     if (!inlineTargetIsCurrent(this.target, this.currentPath())) {
       this.contentEl.createDiv({ cls: "qa-inline-edit-error", text: "原文已经变化，请重新选中后再改写", attr: { role: "alert" } });

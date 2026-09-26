@@ -7,7 +7,7 @@ import { availableFonts, chatFontStack, cleanFamily, codeFontStack, type FontCho
 import { listMcpServers } from "./services/mcp-config";
 import { DEFAULT_SYSTEM_PROMPT } from "./defaults";
 import { FullAccessDialog } from "./ui/host-dialogs";
-import { actionButton, iconAction, navRow, sectionHead, switchRow, wideField } from "./ui/settings-kit";
+import { actionButton, iconAction, labelField, navRow, sectionHead, switchRow, wideField } from "./ui/settings-kit";
 import type { PermissionMode } from "./types";
 
 /** First real family in a CSS font-family stack ("??" is Obsidian's empty-override placeholder). */
@@ -328,7 +328,8 @@ export class QiaomuSettingTab extends PluginSettingTab {
     const body = advanced.createDiv({ cls: "qa-ms-list qa-ms-wide-list" });
 
     const prompt = wideField(body, "系统 Prompt", "接在乔木内置的 Obsidian 约定之后，发给每个模型。");
-    const textarea = prompt.createEl("textarea", { cls: "qa-ms-textarea", attr: { rows: "10", "aria-label": "系统 Prompt", spellcheck: "false" } });
+    const textarea = prompt.createEl("textarea", { cls: "qa-ms-textarea", attr: { rows: "10", spellcheck: "false" } });
+    labelField(prompt, textarea);
     textarea.value = settings.systemPrompt;
     const reset = actionButton(prompt, "rotate-ccw", "恢复默认", "is-quiet");
     reset.toggle(settings.systemPrompt !== DEFAULT_SYSTEM_PROMPT);
@@ -347,7 +348,10 @@ export class QiaomuSettingTab extends PluginSettingTab {
       rows.empty();
       items.forEach((value, index) => {
         const row = rows.createDiv({ cls: "qa-quick-prompt" });
-        const input = row.createEl("input", { type: "text", cls: "qa-ms-input", attr: { "aria-label": `快捷提问 ${index + 1}`, placeholder: "例如 总结当前笔记" } });
+        const name = row.createEl("label", { cls: "qiaomu-agent__sr-only", text: `快捷提问 ${index + 1}` });
+        const input = row.createEl("input", { type: "text", cls: "qa-ms-input", attr: { placeholder: "例如 总结当前笔记" } });
+        input.id = `qa-quick-prompt-${crypto.randomUUID()}`;
+        name.htmlFor = input.id;
         input.value = value;
         input.addEventListener("input", () => { items[index] = input.value; void persist(); });
         input.addEventListener("keydown", (event) => {

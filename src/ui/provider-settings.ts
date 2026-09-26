@@ -159,7 +159,7 @@ export class ProviderSettings {
 
   private row(list: HTMLElement, icon: string | undefined, fallback: string, name: string, sub: string, attention: boolean, open: () => void, shown: boolean, onShown: (shown: boolean) => void): void {
     const entry = list.createDiv({ cls: `qa-ms-row${shown ? "" : " is-off"}` });
-    const main = entry.createEl("button", { cls: "qa-ms-row-main", attr: { type: "button", "aria-label": `${name}：${sub}，打开设置` } });
+    const main = entry.createEl("button", { cls: "qa-ms-row-main", attr: { type: "button" } });
     brand(main, icon, fallback);
     const text = main.createDiv({ cls: "qa-ms-row-text" });
     text.createDiv({ cls: "qa-ms-row-name", text: name });
@@ -449,7 +449,6 @@ class ProviderModal extends Modal {
     });
     const defaultModel = provider.model || provider.enabledModels?.[0];
     const test = actionButton(actions, "flask-conical", this.busy === "test" ? "测试中…" : "测试", this.busy === "test" ? "is-busy" : "");
-    test.setAttribute("aria-label", defaultModel ? `测试默认模型 ${defaultModel}` : "测试默认模型");
     test.disabled = Boolean(this.busy) || (!key && !permitsEmptyKey(provider)) || !defaultModel;
     test.addEventListener("click", () => void this.testModel(provider, key));
 
@@ -515,7 +514,7 @@ class ProviderModal extends Modal {
     if (meta) text.createDiv({ cls: "qa-ms-row-sub", text: meta });
     const tools = row.createDiv({ cls: "qa-ms-model-tools" });
     if (on && provider.model !== id) {
-      const makeDefault = tools.createEl("button", { cls: "qa-ms-text-button", text: "设为默认", attr: { type: "button", "aria-label": `把 ${label} 设为默认模型` } });
+      const makeDefault = tools.createEl("button", { cls: "qa-ms-text-button", text: "设为默认", attr: { type: "button" } });
       makeDefault.addEventListener("click", async () => { await this.save({ ...provider, model: id }); this.draw(); });
     }
     if (on) iconAction(tools, "sliders-horizontal", `${label} 的参数`).addEventListener("click", () => { this.detailModel = id; this.draw(); });
@@ -552,7 +551,9 @@ class ProviderModal extends Modal {
     this.tristate(list, "图片输入", `自动：${detected(auto.vision)}`, options.vision, ["支持", "不支持"], (value) => void save({ vision: value }));
     const number = (title: string, hint: string, value: number | undefined, attr: Record<string, string>, onValue: (value: number | undefined) => void) => {
       const row = this.optionRow(list, title, hint);
-      const input = row.createEl("input", { type: "number", cls: "qa-ms-input qa-ms-number", attr: { ...attr, placeholder: "自动", "aria-label": title } });
+      const input = row.createEl("input", { type: "number", cls: "qa-ms-input qa-ms-number", attr: { ...attr, placeholder: "自动" } });
+      const name = row.querySelector<HTMLElement>(".qa-ms-row-name");
+      if (name) { name.id = `qa-option-${crypto.randomUUID()}`; input.setAttribute("aria-labelledby", name.id); }
       input.value = value === undefined ? "" : String(value);
       input.addEventListener("change", () => {
         if (input.value !== "" && (!input.validity.valid || !Number.isFinite(input.valueAsNumber))) { new Notice(`${title}超出允许范围`); input.value = value === undefined ? "" : String(value); return; }

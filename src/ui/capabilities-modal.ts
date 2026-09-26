@@ -5,7 +5,7 @@ import { listMcpServers, readMcpConfig, removeMcpServer, saveMcpServer, type Mcp
 import { addCodexMcp, listCodexMcp } from "../services/codex-mcp";
 import { parseSkillFrontmatter } from "../utils";
 import type { AgentSkill } from "../types";
-import { actionButton, hostSwitch, iconAction, sectionHead, wideField } from "./settings-kit";
+import { actionButton, hostSwitch, iconAction, labelField, sectionHead, wideField } from "./settings-kit";
 
 type Tab = "skills" | "mcp";
 type View = "list" | "add";
@@ -59,7 +59,7 @@ export class CapabilitiesModal extends Modal {
     el.empty();
     const root = el.createDiv({ cls: "qa-models qa-cap" });
     if (this.showTabs && !adding) {
-      const tabs = root.createDiv({ cls: "qa-capability-tabs", attr: { role: "tablist", "aria-label": "能力类型" } });
+      const tabs = root.createDiv({ cls: "qa-capability-tabs", attr: { role: "tablist" } });
       for (const [id, label] of [["skills", "技能"], ["mcp", "工具连接"]] as const) {
         const selected = this.tab === id;
         const button = tabs.createEl("button", { text: label, attr: { type: "button", role: "tab", "aria-selected": String(selected), tabindex: selected ? "0" : "-1" } });
@@ -81,7 +81,10 @@ export class CapabilitiesModal extends Modal {
   private renderSkills(el: HTMLElement): void {
     const section = el.createDiv({ cls: "qa-ms-section" });
     const toolbar = section.createDiv({ cls: "qa-cap-toolbar" });
-    const search = toolbar.createEl("input", { type: "search", cls: "qa-ms-input", attr: { placeholder: "搜索技能", "aria-label": "搜索技能" } });
+    const searchLabel = toolbar.createEl("label", { cls: "qiaomu-agent__sr-only", text: "搜索技能" });
+    const search = toolbar.createEl("input", { type: "search", cls: "qa-ms-input", attr: { placeholder: "搜索技能" } });
+    search.id = `qa-skill-search-${crypto.randomUUID()}`;
+    searchLabel.htmlFor = search.id;
     search.value = this.query;
     const refresh = iconAction(toolbar, "refresh-cw", "重新扫描技能目录");
     if (Platform.isDesktopApp) actionButton(toolbar, "plus", "添加").addEventListener("click", () => this.go("add"));
@@ -125,7 +128,6 @@ export class CapabilitiesModal extends Modal {
     if (skill.description) copy.createDiv({ cls: "qa-cap-row-desc", text: skill.description });
     if (this.onSelectSkill) {
       const choose = actionButton(row, "corner-down-left", "使用");
-      choose.setAttribute("aria-label", `使用技能 ${skill.name}`);
       choose.addEventListener("click", async () => {
         if (!shown) { this.settings.disabledSkillPaths = this.settings.disabledSkillPaths.filter((path) => path !== skill.path); await this.plugin.saveSettings(); }
         this.onSelectSkill?.(skill); this.close();
@@ -147,7 +149,10 @@ export class CapabilitiesModal extends Modal {
     sectionHead(section, "导入技能文件夹", "选择含 SKILL.md 的文件夹，它会被复制到个人技能目录。");
     const form = section.createDiv({ cls: "qa-ms-form" });
     const row = form.createDiv({ cls: "qa-cap-toolbar" });
-    const path = row.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "技能文件夹的绝对路径", "aria-label": "技能文件夹的绝对路径", spellcheck: "false" } });
+    const pathLabel = row.createEl("label", { cls: "qiaomu-agent__sr-only", text: "技能文件夹的绝对路径" });
+    const path = row.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "技能文件夹的绝对路径", spellcheck: "false" } });
+    path.id = `qa-skill-path-${crypto.randomUUID()}`;
+    pathLabel.htmlFor = path.id;
     const picker = form.createEl("input", { type: "file", attr: { webkitdirectory: "", hidden: "", "aria-hidden": "true", tabindex: "-1" } });
     actionButton(row, "folder-open", "选择…").addEventListener("click", () => picker.click());
     const error = form.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
@@ -171,7 +176,10 @@ export class CapabilitiesModal extends Modal {
 
     const scan = el.createDiv({ cls: "qa-ms-section" });
     sectionHead(scan, "扫描其他目录", "每行一个绝对路径。只用于发现技能，不会移动文件。");
-    const directories = scan.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "4", "aria-label": "额外技能目录", spellcheck: "false", placeholder: "/Users/me/skills" } });
+    const directoryLabel = scan.createEl("label", { cls: "qiaomu-agent__sr-only", text: "额外技能目录" });
+    const directories = scan.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "4", spellcheck: "false", placeholder: "/Users/me/skills" } });
+    directories.id = `qa-skill-dirs-${crypto.randomUUID()}`;
+    directoryLabel.htmlFor = directories.id;
     directories.value = this.settings.skillDirectories.join("\n");
     directories.addEventListener("change", async () => {
       this.settings.skillDirectories = directories.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -234,7 +242,10 @@ export class CapabilitiesModal extends Modal {
     setIcon(summary.createSpan({ cls: "qa-disclosure-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
     if (readError) advanced.open = true;
     const form = advanced.createDiv({ cls: "qa-ms-form" });
-    const input = form.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "10", "aria-label": "MCP JSON 配置", spellcheck: "false" } });
+    const configLabel = form.createEl("label", { cls: "qiaomu-agent__sr-only", text: "MCP JSON 配置" });
+    const input = form.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "10", spellcheck: "false" } });
+    input.id = `qa-mcp-json-${crypto.randomUUID()}`;
+    configLabel.htmlFor = input.id;
     input.value = this.settings.mcpConfig;
     const error = form.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
     const save = actionButton(form.createDiv({ cls: "qa-ms-form-actions" }), "check", "验证并保存", "is-primary");
@@ -255,7 +266,6 @@ export class CapabilitiesModal extends Modal {
       const confirm = row.createDiv({ cls: "qa-cap-confirm" });
       actionButton(confirm, "x", "取消").addEventListener("click", () => { this.confirmRemove = ""; this.render(); });
       const remove = actionButton(confirm, "trash-2", "移除", "is-danger-strong");
-      remove.setAttribute("aria-label", `确认移除 ${server.name}`);
       remove.addEventListener("click", async () => {
         this.settings.mcpConfig = removeMcpServer(this.settings.mcpConfig, server.name);
         this.settings.disabledMcpServers = this.settings.disabledMcpServers.filter((name) => name !== server.name);
@@ -317,7 +327,8 @@ export class CapabilitiesModal extends Modal {
     let scope: "codex" | "qiaomu" = codexPath ? "codex" : "qiaomu";
     let kind: "http" | "stdio" = "http";
     const segments = <T extends string>(parent: HTMLElement, label: string, options: Array<[T, string]>, value: T, onPick: (value: T) => void) => {
-      const group = parent.createDiv({ cls: "qa-segments", attr: { role: "radiogroup", "aria-label": label } });
+      const group = parent.createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
+      labelField(parent, group);
       const buttons = options.map(([id, text]) => {
         const button = group.createEl("button", { text, attr: { type: "button", role: "radio", "aria-checked": String(id === value) } });
         button.addEventListener("click", () => { for (const other of buttons) other.setAttribute("aria-checked", String(other === button)); onPick(id); });
@@ -325,18 +336,21 @@ export class CapabilitiesModal extends Modal {
       });
     };
     const kindField = wideField(form, "连接方式");
-    const name = wideField(form, "名称", "英文字母开头，可含数字、- 和 _").createEl("input", { type: "text", cls: "qa-ms-input", attr: { placeholder: "例如 notes-search", "aria-label": "名称", spellcheck: "false" } });
+    const nameField = wideField(form, "名称", "英文字母开头，可含数字、- 和 _");
+    const name = nameField.createEl("input", { type: "text", cls: "qa-ms-input", attr: { placeholder: "例如 notes-search", spellcheck: "false" } });
+    labelField(nameField, name);
     const targetField = wideField(form, "地址");
-    const target = targetField.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "https://example.com/mcp", "aria-label": "地址", spellcheck: "false" } });
+    const target = targetField.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "https://example.com/mcp", spellcheck: "false" } });
+    labelField(targetField, target);
     const argsField = wideField(form, "参数", "每行一个");
-    const args = argsField.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "3", "aria-label": "参数", spellcheck: "false" } });
+    const args = argsField.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "3", spellcheck: "false" } });
+    labelField(argsField, args);
     argsField.hide();
     segments(kindField, "连接方式", [["http", "远程地址"], ["stdio", "本机程序"]], kind, (value) => {
       kind = value;
       const remote = value === "http";
       targetField.querySelector(".qa-ms-wide-label")?.setText(remote ? "地址" : "命令");
       target.placeholder = remote ? "https://example.com/mcp" : "npx";
-      target.setAttribute("aria-label", remote ? "地址" : "命令");
       argsField.toggle(!remote);
     });
     if (codexPath) segments(wideField(form, "保存到", "Codex 配置会在其他 Codex 客户端中共用"), "保存到", [["codex", "Codex（全局）"], ["qiaomu", "乔木（其他本机 Agent）"]], scope, (value) => { scope = value; });
