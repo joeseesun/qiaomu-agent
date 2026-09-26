@@ -280,6 +280,13 @@ export class ChatView extends ItemView {
   private openConnection(): void {
     new ModelManagerModal(this.app, this.plugin).open();
   }
+  /** Obsidian exposes no public call for this; the settings modal's own API is the common route. */
+  private openSettings(): void {
+    const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): unknown } }).setting;
+    if (!setting) return;
+    setting.open();
+    setting.openTabById(this.plugin.manifest.id);
+  }
   /** The editor selection in the most recent note, unless the user dismissed it from the composer. */
   private activeSelection(): EditorSelectionContext | null {
     const view = this.app.workspace.getMostRecentLeaf()?.view;
@@ -553,7 +560,12 @@ export class ChatView extends ItemView {
       onManageModels: () => new ModelManagerModal(this.app, this.plugin).open(),
       onEffort: (effort: string) => { if (this.running() || !selection) return; selection.effort = effort; this.plugin.backendService.resetSessions(this.backendOwner); void this.plugin.saveSettings(); this.render(); },
       customPrompts: this.plugin.settings.customPrompts ?? [],
-      onManagePrompts: () => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => { this.plugin.settings.customPrompts = prompts; await this.plugin.saveSettings(); }).open(),
+      onManagePrompts: (draft?: string) => new PromptManager(this.app, [...(this.plugin.settings.customPrompts ?? [])], async (prompts) => {
+        const previous = this.plugin.settings.customPrompts;
+        this.plugin.settings.customPrompts = prompts;
+        try { await this.plugin.saveSettings(); this.render(); }
+        catch (error) { this.plugin.settings.customPrompts = previous; throw error; }
+      }, draft).open(),
       onPickFile: (choose: (attachment: ChatAttachment) => void) => this.chooseFile(choose),
       onPickFolder: (choose: (attachment: ChatAttachment) => void) => this.chooseFolder(choose),
       onPickWebPage: getRuntimeRequire() ? (choose: (attachment: ChatAttachment) => void) => this.chooseWebPage(choose) : undefined,
@@ -571,7 +583,7 @@ export class ChatView extends ItemView {
       statusText: this.statusText, prompts: this.plugin.settings.quickPrompts,
       prefill: this.prefill, prefillVersion: this.prefillVersion, focusVersion: this.focusVersion, addRequest: this.addRequest,
       addHotkeys: Object.fromEntries(Object.entries(ADD_COMMANDS).map(([kind, command]) => [kind, commandHotkey(this.app, this.plugin.manifest.id, command.id, Platform.isMacOS)])) as Record<AddKind, string>,
-      onConnection: () => this.openConnection(), onNew: () => this.newConversation(),
+      onConnection: () => this.openConnection(), onNew: () => this.newConversation(), onOpenSettings: () => this.openSettings(),
       onHistory: (event: MouseEvent) => this.openHistory(event),
       branch: this.plugin.settings.activeConversation?.fork ?? null,
       onOpenParent: (id: string) => this.openConversation(id),

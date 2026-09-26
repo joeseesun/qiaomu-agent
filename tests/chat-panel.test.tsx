@@ -26,7 +26,7 @@ function setup() {
     backendLabel: "Mock", skillLabel: "技能", permission: "plan", fileAccessAvailable: true, fullAccessAvailable: true, note: null, statusText: "", prompts: ["总结"], prefill: "", prefillVersion: 0,
     sources: [{ key: "api:mock", kind: "api", label: "Mock 服务商", models: [{ id: "mock", name: "Mock model", efforts: ["low", "high"] }, { id: "other", name: "Other model", efforts: [] }], loaded: true }],
     selection: { source: "api:mock", model: "mock" }, recentModels: [], onPickModel: vi.fn(), onLoadModels: vi.fn(), onManageModels: vi.fn(),
-    onConnection: vi.fn(), onNew: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {}, onApprove: vi.fn(), onRevertChanges: vi.fn(), onOpenFile: vi.fn(), editorSelection: null, onDismissSelection: vi.fn(), onComposerFocus: vi.fn(),
+    onConnection: vi.fn(), onNew: vi.fn(), onOpenSettings: vi.fn(), onHistory: vi.fn(), onSkill: vi.fn(), onPermission: vi.fn(), onEditMessage: vi.fn(), onToggleNote: vi.fn(), onPersist: async () => {}, onApprove: vi.fn(), onRevertChanges: vi.fn(), onOpenFile: vi.fn(), editorSelection: null, onDismissSelection: vi.fn(), onComposerFocus: vi.fn(),
     efforts: ["low", "high"], effort: "high", modelLoading: false, onEffort: vi.fn(), customPrompts: [{ id: "p", name: "测试模板", body: "自定义内容" }], onManagePrompts: vi.fn(), onPickFile: vi.fn(), onPickFolder: vi.fn(), onValidateAttachments: vi.fn(), onAppend: vi.fn(),
   };
   const result = render(<ChatPanel {...props} />);
@@ -47,6 +47,23 @@ it("slash Enter inserts a template, Escape preserves draft, and IME Enter does n
   fireEvent.keyDown(input, { key: "Enter" }); expect((input as HTMLTextAreaElement).value).toBe("自定义内容"); expect(send).not.toHaveBeenCalled();
   fireEvent.change(input, { target: { value: "/" } }); fireEvent.keyDown(input, { key: "Escape" }); expect(screen.queryByRole("listbox")).toBeNull(); expect((input as HTMLTextAreaElement).value).toBe("/");
   fireEvent.compositionStart(input); fireEvent.keyDown(input, { key: "Enter", isComposing: true }); expect(send).not.toHaveBeenCalled(); fireEvent.compositionEnd(input);
+});
+it("pinned prompts and quick prompts fill the composer without sending or losing a draft", () => {
+  const { input, props } = setup();
+  fireEvent.change(input, { target: { value: "已有问题" } });
+  fireEvent.click(screen.getByRole("button", { name: "总结" }));
+  expect((input as HTMLTextAreaElement).value).toBe("已有问题\n\n总结");
+  expect(props.onManagePrompts).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "管理 Prompt 库" }));
+  expect(props.onManagePrompts).toHaveBeenCalledOnce();
+});
+it("save current draft opens Prompt editor and leaves the draft untouched", () => {
+  const { input, props } = setup();
+  fireEvent.change(input, { target: { value: "请总结这份笔记" } });
+  fireEvent.click(screen.getByRole("button", { name: "添加附件与工具" }));
+  fireEvent.click(screen.getByRole("button", { name: "将当前草稿保存为 Prompt" }));
+  expect(props.onManagePrompts).toHaveBeenCalledWith("请总结这份笔记");
+  expect((input as HTMLTextAreaElement).value).toBe("请总结这份笔记");
 });
 it("pasted images become removable attachments and reach the request", async () => {
   const { input, container, send, chat, props } = setup();
@@ -233,14 +250,14 @@ it("shows the editor selection as removable context and refreshes it on focus", 
   expect(props.onComposerFocus).toHaveBeenCalled();
 });
 
-it("shows reading context from another plugin as a removable chip and focuses without clearing the draft", () => {
+it("shows reading context from another plugin as a removable chip and focuses without clearing the draft", async () => {
   const { props, rerender, input } = setup();
   fireEvent.change(input, { target: { value: "写到一半的问题" } });
   const reading = { label: "选中 12 字 · 深度工作", detail: "乔木 RSS · 深度工作\n\n一段话", kind: "article" as const, selected: true };
   const onDismissReading = vi.fn();
   rerender(<ChatPanel {...props} reading={reading} onDismissReading={onDismissReading} focusVersion={1} />);
   expect(screen.getByText("选中 12 字 · 深度工作").closest("[title]")?.getAttribute("title")).toContain("一段话");
-  expect(document.activeElement).toBe(input);
+  await waitFor(() => expect(document.activeElement).toBe(input));
   expect((input as HTMLTextAreaElement).value).toBe("写到一半的问题");
   fireEvent.click(screen.getByRole("button", { name: "不附加正在阅读的内容" }));
   expect(onDismissReading).toHaveBeenCalledOnce();
@@ -280,4 +297,10 @@ it("shows the context ring only after a reported usage, warning near the limit",
   expect(screen.getByText("170K / 200K tokens")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
   expect(props.onNew).toHaveBeenCalledOnce();
+});
+it("header shows the brand and opens plugin settings", () => {
+  const { props } = setup();
+  expect(screen.getByText("Agent")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  expect(props.onOpenSettings).toHaveBeenCalled();
 });

@@ -12,12 +12,18 @@ import { BRAND_ICONS } from "./brand-icons";
 import { actionButton, hostSwitch, iconAction, sectionHead } from "./settings-kit";
 
 function brand(parent: HTMLElement, icon: string | undefined, fallback: string, size = 20): void {
-  const span = parent.createSpan({ cls: "qa-brand" });
+  const span = parent.createSpan({ cls: `qa-brand qa-brand--size-${size}` });
   span.setAttribute("aria-hidden", "true");
-  span.style.width = span.style.height = `${size}px`;
   const svg = icon ? BRAND_ICONS[icon] : undefined;
-  if (svg) span.innerHTML = svg; // bundled, trusted asset
-  else { span.addClass("qa-brand--generic"); setIcon(span, fallback); }
+  if (svg) {
+    const parsed = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+    if (parsed.localName === "svg" && parsed.namespaceURI === "http://www.w3.org/2000/svg") {
+      span.appendChild(document.importNode(parsed, true));
+      return;
+    }
+  }
+  span.addClass("qa-brand--generic");
+  setIcon(span, fallback);
 }
 
 

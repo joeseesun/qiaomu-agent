@@ -57,7 +57,8 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
     ...data,
     schemaVersion: 1,
     permissionMode: data.permissionMode === "edit" || data.permissionMode === "full" ? data.permissionMode : "plan",
-    customPrompts: Array.isArray(data.customPrompts) ? data.customPrompts.filter((p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.body === "string") : [],
+    customPrompts: Array.isArray(data.customPrompts) ? data.customPrompts.filter((p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.body === "string")
+      .map((p) => ({ id: p.id, name: p.name, body: p.body, pinned: p.pinned === true })) : [],
     activeConversation: data.activeConversation && typeof data.activeConversation.id === "string" && typeof data.activeConversation.title === "string"
       ? normalizeBranchTitle({ ...data.activeConversation, createdAt: Number.isFinite(data.activeConversation.createdAt) ? data.activeConversation.createdAt : Date.now() }) : undefined,
     conversations: Array.isArray(data.conversations) ? data.conversations.filter((c) => c && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.messages))

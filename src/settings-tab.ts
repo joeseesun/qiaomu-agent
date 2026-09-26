@@ -81,7 +81,7 @@ export class QiaomuSettingTab extends PluginSettingTab {
     const header = containerEl.createDiv({ cls: "qiaomu-agent-settings__header" });
     const identity = header.createDiv({ cls: "qiaomu-agent-settings__identity" });
     setIcon(identity.createSpan({ attr: { "aria-hidden": "true" } }), "tree-deciduous");
-    identity.createEl("h2", { text: "乔木 Agent" });
+    new Setting(identity).setName("乔木 Agent").setHeading();
     const tabs = header.createDiv({ cls: "qiaomu-agent-settings__tabs" });
     tabs.setAttribute("role", "tablist");
     const sections = [{ id: "models", label: "模型" }, { id: "chat", label: "对话" }, { id: "tools", label: "工具" }, { id: "about", label: "关于" }] as const;
