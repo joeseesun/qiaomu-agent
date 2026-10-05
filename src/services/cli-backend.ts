@@ -3,9 +3,10 @@ import { stripAnsi } from "../utils";
 import { getRuntimeRequire } from "./runtime-require";
 import { getCliProfile } from "./cli-profiles";
 import { parseCliOutputLine } from "./cli-output";
+import { piProcessEnv } from "./pi-process-env";
 
 interface ChildProcessModule {
-  execFile: (file: string, args: string[], options: { timeout: number; windowsHide: boolean; maxBuffer: number }, callback: (error: Error | null, stdout: string, stderr: string) => void) => void;
+  execFile: (file: string, args: string[], options: { timeout: number; windowsHide: boolean; maxBuffer: number; env?: Record<string, string | undefined> }, callback: (error: Error | null, stdout: string, stderr: string) => void) => void;
   spawn: (
     command: string,
     args: string[],
@@ -53,8 +54,9 @@ export class CliBackend implements ChatBackend {
     if (!require) throw new Error("本机模型列表只支持桌面版 Obsidian");
     const childProcess = require("child_process") as ChildProcessModule;
     const isPi = this.detection.id === "pi";
-    return await new Promise((resolve, reject) => childProcess.execFile(this.detection.path!, isPi ? ["--list-models"] : ["models"],
-      { timeout: 15_000, windowsHide: true, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
+    const env = isPi ? await piProcessEnv(require, this.detection.env) : undefined;
+    return await new Promise((resolve, reject) => childProcess.execFile(this.detection.path!, [...(this.detection.argsPrefix ?? []), ...(isPi ? ["--list-models"] : ["models"])],
+      { timeout: 15_000, windowsHide: true, maxBuffer: 512 * 1024, ...(env ? { env } : {}) }, (error, stdout, stderr) => {
         if (error) { reject(new Error(stripAnsi(stderr || stdout).trim() || "请先在 Antigravity CLI 中登录")); return; }
         const models = isPi
           ? stdout.split(/\r?\n/).slice(1).map((line) => line.trim().split(/\s+/)).filter((parts) => parts.length >= 2 && parts[0] && parts[1]).map(([provider, model]) => ({ id: `${provider}/${model}`, name: `${provider}/${model}`, efforts: [] }))

@@ -3,6 +3,7 @@ import { promptWithContext } from "./cli-profiles";
 import { CliBackend } from "./cli-backend";
 import { splitJsonLines } from "./json-rpc-process";
 import { getRuntimeRequire } from "./runtime-require";
+import { piProcessEnv } from "./pi-process-env";
 
 interface Child {
   stdin: { writable: boolean; write(data: string): void; end(): void };
@@ -105,12 +106,16 @@ export class PiRpcBackend implements ChatBackend {
   }
 
   private async connect(request: ChatRequest): Promise<void> {
-    const signature = JSON.stringify([request.cwd, request.model, request.reasoningEffort, request.permissionMode, request.systemPrompt]);
-    if (this.child && this.child.exitCode === null && this.signature === signature) return;
-    if (this.child) await this.shutdown();
     const require = getRuntimeRequire();
     if (!require || !this.detection.path) throw new Error("Pi RPC 仅支持桌面版 Obsidian");
-    const args = ["--mode", "rpc", "--no-session", "--no-skills", "--append-system-prompt", request.systemPrompt,
+    const generation = this.generation;
+    const env = await piProcessEnv(require, this.detection.env);
+    if (generation !== this.generation) throw new Error("Pi RPC 已关闭");
+    const signature = JSON.stringify([request.cwd, request.model, request.reasoningEffort, request.permissionMode, request.systemPrompt,
+      env.HTTP_PROXY, env.HTTPS_PROXY, env.ALL_PROXY, env.NO_PROXY]);
+    if (this.child && this.child.exitCode === null && this.signature === signature) return;
+    if (this.child) await this.shutdown();
+    const args = [...(this.detection.argsPrefix ?? []), "--mode", "rpc", "--no-session", "--no-skills", "--append-system-prompt", request.systemPrompt,
       ...(request.permissionMode === "plan" ? ["--tools", "read,grep,find,ls"] : []),
       ...(request.model ? ["--model", request.model] : []),
       ...(request.reasoningEffort ? ["--thinking", request.reasoningEffort] : [])];
@@ -121,7 +126,7 @@ export class PiRpcBackend implements ChatBackend {
     this.prompted = false;
     const child = (require("child_process") as { spawn: (path: string, args: string[], options: object) => Child }).spawn(this.detection.path, args, {
       cwd: request.cwd ?? undefined,
-      env: (require("process") as { env: Record<string, string | undefined> }).env,
+      env,
       windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;

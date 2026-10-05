@@ -103,14 +103,30 @@ async function scanLocalClis(): Promise<CliDetection[]> {
     let detection: CliDetection | null = null;
     for (const candidate of Array.from(new Set(candidates))) {
       if (candidate.includes("/") && !fs.existsSync(candidate)) continue;
-      const result = await cachedProbe(childProcess.execFile, candidate, profile.versionArgs);
+      let executable = candidate;
+      let argsPrefix: string[] | undefined;
+      let result = await cachedProbe(childProcess.execFile, candidate, profile.versionArgs);
+      // 桌面应用的 PATH 可能缺少 Node；优先用 Pi 同目录的运行时绕过 env shebang。
+      if (!result.ok && profile.id === "pi" && candidate.includes("/")) {
+        const siblingNode = path.join(candidate.slice(0, candidate.lastIndexOf("/")), "node");
+        for (const node of new Set([siblingNode, ...nodePaths])) {
+          if (node.includes("/") && !fs.existsSync(node)) continue;
+          const viaNode = await cachedProbe(childProcess.execFile, node, [candidate, ...profile.versionArgs]);
+          if (!viaNode.ok) continue;
+          executable = node;
+          argsPrefix = [candidate];
+          result = viaNode;
+          break;
+        }
+      }
       if (!result.ok) continue;
       if (profile.id === "cursor" && candidate.split("/").at(-1) === "agent" && !/cursor/i.test(result.version ?? "")) continue;
       detection = {
         id: profile.id,
         label: profile.label,
         command: profile.commands[0] ?? profile.id,
-        path: candidate,
+        path: executable,
+        ...(argsPrefix ? { argsPrefix } : {}),
         version: result.version,
         available: true,
         callable: true,
