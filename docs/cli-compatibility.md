@@ -79,3 +79,11 @@ These checks prove executable discovery, supported command-line flags, event par
 - OpenCode streams message text inside `part.text` rather than the top-level fields used by several other CLIs.
 - Gemini CLI 0.60.0 does not accept `--system-prompt`; the adapter combines the system instructions with the prompt and uses `--skip-trust` plus an explicit approval mode.
 - Pi plan mode retains read-only tools (`read,grep,find,ls`) and disables implicit Skills because the selected Skill is injected explicitly.
+
+## Windows npm CLI wrappers
+
+Windows discovery checks PATH using PATHEXT and also checks `%APPDATA%\npm` and `~\.local\bin`. It supports native `.exe`/`.com` executables and npm Node `.cmd`/`.bat` shims whose quoted `%_prog%` invocation points to a `.js`, `.cjs`, or `.mjs` entry under `node_modules`. It ignores extensionless Unix wrappers and PowerShell shims.
+
+Detection and Agent startup resolve the same npm entry and run it with `node.exe` next to the shim, or with `node.exe` on PATH. Arguments stay separate: prompts, quotes, spaces, newlines, percent signs and other shell syntax never pass through `cmd.exe`. Arbitrary batch scripts and other wrapper formats are rejected; custom npm prefixes need to be on PATH, and npm CLIs require an available Node runtime.
+
+The regression suite simulates Windows paths and discovery on every host. A separate Windows CI smoke test launches a fixture Node CLI through both callback and streaming process APIs, checks literal argument round trips, and verifies that a shell-injection marker is not created. These checks do not replace Windows 11 Obsidian validation with the actual installed Claude, Codex, Gemini and Pi packages, login state, or cancellation behavior.

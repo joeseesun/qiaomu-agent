@@ -1,3 +1,4 @@
+import { getCliProcesses } from "./cli-process";
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, CliProfile, ModelChoice } from "../types";
 import { stripAnsi } from "../utils";
 import { getRuntimeRequire } from "./runtime-require";
@@ -52,7 +53,7 @@ export class CliBackend implements ChatBackend {
     if (!(["antigravity", "pi"] as string[]).includes(this.detection.id) || !this.detection.path) return [];
     const require = getRuntimeRequire();
     if (!require) throw new Error("本机模型列表只支持桌面版 Obsidian");
-    const childProcess = require("child_process") as ChildProcessModule;
+    const childProcess = getCliProcesses(require) as ChildProcessModule;
     const isPi = this.detection.id === "pi";
     const env = isPi ? await piProcessEnv(require, this.detection.env) : undefined;
     return await new Promise((resolve, reject) => childProcess.execFile(this.detection.path!, [...(this.detection.argsPrefix ?? []), ...(isPi ? ["--list-models"] : ["models"])],
@@ -70,7 +71,7 @@ export class CliBackend implements ChatBackend {
     signal.throwIfAborted();
     const require = getRuntimeRequire();
     if (!require || !this.detection.path) throw new Error("本地 CLI 只支持桌面版 Obsidian");
-    const childProcess = require("child_process") as ChildProcessModule;
+    const childProcess = getCliProcesses(require) as ChildProcessModule;
     const temporaryMcpFile = this.createTemporaryMcpFile(require, request);
     const args = [...(this.detection.argsPrefix ?? []), ...this.profile.buildArgs(request, temporaryMcpFile ?? undefined)];
     callbacks.onStatus(`正在通过 ${this.profile.label} 处理…`);
