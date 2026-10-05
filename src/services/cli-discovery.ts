@@ -1,3 +1,4 @@
+import { getCliProcesses, isWindowsRuntime, windowsCliCandidates, environmentValue } from "./cli-process";
 import { Platform } from "obsidian";
 import type { CliDetection, CliProfile } from "../types";
 import { CLI_PROFILES } from "./cli-profiles";
@@ -47,20 +48,24 @@ async function probe(
   args: string[]
 ): Promise<{ ok: boolean; version: string | null; output: string }> {
   return await new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      { timeout: 3_500, windowsHide: true, maxBuffer: 128 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          resolve({ ok: false, version: null, output: "" });
-          return;
+    try {
+      execFile(
+        command,
+        args,
+        { timeout: 3_500, windowsHide: true, maxBuffer: 128 * 1024 },
+        (error, stdout, stderr) => {
+          if (error) {
+            resolve({ ok: false, version: null, output: "" });
+            return;
+          }
+          const output = `${stdout || ""}\n${stderr || ""}`.trim();
+          const version = output.split(/\r?\n/)[0]?.trim() || null;
+          resolve({ ok: true, version, output });
         }
-        const output = `${stdout || ""}\n${stderr || ""}`.trim();
-        const version = output.split(/\r?\n/)[0]?.trim() || null;
-        resolve({ ok: true, version, output });
-      }
-    );
+      );
+    } catch {
+      resolve({ ok: false, version: null, output: "" });
+    }
   });
 }
 
@@ -80,11 +85,20 @@ async function scanLocalClis(): Promise<CliDetection[]> {
   const require = getRuntimeRequire();
   if (!require) return [];
 
-  const childProcess = require("child_process") as ChildProcessModule;
+  const childProcess = getCliProcesses(require) as ChildProcessModule;
   const fs = require("fs") as FileSystemModule;
   const os = require("os") as OsModule;
   const path = require("path") as PathModule;
   const home = os.homedir();
+  const windows = isWindowsRuntime(require);
+  const env = (require("process") as { env: Record<string, string | undefined> }).env;
+  const candidatesFor = (profile: CliProfile): string[] => windows
+    ? profile.commands.flatMap((command) => [
+        ...windowsCliCandidates(command, require),
+        ...windowsCliCandidates(path.join(environmentValue(env, "APPDATA") ?? path.join(home, "AppData", "Roaming"), "npm", command), require),
+        ...windowsCliCandidates(path.join(home, ".local", "bin", command), require),
+      ])
+    : [...profile.commands, ...knownPaths(profile, home, path.join, nvmBins)];
   const nvm = path.join(home, ".nvm/versions/node");
   let versions: string[] = [];
   try { versions = fs.readdirSync(nvm).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })); } catch { /* optional runtime location */ }
@@ -99,13 +113,13 @@ async function scanLocalClis(): Promise<CliDetection[]> {
     return result;
   };
   const detect = async (profile: CliProfile): Promise<CliDetection> => {
-    const candidates = [...profile.commands, ...knownPaths(profile, home, path.join, nvmBins)];
+    const candidates = candidatesFor(profile);
     let detection: CliDetection | null = null;
     for (const candidate of Array.from(new Set(candidates))) {
       if (candidate.includes("/") && !fs.existsSync(candidate)) continue;
       const result = await cachedProbe(childProcess.execFile, candidate, profile.versionArgs);
       if (!result.ok) continue;
-      if (profile.id === "cursor" && candidate.split("/").at(-1) === "agent" && !/cursor/i.test(result.version ?? "")) continue;
+      if (profile.id === "cursor" && candidate.split(/[\\/]/).at(-1)?.replace(/\.(exe|com|cmd|bat)$/i, "") === "agent" && !/cursor/i.test(result.version ?? "")) continue;
       detection = {
         id: profile.id,
         label: profile.label,
@@ -118,11 +132,11 @@ async function scanLocalClis(): Promise<CliDetection[]> {
       break;
     }
     if (profile.id === "claude" && detection) {
-      for (const candidate of ["claude-agent-acp", ...knownPaths({ ...profile, commands: ["claude-agent-acp"] }, home, path.join, nvmBins)]) {
+      for (const candidate of candidatesFor({ ...profile, commands: ["claude-agent-acp"] })) {
         if (candidate.includes("/") && !fs.existsSync(candidate)) continue;
         const result = await cachedProbe(childProcess.execFile, candidate, ["--version"]);
         if (result.ok) { detection.nativePath = candidate; break; }
-        if (!candidate.includes("/")) continue;
+        if (windows || !candidate.includes("/")) continue;
         for (const node of nodePaths) {
           if (node.includes("/") && !fs.existsSync(node)) continue;
           const viaNode = await cachedProbe(childProcess.execFile, node, [candidate, "--version"]);

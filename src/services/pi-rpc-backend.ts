@@ -1,3 +1,4 @@
+import { getCliProcesses } from "./cli-process";
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, ModelChoice, PermissionMode } from "../types";
 import { promptWithContext } from "./cli-profiles";
 import { CliBackend } from "./cli-backend";
@@ -119,7 +120,7 @@ export class PiRpcBackend implements ChatBackend {
     this.stderrTail = "";
     this.signature = signature;
     this.prompted = false;
-    const child = (require("child_process") as { spawn: (path: string, args: string[], options: object) => Child }).spawn(this.detection.path, args, {
+    const child = (getCliProcesses(require) as { spawn: (path: string, args: string[], options: object) => Child }).spawn(this.detection.path, args, {
       cwd: request.cwd ?? undefined,
       env: (require("process") as { env: Record<string, string | undefined> }).env,
       windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"],

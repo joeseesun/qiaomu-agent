@@ -1,3 +1,4 @@
+import { getCliProcesses } from "./cli-process";
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection } from "../types";
 import { promptWithContext } from "./cli-profiles";
 import { getRuntimeRequire } from "./runtime-require";
@@ -59,7 +60,7 @@ export class ZcodeBackend implements ChatBackend {
     try {
       const output = await new Promise<string>((resolve, reject) => {
         let killTimer: ReturnType<typeof setTimeout> | undefined;
-        const child = (require("child_process") as Processes).execFile(this.detection.path!, args, {
+        const child = (getCliProcesses(require) as Processes).execFile(this.detection.path!, args, {
           cwd: request.cwd ?? undefined, env: { ...runtime.env, ...this.detection.env },
           windowsHide: true, shell: false, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, timeout: 300_000,
         }, (error, stdout, stderr) => {

@@ -1,3 +1,4 @@
+import { getCliProcesses } from "./cli-process";
 import { getRuntimeRequire } from "./runtime-require";
 import type { McpServerEntry } from "./mcp-config";
 
@@ -21,7 +22,7 @@ export function codexMcpAddArgs(entry: McpServerEntry): string[] {
 function execCodex(executable: string, args: string[]): Promise<string> {
   const require = getRuntimeRequire();
   if (!require) return Promise.reject(new Error("仅桌面端可读取 Codex 连接"));
-  const child = require("child_process") as typeof import("child_process");
+  const child = getCliProcesses(require) as typeof import("child_process");
   return new Promise((resolve, reject) => child.execFile(executable, args, { timeout: 12000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
     if (error) reject(new Error(stderr.trim() || error.message));
     else resolve(stdout);

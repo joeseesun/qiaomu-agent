@@ -1,3 +1,4 @@
+import { getCliProcesses } from "./cli-process";
 import { getRuntimeRequire } from "./runtime-require";
 
 export interface JsonRpcMessage {
@@ -71,7 +72,7 @@ export class JsonRpcProcess {
     if (this.running) return;
     const require = getRuntimeRequire();
     if (!require) throw new Error("原生 Agent 协议仅支持桌面版 Obsidian");
-    const childProcess = require("child_process") as ChildProcessModule;
+    const childProcess = getCliProcesses(require) as ChildProcessModule;
     this.closing = false;
     this.stdoutBuffer = "";
     this.stdoutDecoder = new TextDecoder();
