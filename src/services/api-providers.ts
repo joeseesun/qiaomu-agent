@@ -1,6 +1,6 @@
 import type { ApiConnection } from "../types";
 
-export type ProviderGroup = "cn" | "global" | "relay" | "local" | "custom";
+export type ProviderGroup = "cn" | "global" | "relay" | "local" | "custom" | "account" | "plan";
 
 export interface ApiPreset {
   label: string;
@@ -15,6 +15,16 @@ export interface ApiPreset {
 
 // Official endpoint references and verification limits: docs/research/provider-coverage.md.
 export const API_PROVIDERS: Record<string, ApiPreset> = {
+  chatgpt: { label: "ChatGPT", baseUrl: "https://api.openai.com/v1", website: "https://chatgpt.com/settings/usage", protocol: "openai-responses", icon: "openai", group: "account" },
+  tokendance: { label: "词元跳动 · TokenDance", baseUrl: "https://tokendance.space/gateway/v1", website: "https://tokendance.space/keys", group: "relay" },
+  magpie: { label: "Magpie · 订阅与模型网关", baseUrl: "http://127.0.0.1:3425/v1", website: "https://usemagpie.ai", local: true, group: "local" },
+  "glm-coding": { label: "智谱 GLM · Coding Plan", baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4", website: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys", icon: "zhipu", group: "plan" },
+  "zai-coding": { label: "Z.ai · Coding Plan", baseUrl: "https://api.z.ai/api/coding/paas/v4", website: "https://z.ai/manage-apikey/apikey-list", icon: "zai", group: "plan" },
+  "kimi-code": { label: "Kimi Code · 国内套餐", baseUrl: "https://api.kimi.com/coding/v1", website: "https://www.kimi.com/code/console", icon: "moonshot", group: "plan" },
+  "minimax-plan": { label: "MiniMax · Token Plan", baseUrl: "https://api.minimaxi.com/v1", website: "https://platform.minimaxi.com/subscribe/coding-plan", icon: "minimax", group: "plan" },
+  "bailian-plan": { label: "百炼 · Token Plan", baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", website: "https://bailian.console.aliyun.com/cn-beijing/subscription/token-plan/personal", icon: "qwen", group: "plan" },
+  "mimo-plan": { label: "小米 MiMo · Token Plan", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", website: "https://platform.xiaomimimo.com/token-plan", icon: "mimo", group: "plan" },
+  "doubao-coding": { label: "火山方舟 · Coding Plan", baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3", website: "https://console.volcengine.com/ark", icon: "doubao", group: "plan" },
   openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", website: "https://platform.openai.com/api-keys", icon: "openai", group: "global" },
   anthropic: { label: "Anthropic", baseUrl: "https://api.anthropic.com/v1", website: "https://console.anthropic.com", protocol: "anthropic", icon: "anthropic", group: "global" },
   google: { label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", website: "https://aistudio.google.com/apikey", protocol: "google", icon: "google", group: "global" },

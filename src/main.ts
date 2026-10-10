@@ -1,3 +1,4 @@
+import { cancelAccountLogins } from "./services/provider-auth";
 import { watchPaneDividers } from "./pane-dividers";
 import { FuzzySuggestModal, MarkdownView, Menu, Notice, Platform, Plugin, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo } from "obsidian";
 import { ChatView, VIEW_TYPE_QIAOMU_AGENT } from "./chat-view";
@@ -145,6 +146,7 @@ export default class QiaomuAgentPlugin extends Plugin {
   }
 
   override onunload(): void {
+    cancelAccountLogins();
     void this.backendService?.shutdown();
   }
 

@@ -32,6 +32,9 @@ export function thinkingRequest(connection: Pick<ApiConnection, "provider" | "pr
   if (connection.provider === "deepseek" && protocol === "openai-chat" && (effort === "low" || effort === "high" || effort === "max")) {
     return { body: { thinking: { type: "enabled" }, reasoning_effort: effort } };
   }
+  if ((connection.provider === "magpie" || connection.provider === "chatgpt") && effort && /^[a-z0-9_-]{1,24}$/.test(effort)) {
+    return { body: protocol === "openai-responses" ? { reasoning: { effort } } : { reasoning_effort: effort } };
+  }
   if (effort !== "low" && effort !== "medium" && effort !== "high") return {};
   const level: Effort = effort;
   if (protocol === "anthropic") {
