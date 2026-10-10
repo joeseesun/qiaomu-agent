@@ -475,7 +475,7 @@ export class ChatView extends ItemView {
       } else {
         const provider = findProvider(settings, source.slice(4));
         if (!provider) throw new Error("该服务商已被移除");
-        provider.models = await new ApiBackend(provider, this.app.secretStorage.getSecret(provider.secretId) ?? "").listModels();
+        provider.models = await new ApiBackend(provider, this.app.secretStorage.getSecret(provider.secretId) ?? "", "", this.app).listModels();
         provider.fetchedAt = Date.now();
       }
       this.sourceState.delete(source);

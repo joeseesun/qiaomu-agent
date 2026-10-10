@@ -1,3 +1,6 @@
+import { accountText as at } from "../i18n/accounts";
+import { loginKind, signInAccount, readAccount, signOutAccount } from "../services/provider-auth";
+import { magpieAddress, detectMagpie } from "../services/magpie";
 import { mobileProviderModal } from "./mobile-provider-modal";
 import { providerModels, manualProviderModels, refreshProviderModels, addManualProviderModel } from "../services/provider-models";
 import { secretInput } from "./secret-input";
@@ -10,7 +13,7 @@ import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, type Provi
 import { ApiBackend } from "../services/api-backend";
 import { compactTokens, resolveModel } from "../services/model-capabilities";
 import { isChatModel, recommendedModels } from "../services/key-detection";
-import { agentShown, addProviderConnection, persistProviderChange, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, providerSecretId, removeProvider, upsertProvider } from "../services/model-sources";
+import { agentShown, addProviderConnection, persistProviderChange, persistProviderRemoval, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, providerSecretId, upsertProvider } from "../services/model-sources";
 import { nativeTransportFor, nativeTransportLabel } from "../services/native-agent-backend";
 import { agentIconKey } from "./brand-icon";
 import { BRAND_ICONS } from "./brand-icons";
@@ -65,13 +68,13 @@ function modalTitle(modal: Modal, text: string, icon?: { key: string | undefined
   modal.titleEl.createSpan({ cls: "qa-modal-title-text", text });
 }
 
-function listModelsFor(connection: ApiConnection, key: string, signal?: AbortSignal): Promise<ModelChoice[]> {
-  return new ApiBackend(connection, key).listModels(undefined, signal);
+function listModelsFor(app: App, connection: ApiConnection, key: string, signal?: AbortSignal): Promise<ModelChoice[]> {
+  return new ApiBackend(connection, key, "", app).listModels(undefined, signal);
 }
 
-async function verifyModel(connection: ApiConnection, key: string, model: string, signal?: AbortSignal): Promise<void> {
+async function verifyModel(app: App, connection: ApiConnection, key: string, model: string, signal?: AbortSignal): Promise<void> {
   let text = "";
-  await new ApiBackend({ ...connection, model }, key).send(
+  await new ApiBackend({ ...connection, model }, key, "", app).send(
     { prompt: "Reply with exactly: OK", systemPrompt: "", cwd: null, model, modelOptions: { maxOutputTokens: 1024 }, permissionMode: "plan", history: [], webSearch: false },
     { onText: (chunk) => { text += chunk; }, onStatus: () => {} },
     signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000));
@@ -102,21 +105,21 @@ export class ProviderSettings {
 
   private renderApi(section: HTMLElement): void {
     const providers = this.settings.providers;
-    const actions = sectionHead(section, "模型服务", "用 API Key 连接云端模型。开关决定是否出现在对话的模型菜单里。");
+    const actions = sectionHead(section, "模型服务", at("services"));
     const openChooser = () => new ProviderChooserModal(this.app, this.plugin, this.rerender).open();
     if (providers.length) actionButton(actions, "plus", "添加服务商").addEventListener("click", openChooser);
     if (!providers.length) {
       const empty = section.createDiv({ cls: "qa-ms-empty" });
       empty.createDiv({ cls: "qa-ms-empty-title", text: "还没有连接模型服务" });
-      empty.createDiv({ cls: "qa-ms-empty-text", text: "选择服务商并粘贴 API Key，即可在对话中使用它的模型。" });
+      empty.createDiv({ cls: "qa-ms-empty-text", text: at("empty") });
       actionButton(empty, "plus", "添加服务商", "is-primary").addEventListener("click", openChooser);
       return;
     }
     const list = section.createDiv({ cls: "qa-ms-list" });
     for (const provider of providers) {
-      const ok = Boolean(this.secret(provider)) || permitsEmptyKey(provider);
+      const ok = provider.provider === "chatgpt" ? Boolean(readAccount(this.secret(provider))?.access) : Boolean(this.secret(provider)) || permitsEmptyKey(provider);
       const count = new Set(provider.enabledModels ?? []).size;
-      const sub = !ok ? "需要 API Key" : count ? `${count} 个模型 · ${providerHost(provider)}` : "尚未启用模型";
+      const sub = !ok ? (provider.provider === "chatgpt" ? at("needsLogin") : "需要 API Key") : count ? `${count} 个模型 · ${providerHost(provider)}` : "尚未启用模型";
       this.row(list, providerIcon(provider), "boxes", providerLabel(provider), sub, !ok || !count,
         () => new ProviderModal(this.app, this.plugin, provider.id, this.rerender).open(), provider.showInPicker !== false,
         async (shown) => { upsertProvider(this.settings, { ...provider, showInPicker: shown }); await this.plugin.saveSettings(); this.rerender(); });
@@ -186,7 +189,7 @@ export class ProviderSettings {
 
 const GROUPS: Array<[ProviderGroup, string]> = [["global", "海外"], ["cn", "国内"], ["relay", "聚合平台"]];
 
-/** Choose a provider, then paste its key — one modal, two steps. */
+/** Choose a provider, then sign in or configure its connection. */
 export class ProviderChooserModal extends Modal {
   private closed = false;
   private selected = "";
@@ -197,11 +200,13 @@ export class ProviderChooserModal extends Modal {
   private busy = false;
   private error = "";
   private changed = false;
+  private loginOperation: AbortController | null = null;
+  private drafts = new Map<string, { key: string; url: string; name: string }>();
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly onChange: () => void) { super(app); }
 
   private disposeMobile = () => {};
   override onOpen(): void { this.closed = false; this.modalEl.addClass("qa-provider-chooser-modal"); this.draw(); this.disposeMobile = mobileProviderModal(this.modalEl, this.contentEl); if (!Platform.isMobile) this.contentEl.querySelector<HTMLInputElement>("input")?.focus(); }
-  override onClose(): void { this.disposeMobile(); this.closed = true; this.busy = false; this.key = ""; this.contentEl.empty(); if (this.changed) this.onChange(); }
+  override onClose(): void { this.disposeMobile(); this.closed = true; this.loginOperation?.abort(); this.drafts.clear(); this.busy = false; this.key = ""; this.contentEl.empty(); if (this.changed) this.onChange(); }
 
   private draw(): void {
     this.contentEl.empty();
@@ -210,7 +215,11 @@ export class ProviderChooserModal extends Modal {
     const search = labeledInput(this.contentEl, "搜索服务商", "search", "qa-provider-search", { placeholder: "搜索服务商", autocomplete: "off" });
     const scroller = this.contentEl.createDiv({ cls: "qa-provider-choices" });
     const items: Array<{ text: string; button: HTMLButtonElement; group: HTMLElement }> = [];
-    const choose = (id: string) => { this.selected = id; this.error = ""; this.draw(); };
+    const choose = (id: string) => {
+      this.selected = id; this.error = "";
+      const draft = this.drafts.get(id); this.key = draft?.key ?? ""; this.url = draft?.url ?? API_PROVIDERS[id]?.baseUrl ?? ""; this.name = draft?.name ?? "";
+      this.draw();
+    };
     const group = (title: string) => {
       const wrapper = scroller.createDiv({ cls: "qa-provider-group" });
       wrapper.createDiv({ cls: "qa-provider-group-title", text: title });
@@ -223,16 +232,22 @@ export class ProviderChooserModal extends Modal {
       button.addEventListener("click", () => choose(id));
       items.push({ text: `${label} ${id} ${keywords}`.toLowerCase(), button, group: target.wrapper });
     };
-    for (const [groupId, title] of GROUPS) {
-      const presets = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && preset.group === groupId);
+    const accounts = group(at("accounts"));
+    for (const id of ["chatgpt", "openrouter", "tokendance"]) {
+      const preset = API_PROVIDERS[id]!; choice(accounts, id, preset.label, preset.icon, "log-in");
+    }
+    const subscriptions = group("Claude · Codex · Copilot · Qoder");
+    choice(subscriptions, "magpie", "Magpie", undefined, "network", "订阅 subscription Claude Codex Copilot Qoder ZCode Kimi Gemini Antigravity MiMo MiniMax Code WorkBuddy Trae");
+    for (const [groupId, title] of [...GROUPS, ["plan", at("plans")] as [ProviderGroup, string]]) {
+      const presets = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && preset.group === groupId && !loginKind(id));
       if (!presets.length) continue;
       const target = group(title);
       for (const [id, preset] of presets) choice(target, id, preset.label, preset.icon, "boxes");
     }
-    const rest = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && !GROUPS.some(([groupId]) => groupId === preset.group));
+    const rest = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && !loginKind(id) && preset.group !== "plan" && !GROUPS.some(([groupId]) => groupId === preset.group));
     const extra = group("本地与自定义");
     for (const [id, preset] of rest) choice(extra, id, preset.label, preset.icon, "boxes");
-    if (Platform.isDesktopApp) choice(extra, "ollama", "Ollama · 本地", API_PROVIDERS.ollama?.icon, "boxes", "local 本地");
+    if (Platform.isDesktopApp) for (const id of ["ollama", "lmstudio"]) choice(extra, id, API_PROVIDERS[id]!.label, API_PROVIDERS[id]!.icon, "boxes", "local 本地");
     choice(extra, "custom", "自定义接口", undefined, "settings-2", "custom openai anthropic 中转");
     const empty = scroller.createDiv({ cls: "qa-ms-empty-text qa-provider-none", text: "没有匹配的服务商，可以用“自定义接口”连接" });
     const filter = () => {
@@ -253,7 +268,12 @@ export class ProviderChooserModal extends Modal {
   private drawConnection(): void {
     const preset = API_PROVIDERS[this.selected] ?? API_PROVIDERS.custom!;
     modalTitle(this, this.selected === "custom" ? "自定义接口" : preset.label, { key: preset.icon, fallback: this.selected === "custom" ? "settings-2" : "boxes" },
-      () => { if (this.busy) return; this.selected = ""; this.error = ""; this.draw(); });
+      () => { if (this.busy && !this.loginOperation) return;
+        this.loginOperation?.abort(); this.loginOperation = null; this.busy = false;
+        this.drafts.set(this.selected, { key: this.key, url: this.url, name: this.name });
+        this.selected = ""; this.error = ""; this.draw(); });
+    const back = this.titleEl.querySelector<HTMLButtonElement>(".qa-modal-back");
+    if (back) back.disabled = this.busy && !this.loginOperation;
     const form = this.contentEl.createDiv({ cls: "qa-ms-form" });
     if (this.selected === "custom") {
       const name = labeledInput(field(form, "显示名称"), "显示名称", "text", "qa-ms-input", { placeholder: "例如：我的中转站" });
@@ -277,18 +297,40 @@ export class ProviderChooserModal extends Modal {
       url.value = this.url;
       url.addEventListener("input", () => { this.url = url.value.trim(); });
     }
+    const kind = loginKind(this.selected);
+    if (kind) {
+      form.createDiv({ cls: "qa-ms-note", text: at(Platform.isDesktopApp ? kind === "chatgpt" ? "chatgptHint" : "browser" : "desktop") });
+      const login = actionButton(form, "log-in", this.busy ? at("waiting") : kind === "chatgpt" ? "Continue with ChatGPT" : at("login"), "is-primary");
+      login.disabled = this.busy || !Platform.isDesktopApp;
+      login.addEventListener("click", () => void this.login());
+      if (this.busy && this.loginOperation) {
+        const cancel = actionButton(form, "x", at("cancel")); cancel.dataset.cancelLogin = "true";
+        cancel.addEventListener("click", () => { this.loginOperation?.abort(); this.loginOperation = null; this.busy = false; this.draw(); });
+      }
+      if (kind !== "chatgpt") form.createDiv({ cls: "qa-ms-note", text: at("keyInstead") });
+    }
+    if (this.selected === "magpie") {
+      form.createDiv({ cls: "qa-ms-note", text: at("magpie") });
+      const url = labeledInput(field(form, at("endpoint")), at("endpoint"), "url", "qa-ms-input is-mono");
+      url.value = this.url || preset.baseUrl;
+      url.addEventListener("input", () => { this.url = url.value.trim(); });
+      const detect = actionButton(form, "search", at("detect"));
+      detect.addEventListener("click", () => void this.detectGateway(url));
+      form.createEl("a", { text: at("gatewayLink"), href: "https://usemagpie.ai/docs/start", attr: { target: "_blank", rel: "noopener noreferrer" } });
+    }
     let keyInput: HTMLInputElement | null = null;
-    if (!preset.local) {
-      const keyField = field(form, "API Key");
+    if ((!preset.local || this.selected === "magpie") && kind !== "chatgpt") {
+      const keyField = field(form, this.selected === "magpie" ? at("gatewayKey") : "API Key");
       keyInput = secretInput(keyField, "API Key", "粘贴 API Key");
       keyInput.value = this.key;
       keyInput.addEventListener("input", () => { this.key = keyInput!.value.trim(); });
       keyInput.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void this.connect(); } });
       if (preset.website) this.keyLink(keyField, preset.website);
-    } else {
-      form.createDiv({ cls: "qa-ms-note", text: "会连接本机 Ollama（http://localhost:11434），请先启动 Ollama。" });
+    } else if (preset.local) {
+      form.createDiv({ cls: "qa-ms-note", text: at("localService") });
     }
     if (this.error) form.createDiv({ cls: "qa-inline-error", text: this.error, attr: { role: "alert" } });
+    if (kind === "chatgpt") return;
     const footer = this.contentEl.createDiv({ cls: "qa-ms-footer" });
     const note = footer.createDiv({ cls: "qa-ms-footer-note" });
     if (!preset.local) {
@@ -298,7 +340,34 @@ export class ProviderChooserModal extends Modal {
     const connect = footer.createEl("button", { cls: "mod-cta", text: this.busy ? ct("saving") : ct("saveManage"), attr: { type: "button" } });
     connect.disabled = this.busy;
     connect.addEventListener("click", () => void this.connect());
-    form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach((control) => { control.disabled = this.busy; });
+    if (this.busy) form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button:not([data-cancel-login])').forEach((control) => { control.disabled = true; });
+  }
+
+  private async login(): Promise<void> {
+    const kind = loginKind(this.selected); if (!kind || this.busy) return;
+    const op = new AbortController(); this.loginOperation = op; this.busy = true; this.error = ""; this.draw();
+    try {
+      const result = await signInAccount(kind, this.app.secretStorage, url => window.open(url, "_blank", "noopener,noreferrer"), op.signal);
+      if (this.closed || op.signal.aborted || this.loginOperation !== op) return;
+      this.key = result.secret; this.name = result.label ? `ChatGPT · ${result.label}` : "";
+      this.loginOperation = null; this.busy = false; await this.connect();
+    } catch (error) { if (!op.signal.aborted && !this.closed && this.loginOperation === op) this.error = connectionError(error); }
+    finally { if (this.loginOperation === op) { this.loginOperation = null; this.busy = false; if (!this.closed) this.draw(); } }
+  }
+
+  private async detectGateway(input: HTMLInputElement): Promise<void> {
+    const op = new AbortController(); this.loginOperation?.abort(); this.loginOperation = op;
+    try {
+      if (!input.value || input.value === API_PROVIDERS.magpie!.baseUrl) {
+        const address = await magpieAddress();
+        if (this.closed || op.signal.aborted || this.loginOperation !== op) return;
+        input.value = address;
+      }
+      this.url = input.value;
+      await detectMagpie(this.url, this.key, op.signal);
+      if (!this.closed && this.loginOperation === op) new Notice(at("detected"));
+    } catch (error) { if (!this.closed && !op.signal.aborted && this.loginOperation === op) { this.error = connectionError(error); this.draw(); } }
+    finally { if (this.loginOperation === op) this.loginOperation = null; }
   }
 
   private keyLink(parent: HTMLElement, href: string): void {
@@ -310,15 +379,20 @@ export class ProviderChooserModal extends Modal {
     if (this.busy) return;
     const preset = API_PROVIDERS[this.selected] ?? API_PROVIDERS.custom!;
     if (!preset.local && !this.key) { this.error = "请输入 API Key"; this.draw(); this.contentEl.querySelector<HTMLElement>(Platform.isMobile ? ".qa-secret-paste" : ".qa-secret-input input")?.focus(); return; }
-    let endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string } = {};
+    let endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string } = this.name ? { name: this.name } : {};
     if (this.selected === "custom") {
       try { endpoint = { baseUrl: validateApiUrl(this.url), protocol: this.protocol, name: this.name || undefined }; }
       catch (error) { this.error = error instanceof Error ? error.message : String(error); this.draw(); return; }
     }
+    if (this.selected === "magpie") {
+      try { endpoint.baseUrl = validateApiUrl(this.url || preset.baseUrl); }
+      catch (error) { this.error = connectionError(error); this.draw(); return; }
+      if (!this.key && !permitsEmptyKey({ ...this.plugin.settings.api, provider: "magpie", baseUrl: endpoint.baseUrl })) { this.error = ct("missingKey"); this.draw(); return; }
+    }
     this.busy = true; this.error = ""; this.draw();
     let added: ProviderConfig | undefined;
     try {
-      const provider = await persistProviderChange(this.plugin.settings, () => added = addProviderConnection(this.plugin.settings, this.selected, preset.local ? "" : this.key,
+      const provider = await persistProviderChange(this.plugin.settings, () => added = addProviderConnection(this.plugin.settings, this.selected, this.key,
         (id, value) => this.app.secretStorage.setSecret(id, value), endpoint), () => this.plugin.saveSettings());
       this.changed = true;
       if (this.closed) { this.onChange(); return; }
@@ -348,6 +422,7 @@ export class ProviderModal extends Modal {
   private protocolDraft: ApiConnection["protocol"] = "openai-chat";
   private addingModel = false;
   private confirmRemove = false;
+  private accountOperation: AbortController | null = null;
   private busy = "";
   private error = "";
 
@@ -365,7 +440,7 @@ export class ProviderModal extends Modal {
     this.draw();
     this.disposeMobile = mobileProviderModal(this.modalEl, this.contentEl);
   }
-  override onClose(): void { this.disposeMobile(); this.closed = true; this.operation?.abort(); this.keyDraft = ""; this.contentEl.empty(); this.onChange(); }
+  override onClose(): void { this.disposeMobile(); this.closed = true; this.accountOperation?.abort(); this.operation?.abort(); this.keyDraft = ""; this.contentEl.empty(); this.onChange(); }
 
   private async save(provider: ProviderConfig): Promise<void> {
     await persistProviderChange(this.plugin.settings, () => { upsertProvider(this.plugin.settings, provider); return provider; }, () => this.plugin.saveSettings());
@@ -387,10 +462,14 @@ export class ProviderModal extends Modal {
     remove.disabled = Boolean(this.busy);
     remove.addEventListener("click", async () => {
       if (!this.confirmRemove) { this.confirmRemove = true; this.draw(); return; }
-      this.app.secretStorage.setSecret(provider.secretId, "");
-      removeProvider(this.plugin.settings, provider.id);
-      await this.plugin.saveSettings();
-      this.close();
+      this.busy = "remove"; this.draw();
+      try {
+        await persistProviderRemoval(this.plugin.settings, provider.id, () => this.plugin.saveSettings());
+        if (provider.provider === "chatgpt" && !await signOutAccount(provider.secretId, this.app.secretStorage)) new Notice(at("revokeFailed"));
+        this.app.secretStorage.setSecret(provider.secretId, "");
+        this.close();
+      } catch (error) { this.error = connectionError(error); }
+      finally { this.busy = ""; if (!this.closed) this.draw(); }
     });
     this.contentEl.scrollTop = scroll;
   }
@@ -400,12 +479,14 @@ export class ProviderModal extends Modal {
     sectionHead(section, "连接");
     const preset = API_PROVIDERS[provider.provider] ?? API_PROVIDERS.custom!;
     const currentKey = this.secret(provider);
+    if (loginKind(provider.provider)) this.drawAccount(section, provider);
+    if (provider.provider === "chatgpt") return;
     const form = section.createDiv({ cls: "qa-ms-form" });
     let save!: HTMLButtonElement;
     const dirty = () => Boolean(this.keyDraft) || this.endpointDraft.trim() !== provider.baseUrl || this.protocolDraft !== apiProtocol(provider);
     const refresh = () => { save.disabled = Boolean(this.busy) || !dirty(); };
-    if (!preset.local) {
-      const keyField = field(form, "API Key", currentKey ? `当前 ${maskKey(currentKey)}` : "未填写");
+    if (!preset.local || provider.provider === "magpie") {
+      const keyField = field(form, provider.provider === "magpie" ? at("gatewayKey") : "API Key", currentKey ? `当前 ${maskKey(currentKey)}` : "未填写");
       const key = secretInput(keyField, "API Key", currentKey ? "粘贴新的 Key 以替换" : "粘贴 API Key");
       key.value = this.keyDraft;
       key.addEventListener("input", () => { this.keyDraft = key.value.trim(); refresh(); });
@@ -439,6 +520,36 @@ export class ProviderModal extends Modal {
     save.addEventListener("click", () => void this.saveConnection(provider));
     refresh();
     if (this.busy) form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach((control) => { control.disabled = true; });
+  }
+
+  private drawAccount(section: HTMLElement, provider: ProviderConfig): void {
+    const kind = loginKind(provider.provider)!;
+    const creds = readAccount(this.secret(provider));
+    if (kind === "chatgpt") section.createDiv({ cls: "qa-ms-note", text: creds?.access ? `${at("accountReady")} · ${creds.email || "ChatGPT"}` : at("needsLogin") });
+    const button = actionButton(section, "log-in", this.busy === "login" ? at("waiting") : at("again"));
+    button.disabled = Boolean(this.busy) || !Platform.isDesktopApp;
+    button.addEventListener("click", async () => {
+      const op = new AbortController(); this.accountOperation = op; this.busy = "login"; this.error = ""; this.draw();
+      const before = this.secret(provider);
+      try {
+        const result = await signInAccount(kind, this.app.secretStorage, url => window.open(url, "_blank", "noopener,noreferrer"), op.signal, creds ?? undefined);
+        if (this.closed || op.signal.aborted || !this.provider || this.secret(provider) !== before) return;
+        this.app.secretStorage.setSecret(provider.secretId, result.secret);
+        new Notice(at("accountReady"));
+      } catch (error) { if (!op.signal.aborted) this.error = connectionError(error); }
+      finally { this.busy = ""; this.accountOperation = null; if (!this.closed) this.draw(); }
+    });
+    if (this.busy === "login") actionButton(section, "x", at("cancel")).addEventListener("click", () => this.accountOperation?.abort());
+    if (kind === "chatgpt" && creds?.access) {
+      const out = actionButton(section, "log-out", at("signout")); out.disabled = Boolean(this.busy);
+      out.addEventListener("click", async () => {
+        this.busy = "logout"; this.draw();
+        try { if (!await signOutAccount(provider.secretId, this.app.secretStorage)) new Notice(at("revokeFailed")); }
+        catch (error) { this.error = connectionError(error); }
+        finally { this.busy = ""; if (!this.closed) this.draw(); }
+      });
+    }
+    if (this.error) section.createDiv({ cls: "qa-inline-error", text: this.error, attr: { role: "alert" } });
   }
 
   private async saveConnection(provider: ProviderConfig): Promise<void> {
@@ -489,7 +600,7 @@ export class ProviderModal extends Modal {
       const operation = new AbortController(); this.operation = operation;
       this.busy = "models"; this.modelError = ""; this.draw();
       try {
-        const models = await listModelsFor(provider, key, operation.signal);
+        const models = await listModelsFor(this.app, provider, key, operation.signal);
         if (this.closed || !this.provider) return;
         await this.save(refreshProviderModels(this.provider, models));
         new Notice(`已获取 ${models.length} 个模型`);
@@ -501,7 +612,7 @@ export class ProviderModal extends Modal {
     add.addEventListener("click", () => { this.addingModel = true; this.draw(); this.contentEl.querySelector<HTMLInputElement>(".qa-ms-add input")?.focus(); });
     const defaultModel = provider.model || provider.enabledModels?.[0];
     const test = actionButton(actions, "flask-conical", this.busy === "test" ? "测试中…" : "测试", this.busy === "test" ? "is-busy" : "");
-    test.disabled = Boolean(this.busy) || (!key && !permitsEmptyKey(provider)) || !defaultModel;
+    test.disabled = Boolean(this.busy) || (provider.provider === "chatgpt" ? !readAccount(key)?.access : !key && !permitsEmptyKey(provider)) || !defaultModel;
     test.addEventListener("click", () => void this.testModel(provider, key));
 
     if (this.modelError) section.createDiv({ cls: "qa-inline-error", text: this.modelError, attr: { role: "alert" } });
@@ -635,9 +746,9 @@ export class ProviderModal extends Modal {
       if (value !== undefined && !Number.isInteger(value)) { new Notice("上下文窗口需要是正整数"); return; }
       void save({ contextWindow: value });
     });
-    number("最大输出 Token", "留空：服务商默认", options.maxOutputTokens, { min: "1", max: String(model?.maxOutputTokens ?? 1_000_000), step: "1" }, (value) => void save({ maxOutputTokens: value }));
+    if (provider.provider !== "chatgpt") number("最大输出 Token", "留空：服务商默认", options.maxOutputTokens, { min: "1", max: String(model?.maxOutputTokens ?? 1_000_000), step: "1" }, (value) => void save({ maxOutputTokens: value }));
     // Thinking models fix their own sampling temperature.
-    if (!resolveModel(provider, id).efforts.length) number("温度", "0–2，留空：服务商默认", options.temperature, { min: "0", max: "2", step: "0.1" }, (value) => void save({ temperature: value }));
+    if (provider.provider !== "chatgpt" && !resolveModel(provider, id).efforts.length) number("温度", "0–2，留空：服务商默认", options.temperature, { min: "0", max: "2", step: "0.1" }, (value) => void save({ temperature: value }));
   }
 
   private optionRow(list: HTMLElement, title: string, hint: string): HTMLElement {
@@ -664,7 +775,7 @@ export class ProviderModal extends Modal {
     const operation = new AbortController(); this.operation = operation;
     this.busy = "test"; this.draw();
     try {
-      await verifyModel(provider, key, model, operation.signal);
+      await verifyModel(this.app, provider, key, model, operation.signal);
       new Notice(`${model} 测试成功`);
     } catch (error) { new Notice(`测试失败：${connectionError(error)}`); }
     finally { this.busy = ""; if (!this.closed) this.draw(); }

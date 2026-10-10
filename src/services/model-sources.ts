@@ -180,6 +180,24 @@ export function removeProvider(settings: QiaomuSettings, id: string): void {
   settings.recentModels = settings.recentModels.filter((item) => item.source !== `api:${id}`);
 }
 
+/** Credential deletion belongs after this succeeds; failed disk writes restore the removed source. */
+export async function persistProviderRemoval(settings: QiaomuSettings, id: string, persist: () => Promise<void>): Promise<void> {
+  const index = settings.providers.findIndex(item => item.id === id);
+  const provider = settings.providers[index];
+  if (!provider) return;
+  const before = { api: settings.api, backend: settings.backendKind, recent: settings.recentModels };
+  removeProvider(settings, id);
+  const after = { api: settings.api, backend: settings.backendKind, recent: settings.recentModels };
+  try { await persist(); }
+  catch (error) {
+    if (!findProvider(settings, id)) settings.providers.splice(index, 0, provider);
+    if (settings.api === after.api) settings.api = before.api;
+    if (settings.backendKind === after.backend) settings.backendKind = before.backend;
+    if (settings.recentModels === after.recent) settings.recentModels = before.recent;
+    throw error;
+  }
+}
+
 export function rememberRecent(settings: QiaomuSettings, source: string, model: string): void {
   if (!model) return;
   settings.recentModels = [{ source, model }, ...settings.recentModels.filter((item) => !(item.source === source && item.model === model))].slice(0, RECENT_LIMIT);

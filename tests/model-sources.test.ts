@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../src/defaults";
-import { activeProvider, agentShown, chooseModel, addProviderConnection, persistProviderChange, DEFAULT_VISIBLE_AGENT_IDS, exposedModels, maskKey, migrateProviders, newProvider, providerSecretId, removeProvider, upsertProvider, visibleAgentModels } from "../src/services/model-sources";
+import { activeProvider, agentShown, chooseModel, addProviderConnection, persistProviderChange, persistProviderRemoval, DEFAULT_VISIBLE_AGENT_IDS, exposedModels, maskKey, migrateProviders, newProvider, providerSecretId, removeProvider, upsertProvider, visibleAgentModels } from "../src/services/model-sources";
 import type { QiaomuSettings } from "../src/types";
 
 function fresh(): QiaomuSettings {
@@ -174,4 +174,15 @@ describe("failed provider persistence", () => {
     })).rejects.toThrow("disk full");
     expect(settings.providers[0]).toBe(old); expect(settings.providers).toHaveLength(2); expect(settings.api).toBe(api);
   });
+});
+
+
+it("restores a removed active subscription and recent models if disk persistence fails", async () => {
+  const settings = fresh();
+  const provider = addProviderConnection(settings, "chatgpt", "credential-fixture", () => {});
+  chooseModel(settings, `api:${provider.id}`, "test");
+  const before = { api: settings.api, recent: settings.recentModels, backend: settings.backendKind };
+  await expect(persistProviderRemoval(settings, provider.id, async () => { throw new Error("disk full"); })).rejects.toThrow("disk full");
+  expect(settings.providers[0]?.id).toBe(provider.id);
+  expect(settings.api).toBe(before.api); expect(settings.recentModels).toBe(before.recent); expect(settings.backendKind).toBe(before.backend);
 });

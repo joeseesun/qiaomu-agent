@@ -1,3 +1,6 @@
+import { accessToken } from "./provider-auth";
+import { detectMagpie } from "./magpie";
+import { chatgptBody, completeChatGPTStream } from "./chatgpt-transport";
 import { apiFetch, apiStatusError } from "./api-transport";
 import { connectionText as ct } from "../i18n/connection";
 import { activeNoteBlock, selectionBlock } from "./agent-prompt";
@@ -70,17 +73,24 @@ export class ApiBackend implements ChatBackend {
     this.label = connection.model || "Model API";
   }
   async listModels(_request?: ChatRequest, signal?: AbortSignal): Promise<ModelChoice[]> {
-    if (!this.apiKey && !permitsEmptyKey(this.connection)) throw new Error("请先配置 API Key");
+    const credential = await accessToken(this.connection, this.apiKey, this.app?.secretStorage);
+    if (!credential && !permitsEmptyKey(this.connection)) throw new Error("请先配置 API Key");
+    if (this.connection.provider === "magpie") await detectMagpie(this.connection.baseUrl, credential, signal ?? AbortSignal.timeout(5000));
     const base = apiBaseUrl(this.connection);
     const provider = this.connection.provider;
     const protocol = apiProtocol(this.connection);
     const headers: Record<string, string> = protocol === "anthropic"
-      ? { "x-api-key": this.apiKey, "anthropic-version": "2023-06-01", ...anthropicHeaders(provider, this.apiKey) }
-      : protocol === "google" ? { "x-goog-api-key": this.apiKey } : this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+      ? { "x-api-key": credential, "anthropic-version": "2023-06-01", ...anthropicHeaders(provider, credential) }
+      : protocol === "google" ? { "x-goog-api-key": credential } : credential ? { Authorization: `Bearer ${credential}` } : {};
     const response = await apiFetch(`${base}/models`, { headers, redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
     if (!response.ok) throw apiStatusError(response.status);
-    const body = await response.json() as { data?: { id: string; name?: string; display_name?: string; max_output_tokens?: number; effort?: { supported_levels?: string[] } }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
+    const body = await response.json() as { data?: { id: string; name?: string; display_name?: string; max_output_tokens?: number; supported_reasoning_levels?: Array<{ effort: string }>; effort?: { supported_levels?: string[] } }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
     if (!body || !Array.isArray(body.data) && !Array.isArray(body.models)) throw new Error(ct("invalidResponse"));
+    if (provider === "chatgpt") {
+      const catalog = (body as unknown as { models?: Array<{ slug?: string; display_name?: string; visibility?: string; supported_reasoning_levels?: Array<{ effort: string }>; context_window?: number }> }).models;
+      if (!Array.isArray(catalog)) throw new Error(ct("invalidResponse"));
+      return catalog.filter(m => typeof m.slug === "string" && m.visibility === "list").map(m => ({ id: m.slug!, name: m.display_name || m.slug!, ...reportedCapabilities(m), efforts: (m.supported_reasoning_levels ?? []).map(x => x.effort).filter(x => typeof x === "string" && /^[a-z0-9_-]{1,24}$/.test(x)), isDefault: m.slug === this.connection.model }));
+    }
     const data = Array.isArray(body.data) ? body.data : undefined;
     const googleModels = Array.isArray(body.models) ? body.models : undefined;
     const models = data?.filter((m) => m && typeof m.id === "string" && m.id.trim()).map((m) => ({ id: m.id, name: m.name || m.display_name || m.id,
@@ -90,7 +100,8 @@ export class ApiBackend implements ChatBackend {
     return models.map((m) => {
       const raw = data?.find((item) => item?.id === m.id);
       const allowedEfforts = provider === "deepseek" ? ["none", "low", "high", "max"] : ["low", "medium", "high"];
-      const reportedEfforts = raw?.effort?.supported_levels?.filter((level) => allowedEfforts.includes(level)) ?? [];
+      const gatewayEfforts = provider === "magpie" ? raw?.supported_reasoning_levels?.map(x => x.effort).filter(x => typeof x === "string" && /^[a-z0-9_-]{1,24}$/.test(x)) : undefined;
+      const reportedEfforts = gatewayEfforts ?? raw?.effort?.supported_levels?.filter((level) => allowedEfforts.includes(level)) ?? [];
       return { ...m, efforts: reportedEfforts.length ? reportedEfforts : resolveModel({ provider, models: [{ ...m, efforts: [] }] }, m.id).efforts, isDefault: m.id === this.connection.model };
     });
   }
@@ -103,10 +114,16 @@ export class ApiBackend implements ChatBackend {
     const thinking = thinkingRequest(this.connection, protocol, modelId, request.reasoningEffort);
     const editingImage = request.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
     const searching = request.webSearch !== false && !editingImage;
-    const options = { apiKey: this.apiKey || "local", baseURL: apiBaseUrl(this.connection), fetch: (input: RequestInfo | URL, init?: RequestInit) => apiFetch(input, { ...init, body: withBodyExtras(init?.body, {
+    const siwc = this.connection.provider === "chatgpt";
+    const credential = await accessToken(this.connection, this.apiKey, this.app?.secretStorage);
+    const options = { apiKey: credential || "local", baseURL: apiBaseUrl(this.connection), fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      if (siwc) headers.set("Authorization", `Bearer ${await accessToken(this.connection, this.apiKey, this.app?.secretStorage)}`);
+      const outgoingBody = withBodyExtras(init?.body, thinking.body ?? null);
+      return apiFetch(input, { ...init, headers, body: siwc ? chatgptBody(outgoingBody) : withBodyExtras(init?.body, {
       ...thinking.body,
       ...(this.connection.provider === "openrouter" && searching ? { tools: [{ type: "openrouter:web_search", parameters: { max_results: 5, max_total_results: 10 } }, { type: "openrouter:web_fetch" }] } : {}),
-    }), redirect: "error" }).then(async (response) => { if (!response.ok) { await response.body?.cancel(); throw apiStatusError(response.status); } return response; }) };
+    }), redirect: "error" }).then(async (response) => { if (!response.ok) { await response.body?.cancel(); throw apiStatusError(response.status); } return siwc ? completeChatGPTStream(response) : response; }); } };
     const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
     if (editingImage && this.connection.provider !== "openai" && !(protocol === "google" && googleImageModel)) {
       throw new Error("当前模型尚未接入图片编辑；请切换 Codex、OpenAI 或 Gemini 图片模型");
@@ -202,8 +219,9 @@ export class ApiBackend implements ChatBackend {
       ...(request.modelOptions?.temperature !== undefined ? { temperature: request.modelOptions.temperature } : {}),
       ...(request.modelOptions?.maxOutputTokens !== undefined ? { maxOutputTokens: request.modelOptions.maxOutputTokens } : {}),
       ...(thinking.reasoning ? { reasoning: thinking.reasoning } : {}),
-      ...(thinking.providerOptions || (editingImage && protocol === "google") ? { providerOptions: {
+      ...(siwc || thinking.providerOptions || (editingImage && protocol === "google") ? { providerOptions: {
         ...thinking.providerOptions,
+        ...(siwc ? { openai: { store: false, systemMessageMode: "developer" } } : {}),
         ...(editingImage && protocol === "google" ? { google: { responseModalities: ["TEXT", "IMAGE"] as ("TEXT" | "IMAGE")[] } } : {}),
       } as Parameters<typeof streamText>[0]["providerOptions"] } : {}),
     } as Parameters<typeof streamText>[0]);

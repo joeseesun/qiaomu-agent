@@ -4,7 +4,7 @@
 
 **中文** | [English](#english) · [下载最新版](https://github.com/joeseesun/qiaomu-agent/releases/latest) · [安装方法](#安装) · [反馈问题](https://github.com/joeseesun/qiaomu-agent/issues)
 
-读笔记时直接提问，选中一段话请 Agent 改写，再检查改动并决定是否保留。你可以接入本机已有的 Codex、Claude Code 等 Agent，也可以使用自己的模型 API Key；对话、资料和修改都留在 Obsidian 的工作流里。
+读笔记时直接提问，选中一段话请 Agent 改写，再检查改动并决定是否保留。你可以接入本机已有的 Codex、Claude Code 等 Agent，也可以登录 ChatGPT、词元跳动、OpenRouter，连接 Magpie 网关，或使用自己的模型 API Key；对话、资料和修改都留在 Obsidian 的工作流里。
 
 *Ask questions about your notes, rewrite a selection, and review changes inside Obsidian. Bring a local agent or your own model API key.*
 
@@ -62,7 +62,9 @@
 
 - **只读**是默认权限；需要改写时可切到「可修改当前库」。桌面端还提供「完全访问」，允许 Agent 处理库外文件或命令，使用前请确认任务和本机 Agent 的审批策略。删除操作进入回收站，修改有变更记录与撤销入口。
 - 插件没有自己的对话服务器，也不收集遥测。使用云端模型时，消息及你附加的笔记、选区、图片或网页内容会发给所选服务商；使用本机 Agent 时，联网行为取决于该 Agent 的配置。
-- API Key 保存在 Obsidian SecretStorage 中。联网搜索可能使用模型服务商或你自己的 Brave Search Key。
+- API Key 和账号凭据保存在 Obsidian SecretStorage 中。联网搜索可能使用模型服务商或你自己的 Brave Search Key。
+
+账号与订阅入口见「模型 → 添加服务商」。Claude 订阅使用已登录的 Claude Code 或 Magpie；国内 Coding 套餐提供专属 Key 预设，更多账号登录由 Magpie 管理。[接入说明与支持矩阵](docs/research/2026-10-11-account-and-gateway-access.md)。
 
 桌面端已在 macOS 的真实库中验证。移动端的 API 对话等路径尚未在 iOS / Android 真机验收，本机 CLI 与 MCP 连接仅适用于桌面端；部分服务商的跨域策略也可能阻止移动端直连。
 
@@ -70,6 +72,8 @@
 <summary>更多：联网与库外访问细节</summary>
 
 本插件没有自己的服务器，不收集遥测数据。使用云端模型时，你的消息、附加的笔记、选区、图片、网页内容和所选技能正文，会发送到你选择的服务商 API 地址。拉取模型列表、验证 Key 时也会请求该服务商。模型自带搜索可能单独计费；连接 Brave Search 后，搜索词会发送到 `api.search.brave.com`，Brave Key 留在本机。网页读取只接受公开 HTTP/HTTPS 地址，本机和内网地址会被拒绝。打开「设置 → 关于」时会从 `radio.qiaomu.ai` 加载作者公众号和打赏二维码图片。API Key 保存在 Obsidian SecretStorage 中，不写入插件数据文件。“粘贴密钥”仅在点击后读取剪贴板，不会自动读取。手机端可直接粘贴，或使用输入框原生粘贴；系统可能要求粘贴权限。
+
+桌面账号授权会打开服务商登录网页，在 `127.0.0.1` 的临时端口接收回调，并向服务商兑换/刷新凭据；取消或关闭后监听器停止。Magpie 会收到对话内容和附加上下文，再转发给你选择的上游；其登录与额度由 Magpie 管理。检测 Magpie 只读取公开配置的端口，不读取其账号文件。
 
 桌面端可启动已安装的本机 Agent CLI，并在系统临时目录创建仅当前用户可读写的 MCP 配置文件，运行结束后删除。它可读取已配置的本机技能目录；导入技能时将所选文件夹复制到个人技能目录。选择「保存到 Codex」工具连接时会通过 `codex mcp add` 写入 Codex 全局配置。选择「完全访问」时，Agent 可以读写电脑文件并运行命令；读取凭据、改动启动项、大范围删除和高风险命令仍会被拦截或先询问。
 
@@ -93,4 +97,4 @@
 
 **Try it:** Connect a logged-in local agent or add your provider API key. With the default read-only permission, ask “Summarize the current note.” To try editing, select text in a test note, switch permission to “modify current vault,” ask for a rewrite, and review the recorded change. Local agents follow their own approval settings.
 
-**Privacy and limits:** There is no Qiaomu conversation server or telemetry. Cloud model requests send your prompt and attached context to your selected provider, which may charge for usage. Keys are stored in Obsidian SecretStorage. The Paste API key button reads the clipboard only after an explicit click; it may require system paste permission. Desktop use was verified on macOS; mobile behavior has not been checked on physical devices. Local CLI agents and MCP connections are desktop-only. See [CLI compatibility notes](docs/cli-compatibility.md), [license](LICENSE), and [Issues](https://github.com/joeseesun/qiaomu-agent/issues).
+**Privacy and limits:** There is no Qiaomu conversation server or telemetry. Cloud model requests send your prompt and attached context to your selected provider, which may charge for usage. Keys and account credentials are stored in Obsidian SecretStorage. Desktop account sign-in opens the provider website and a temporary loopback callback. Magpie forwards requests to the upstream account selected in its gateway; the plugin does not read Magpie credentials. See the [account and subscription matrix](docs/research/2026-10-11-account-and-gateway-access.md). The Paste API key button reads the clipboard only after an explicit click; it may require system paste permission. Desktop use was verified on macOS; mobile behavior has not been checked on physical devices. Local CLI agents and MCP connections are desktop-only. See [CLI compatibility notes](docs/cli-compatibility.md), [license](LICENSE), and [Issues](https://github.com/joeseesun/qiaomu-agent/issues).

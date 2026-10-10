@@ -31,8 +31,8 @@ export function reportedCapabilities(raw: Record<string, unknown>): Pick<ModelCh
   const result: Pick<ModelChoice, "contextWindow" | "vision" | "reasoning"> = {};
   if (contextWindow) result.contextWindow = contextWindow;
   if (inputs.length) result.vision = inputs.includes("image");
-  if (parameters.length || typeof raw.thinking === "boolean" || (raw.reasoning && typeof raw.reasoning === "object") || Array.isArray(effort.supported_levels)) {
-    result.reasoning = parameters.includes("reasoning") || raw.thinking === true || Boolean(raw.reasoning && typeof raw.reasoning === "object") || strings(effort.supported_levels).length > 0;
+  if (parameters.length || typeof raw.thinking === "boolean" || typeof raw.reasoning === "boolean" || (raw.reasoning && typeof raw.reasoning === "object") || Array.isArray(effort.supported_levels)) {
+    result.reasoning = parameters.includes("reasoning") || raw.thinking === true || raw.reasoning === true || Boolean(raw.reasoning && typeof raw.reasoning === "object") || strings(effort.supported_levels).length > 0;
   }
   return result;
 }

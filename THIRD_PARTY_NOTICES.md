@@ -27,3 +27,5 @@ Not bundled. Diagrams are rendered with the Mermaid copy that Obsidian ships (`l
 `src/ui/brand-icons.ts` embeds provider and agent marks from [@lobehub/icons-static-svg](https://github.com/lobehub/lobe-icons) 1.95.1, MIT License. Local modifications: titles removed, internal ids namespaced, root `fill="currentColor"` added; Kimi uses the mono mark. Brand names and logos remain trademarks of their owners and are used only to identify the service.
 
 Design reference only, no code copied: [magpie](https://github.com/yetone/magpie) (MIT) for the provider list, one-field provider setup and grouped model picker.
+
+Account and gateway protocol research (no upstream authentication code copied): Magpie `4ee3a76b7f50d42c5ecadd5105548c98978a77eb`, Magpie community plugins `bcc94e593339539fbe4c074ea666846455b6c167`, and Qiaomu Clipper `d97772a`. Sources and local design choices are recorded in [the integration research](docs/research/2026-10-11-account-and-gateway-access.md).
