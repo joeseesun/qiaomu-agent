@@ -13,7 +13,7 @@ import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, type Provi
 import { ApiBackend } from "../services/api-backend";
 import { compactTokens, resolveModel } from "../services/model-capabilities";
 import { isChatModel, recommendedModels } from "../services/key-detection";
-import { agentShown, addProviderConnection, persistProviderChange, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, providerSecretId, removeProvider, upsertProvider } from "../services/model-sources";
+import { agentShown, addProviderConnection, persistProviderChange, persistProviderRemoval, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, providerSecretId, upsertProvider } from "../services/model-sources";
 import { nativeTransportFor, nativeTransportLabel } from "../services/native-agent-backend";
 import { agentIconKey } from "./brand-icon";
 import { BRAND_ICONS } from "./brand-icons";
@@ -237,7 +237,7 @@ export class ProviderChooserModal extends Modal {
       const preset = API_PROVIDERS[id]!; choice(accounts, id, preset.label, preset.icon, "log-in");
     }
     const subscriptions = group("Claude · Codex · Copilot · Qoder");
-    choice(subscriptions, "magpie", "Magpie", undefined, "network", "订阅 subscription Claude Codex Copilot Qoder ZCode Kimi Gemini Antigravity MiMo");
+    choice(subscriptions, "magpie", "Magpie", undefined, "network", "订阅 subscription Claude Codex Copilot Qoder ZCode Kimi Gemini Antigravity MiMo MiniMax Code WorkBuddy Trae");
     for (const [groupId, title] of [...GROUPS, ["plan", at("plans")] as [ProviderGroup, string]]) {
       const presets = Object.entries(API_PROVIDERS).filter(([id, preset]) => id !== "custom" && !preset.local && preset.group === groupId && !loginKind(id));
       if (!presets.length) continue;
@@ -464,7 +464,7 @@ export class ProviderModal extends Modal {
       if (!this.confirmRemove) { this.confirmRemove = true; this.draw(); return; }
       this.busy = "remove"; this.draw();
       try {
-        await persistProviderChange(this.plugin.settings, () => { removeProvider(this.plugin.settings, provider.id); return provider; }, () => this.plugin.saveSettings());
+        await persistProviderRemoval(this.plugin.settings, provider.id, () => this.plugin.saveSettings());
         if (provider.provider === "chatgpt" && !await signOutAccount(provider.secretId, this.app.secretStorage)) new Notice(at("revokeFailed"));
         this.app.secretStorage.setSecret(provider.secretId, "");
         this.close();
