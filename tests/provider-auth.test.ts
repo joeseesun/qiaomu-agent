@@ -116,3 +116,12 @@ it("requires an actual key for remote Magpie and never fabricates its local app 
   expect(await accessToken({ ...conn, provider: "magpie", baseUrl: "https://gateway.example/v1" }, "")).toBe("");
   expect(await accessToken({ ...conn, provider: "magpie", baseUrl: "http://127.0.0.1:3425/v1" }, "")).toBe("magpie-qiaomu-agent");
 });
+
+it("rejects malformed saved accounts and malformed rotated refresh tokens", async () => {
+  expect(readAccount('{"version":1,"clientId":{},"subject":[]}')).toBeNull();
+  expect(readAccount(JSON.stringify(account({ scopes: [42] as unknown as string[] })))).toBeNull();
+  const s = store({ a: JSON.stringify(account()) });
+  http.mockResolvedValue(new Response(JSON.stringify({ access_token: "new", refresh_token: { unsafe: true }, expires_in: 3600 })));
+  await expect(accessToken(conn, "", s)).rejects.toThrow();
+  expect(readAccount(s.getSecret("a")!)?.refresh).toBe("refresh-a");
+});

@@ -2,6 +2,7 @@ import { apiFetch } from "./api-transport";
 import { permitsEmptyKey, validateApiUrl } from "./api-providers";
 import { accountText as t } from "../i18n/accounts";
 import { getRuntimeRequire } from "./runtime-require";
+import { accountObject } from "./account-json";
 
 export const MAGPIE_BASE = "http://127.0.0.1:3425/v1";
 /** Only public gateway settings; never read or modify Magpie's account/key files. */
@@ -14,8 +15,8 @@ export async function magpieAddress(): Promise<string> {
     const path = require("node:path") as typeof import("node:path");
     const runtime = require("node:process") as typeof import("node:process");
     const root = runtime.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-    const config = JSON.parse(await fs.readFile(path.join(root, "magpie", "settings.json"), "utf8"));
-    if (Number.isInteger(config.port) && config.port > 0 && config.port < 65536) return `http://127.0.0.1:${config.port}/v1`;
+    const config = accountObject(JSON.parse(await fs.readFile(path.join(root, "magpie", "settings.json"), "utf8")) as unknown);
+    if (typeof config.port === "number" && Number.isInteger(config.port) && config.port > 0 && config.port < 65536) return `http://127.0.0.1:${config.port}/v1`;
   } catch { /* default address remains editable */ }
   return MAGPIE_BASE;
 }
@@ -29,7 +30,7 @@ export async function detectMagpie(base: string, key: string, signal: AbortSigna
   try {
     const response = await apiFetch(url.href, { headers: { Authorization: `Bearer ${key || "magpie-qiaomu-agent"}` }, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
     if (!response.ok) throw new Error();
-    const data = await response.json();
+    const data = accountObject(await response.json() as unknown);
     if (data.name !== "magpie") throw new Error();
     return typeof data.version === "string" ? data.version : "";
   } catch { signal.throwIfAborted(); throw new Error(t("notMagpie")); }

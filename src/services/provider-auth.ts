@@ -3,6 +3,7 @@ import { apiFetch } from "./api-transport";
 import { accountText as t } from "../i18n/accounts";
 import { listenOAuth } from "./oauth-loopback";
 import { permitsEmptyKey } from "./api-providers";
+import { accountObject as object, accountString as requiredString, accountExpiry } from "./account-json";
 
 export type LoginKind = "chatgpt" | "openrouter" | "tokendance";
 export interface SecretStore { getSecret(id: string): string | null; setSecret(id: string, value: string): void }
@@ -22,17 +23,22 @@ const bytes = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/
 export const randomOAuth = () => b64(crypto.getRandomValues(new Uint8Array(48)));
 export async function pkceChallenge(verifier: string): Promise<string> { return b64(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))); }
 
-async function json(url: string, init: RequestInit = {}): Promise<Record<string, any>> {
+async function json(url: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await apiFetch(url, { ...init, redirect: "error", signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) });
   if (!response.ok) { await response.body?.cancel(); throw new Error(response.status === 400 || response.status === 401 ? t("expired") : t("failed")); }
-  return response.json();
+  return object(await response.json() as unknown);
 }
 async function token(body: Record<string, string>, signal?: AbortSignal) {
   return json(tokenUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body).toString(), signal });
 }
 
 export function readAccount(raw: string): AccountCredentials | null {
-  try { const c = JSON.parse(raw); return c.version === 1 && typeof c.clientId === "string" && typeof c.subject === "string" && typeof c.access === "string" && typeof c.refresh === "string" && typeof c.expires === "number" && Array.isArray(c.scopes) ? c : null; } catch { return null; }
+  try {
+    const c = object(JSON.parse(raw) as unknown);
+    if (c.version !== 1 || typeof c.access !== "string" || typeof c.refresh !== "string" || typeof c.expires !== "number" || !Number.isFinite(c.expires) || !Array.isArray(c.scopes) || !c.scopes.every((s: unknown) => typeof s === "string")) return null;
+    return { version: 1, clientId: requiredString(c.clientId), subject: requiredString(c.subject), access: c.access, refresh: c.refresh, expires: c.expires,
+      scopes: c.scopes.filter((s: unknown): s is string => typeof s === "string"), email: typeof c.email === "string" ? c.email : "", hostId: typeof c.hostId === "string" ? c.hostId : "", idToken: typeof c.idToken === "string" ? c.idToken : "" };
+  } catch { return null; }
 }
 
 /** Verify, never merely decode, the identity supplied by the issuer. */
@@ -40,19 +46,21 @@ export async function validateIdentity(jwt: string, clientId: string, nonce: str
   try {
     const parts = jwt.split(".");
     if (parts.length !== 3) throw new Error();
-    const header = JSON.parse(new TextDecoder().decode(bytes(parts[0]!)));
-    const claims = JSON.parse(new TextDecoder().decode(bytes(parts[1]!)));
+    const header = object(JSON.parse(new TextDecoder().decode(bytes(parts[0]!))) as unknown);
+    const claims = object(JSON.parse(new TextDecoder().decode(bytes(parts[1]!))) as unknown);
     if (header.alg !== "RS256" || typeof header.kid !== "string") throw new Error();
     const discovery = await json(`${issuer}/.well-known/openid-configuration`, { signal });
-    const jwksUrl = new URL(discovery.jwks_uri);
+    const jwksUrl = new URL(requiredString(discovery.jwks_uri));
     if (jwksUrl.origin !== issuer || discovery.issuer !== issuer) throw new Error();
     const jwks = await json(jwksUrl.href, { signal });
-    const jwk = jwks.keys?.find((key: JsonWebKey & { kid: string }) => key.kid === header.kid && key.kty === "RSA" && (!key.use || key.use === "sig"));
+    if (!Array.isArray(jwks.keys)) throw new Error();
+    const jwk = jwks.keys.map((key: unknown) => object(key)).find(key => key.kid === header.kid && key.kty === "RSA" && (!key.use || key.use === "sig") && (!key.alg || key.alg === "RS256"));
     if (!jwk) throw new Error();
-    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: requiredString(jwk.n), e: requiredString(jwk.e), alg: "RS256", use: "sig" }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     if (!await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, bytes(parts[2]!), new TextEncoder().encode(`${parts[0]}.${parts[1]}`))) throw new Error();
-    const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    const audience: unknown[] = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
     if (claims.iss !== issuer || !audience.includes(clientId) || (audience.length > 1 && claims.azp !== clientId) || claims.nonce !== nonce || typeof claims.exp !== "number" || claims.exp <= Date.now() / 1000 || typeof claims.sub !== "string" || !claims.sub) throw new Error();
+    if (claims.nbf !== undefined && (typeof claims.nbf !== "number" || claims.nbf > Date.now() / 1000 + 60)) throw new Error();
     return { sub: claims.sub, email: typeof claims.email === "string" ? claims.email : "" };
   } catch { signal.throwIfAborted(); throw new Error(t("invalid")); }
 }
@@ -96,13 +104,12 @@ export async function signInAccount(kind: LoginKind, store: SecretStore, openBro
     const clientId = back.searchParams.get("client_id") || existing?.clientId;
     if (!clientId || clientId === "dynamic_agent_client" || (existing && clientId !== existing.clientId)) throw new Error(t("invalid"));
     const data = await token({ grant_type: "authorization_code", client_id: clientId, code, code_verifier: verifier, redirect_uri: listener.redirect, resource }, combined);
-    const identity = await validateIdentity(data.id_token, clientId, nonce, combined);
+    const identity = await validateIdentity(requiredString(data.id_token), clientId, nonce, combined);
     if (existing && identity.sub !== existing.subject) throw new Error(t("invalid"));
-    const scopes = String(data.scope || "").split(/\s+/);
+    const scopes = typeof data.scope === "string" ? data.scope.split(/\s+/) : [];
     if (!scopes.includes("chatgpt.tokens.use.direct")) throw new Error(t("unsupported"));
-    if (!data.access_token || !data.refresh_token) throw new Error(t("invalid"));
     combined.throwIfAborted();
-    const creds: AccountCredentials = { version: 1, clientId, subject: identity.sub, email: identity.email, hostId, access: data.access_token, refresh: data.refresh_token, idToken: data.id_token, expires: Date.now() + (Number(data.expires_in) || 3600) * 1000, scopes };
+    const creds: AccountCredentials = { version: 1, clientId, subject: identity.sub, email: identity.email, hostId, access: requiredString(data.access_token), refresh: requiredString(data.refresh_token), idToken: requiredString(data.id_token), expires: accountExpiry(data.expires_in), scopes };
     return { secret: JSON.stringify(creds), label: identity.email || "ChatGPT" };
   } finally { listener?.close(); sessions.delete(controller); }
 }
@@ -129,10 +136,10 @@ export async function accessToken(connection: ApiConnection, raw: string, store?
     if (store.getSecret(key) !== saved) throw new Error(t("expired"));
     const scopes = typeof data.scope === "string" ? data.scope.split(/\s+/) : creds.scopes;
     if (!scopes.includes("chatgpt.tokens.use.direct")) throw new Error(t("unsupported"));
-    const next = JSON.stringify({ ...creds, access: data.access_token, refresh: data.refresh_token || creds.refresh, scopes, expires: Date.now() + (Number(data.expires_in) || 3600) * 1000 });
+    const next = JSON.stringify({ ...creds, access: data.access_token, refresh: data.refresh_token === undefined ? creds.refresh : requiredString(data.refresh_token), scopes, expires: accountExpiry(data.expires_in) });
     pending.set(key, { before: saved, after: next });
     store.setSecret(key, next); pending.delete(key);
-    return data.access_token as string;
+    return data.access_token;
   };
   let promise = refreshing.get(key);
   if (!promise) {
@@ -151,7 +158,7 @@ export async function signOutAccount(id: string, store: SecretStore): Promise<bo
   try {
     if (creds?.refresh) {
       const discovery = await json(`${issuer}/.well-known/openid-configuration`);
-      const url = new URL(discovery.revocation_endpoint);
+      const url = new URL(requiredString(discovery.revocation_endpoint));
       if (url.origin !== issuer) throw new Error();
       const response = await apiFetch(url.href, { method: "POST", redirect: "error", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: creds.refresh, token_type_hint: "refresh_token", client_id: creds.clientId }).toString(), signal: AbortSignal.timeout(15_000) });
       revoked = response.ok; await response.body?.cancel();
