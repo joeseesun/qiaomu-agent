@@ -29,4 +29,20 @@ describe("API provider configuration", () => {
   it.each(["http://example.com/v1", "https://user:secret@example.com/v1", "https://example.com/v1?key=secret", "file:///tmp/api", "https://example.com/#secret"])("rejects unsafe endpoint %s", (url) => {
     expect(() => validateApiUrl(url)).toThrow();
   });
+  it("rejects private HTTP by default without confirmation", () => {
+    expect(() => validateApiUrl("http://172.16.92.211:23323/v1")).toThrow("局域网私有地址请确认允许使用 HTTP 连接");
+    expect(() => validateApiUrl("http://192.168.1.100:8000/v1")).toThrow("局域网私有地址请确认允许使用 HTTP 连接");
+  });
+  it("allows private HTTP when explicitly confirmed", () => {
+    expect(validateApiUrl("http://172.16.92.211:23323/v1", true)).toBe("http://172.16.92.211:23323/v1");
+    expect(validateApiUrl("http://192.168.1.100:8000/v1/", { allowPrivateHttp: true })).toBe("http://192.168.1.100:8000/v1");
+    expect(validateApiUrl("http://10.0.0.2:11434/v1", true)).toBe("http://10.0.0.2:11434/v1");
+  });
+  it("still rejects public remote HTTP even when private HTTP is allowed", () => {
+    expect(() => validateApiUrl("http://example.com/v1", true)).toThrow();
+    expect(() => validateApiUrl("http://8.8.8.8/v1", true)).toThrow();
+  });
+  it("normalizes apiBaseUrl with configured private HTTP endpoints", () => {
+    expect(apiBaseUrl({ ...DEFAULT_SETTINGS.api, provider: "custom", baseUrl: "http://172.16.92.211:23323/v1" })).toBe("http://172.16.92.211:23323/v1");
+  });
 });

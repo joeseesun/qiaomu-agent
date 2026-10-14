@@ -1,3 +1,5 @@
+import { isLocalOrPrivateHost } from "./network-hosts";
+
 export interface McpServerEntry {
   name: string;
   kind: "http" | "stdio";
@@ -34,8 +36,8 @@ export function saveMcpServer(raw: string, entry: McpServerEntry): string {
   const target = entry.target.trim();
   if (entry.kind === "http") {
     const url = new URL(target);
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
-      throw new Error("远程地址需要 HTTPS，本机可使用 HTTP");
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalOrPrivateHost(url.hostname)))
+      throw new Error("远程地址需要 HTTPS，本机或局域网可使用 HTTP");
   } else if (!target || /\s/.test(target)) throw new Error("请填写可执行命令；参数单独填写");
   const config = readMcpConfig(raw);
   const servers = object(config.mcpServers) ?? {};

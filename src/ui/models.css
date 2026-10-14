@@ -437,3 +437,12 @@ details[open] > .qa-disclosure .qa-disclosure-chevron { transform: rotate(90deg)
 .qa-prompt-help code { font-size: 11px; }
 .qa-prompt-editor-actions { display: flex; align-items: center; gap: 8px; }
 .qa-prompt-editor-spacer { flex: 1; }
+
+/* Private network HTTP inline warning */
+.qa-ms-private-http-notice { margin-top: 8px; padding: 10px 12px; border-radius: var(--qa-radius-sm, 6px); border: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
+.qa-ms-private-http-row { display: flex; gap: 10px; align-items: flex-start; }
+.qa-ms-private-http-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--text-warning, #d97706); flex-shrink: 0; margin-top: 2px; }
+.qa-ms-private-http-body { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.qa-ms-private-http-text { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.qa-ms-private-http-label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-normal); cursor: pointer; user-select: none; }
+.qa-ms-private-http-label input[type="checkbox"] { margin: 0; cursor: pointer; }

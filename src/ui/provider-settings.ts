@@ -9,7 +9,7 @@ import { connectionError } from "../services/api-transport";
 import { Modal, Notice, Platform, setIcon, type App } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
 import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ModelOptions, ProviderConfig } from "../types";
-import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, type ProviderGroup } from "../services/api-providers";
+import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, isPrivateHttpUrl, type ProviderGroup } from "../services/api-providers";
 import { ApiBackend } from "../services/api-backend";
 import { compactTokens, resolveModel } from "../services/model-capabilities";
 import { isChatModel, recommendedModels } from "../services/key-detection";
@@ -56,6 +56,41 @@ function labelGroup(group: HTMLElement, label: string): void {
   group.createSpan({ cls: "qiaomu-agent__sr-only", text: label, attr: { id } });
   group.setAttribute("aria-labelledby", id);
 }
+
+function renderPrivateHttpNotice(
+  parent: HTMLElement,
+  getUrl: () => string,
+  getAllow: () => boolean,
+  setAllow: (allow: boolean) => void,
+  onClearError?: () => void
+): () => void {
+  const notice = parent.createDiv({ cls: "qa-ms-private-http-notice" });
+  const update = () => {
+    notice.empty();
+    const url = getUrl();
+    if (!isPrivateHttpUrl(url)) {
+      notice.hidden = true;
+      return;
+    }
+    notice.hidden = false;
+    const row = notice.createDiv({ cls: "qa-ms-private-http-row" });
+    const icon = row.createSpan({ cls: "qa-ms-private-http-icon", attr: { "aria-hidden": "true" } });
+    setIcon(icon, "shield-alert");
+    const body = row.createDiv({ cls: "qa-ms-private-http-body" });
+    body.createDiv({ cls: "qa-ms-private-http-text", text: "检测到局域网私有地址。未加密的 HTTP 传输可能会在局域网内暴露 API Key。" });
+    const label = body.createEl("label", { cls: "qa-ms-private-http-label" });
+    const checkbox = label.createEl("input", { type: "checkbox" });
+    checkbox.checked = getAllow();
+    checkbox.addEventListener("change", () => {
+      setAllow(checkbox.checked);
+      if (checkbox.checked && onClearError) onClearError();
+    });
+    label.createSpan({ text: "允许在此局域网地址上使用 HTTP" });
+  };
+  update();
+  return update;
+}
+
 
 
 
@@ -201,7 +236,8 @@ export class ProviderChooserModal extends Modal {
   private error = "";
   private changed = false;
   private loginOperation: AbortController | null = null;
-  private drafts = new Map<string, { key: string; url: string; name: string }>();
+  private allowPrivateHttp = false;
+  private drafts = new Map<string, { key: string; url: string; name: string; allowPrivateHttp?: boolean }>();
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly onChange: () => void) { super(app); }
 
   private disposeMobile = () => {};
@@ -218,6 +254,7 @@ export class ProviderChooserModal extends Modal {
     const choose = (id: string) => {
       this.selected = id; this.error = "";
       const draft = this.drafts.get(id); this.key = draft?.key ?? ""; this.url = draft?.url ?? API_PROVIDERS[id]?.baseUrl ?? ""; this.name = draft?.name ?? "";
+      this.allowPrivateHttp = draft?.allowPrivateHttp ?? isPrivateHttpUrl(this.url);
       this.draw();
     };
     const group = (title: string) => {
@@ -270,7 +307,7 @@ export class ProviderChooserModal extends Modal {
     modalTitle(this, this.selected === "custom" ? "自定义接口" : preset.label, { key: preset.icon, fallback: this.selected === "custom" ? "settings-2" : "boxes" },
       () => { if (this.busy && !this.loginOperation) return;
         this.loginOperation?.abort(); this.loginOperation = null; this.busy = false;
-        this.drafts.set(this.selected, { key: this.key, url: this.url, name: this.name });
+        this.drafts.set(this.selected, { key: this.key, url: this.url, name: this.name, allowPrivateHttp: this.allowPrivateHttp });
         this.selected = ""; this.error = ""; this.draw(); });
     const back = this.titleEl.querySelector<HTMLButtonElement>(".qa-modal-back");
     if (back) back.disabled = this.busy && !this.loginOperation;
@@ -293,9 +330,20 @@ export class ProviderChooserModal extends Modal {
         });
         option.addEventListener("click", () => { this.protocol = value; this.error = ""; this.draw(); this.contentEl.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(); });
       }
-      const url = labeledInput(field(form, "接口地址"), "接口地址", "url", "qa-ms-input is-mono", { placeholder: this.protocol === "anthropic" ? "https://api.example.com" : "https://api.example.com/v1" });
+      const urlField = field(form, "接口地址");
+      const url = labeledInput(urlField, "接口地址", "url", "qa-ms-input is-mono", { placeholder: this.protocol === "anthropic" ? "https://api.example.com" : "https://api.example.com/v1" });
       url.value = this.url;
-      url.addEventListener("input", () => { this.url = url.value.trim(); });
+      const updateNotice = renderPrivateHttpNotice(form, () => this.url, () => this.allowPrivateHttp, (val) => { this.allowPrivateHttp = val; }, () => {
+        if (this.error.includes("局域网")) { this.error = ""; form.querySelector(".qa-inline-error")?.remove(); }
+      });
+      url.addEventListener("input", () => {
+        const prev = this.url;
+        this.url = url.value.trim();
+        if (isPrivateHttpUrl(prev) !== isPrivateHttpUrl(this.url)) {
+          this.allowPrivateHttp = false;
+        }
+        updateNotice();
+      });
     }
     const kind = loginKind(this.selected);
     if (kind) {
@@ -381,7 +429,12 @@ export class ProviderChooserModal extends Modal {
     if (!preset.local && !this.key) { this.error = "请输入 API Key"; this.draw(); this.contentEl.querySelector<HTMLElement>(Platform.isMobile ? ".qa-secret-paste" : ".qa-secret-input input")?.focus(); return; }
     let endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string } = this.name ? { name: this.name } : {};
     if (this.selected === "custom") {
-      try { endpoint = { baseUrl: validateApiUrl(this.url), protocol: this.protocol, name: this.name || undefined }; }
+      if (isPrivateHttpUrl(this.url) && !this.allowPrivateHttp) {
+        this.error = "检测到局域网私有地址，请确认允许使用 HTTP 连接";
+        this.draw();
+        return;
+      }
+      try { endpoint = { baseUrl: validateApiUrl(this.url, this.allowPrivateHttp), protocol: this.protocol, name: this.name || undefined }; }
       catch (error) { this.error = error instanceof Error ? error.message : String(error); this.draw(); return; }
     }
     if (this.selected === "magpie") {
@@ -425,6 +478,7 @@ export class ProviderModal extends Modal {
   private accountOperation: AbortController | null = null;
   private busy = "";
   private error = "";
+  private allowPrivateHttp = false;
 
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly id: string, private readonly onChange: () => void) { super(app); }
 
@@ -436,7 +490,11 @@ export class ProviderModal extends Modal {
     this.closed = false;
     this.modalEl.addClass("qa-provider-modal");
     const provider = this.provider;
-    if (provider) { this.endpointDraft = provider.baseUrl; this.protocolDraft = apiProtocol(provider); }
+    if (provider) {
+      this.endpointDraft = provider.baseUrl;
+      this.protocolDraft = apiProtocol(provider);
+      this.allowPrivateHttp = isPrivateHttpUrl(provider.baseUrl);
+    }
     this.draw();
     this.disposeMobile = mobileProviderModal(this.modalEl, this.contentEl);
   }
@@ -483,7 +541,7 @@ export class ProviderModal extends Modal {
     if (provider.provider === "chatgpt") return;
     const form = section.createDiv({ cls: "qa-ms-form" });
     let save!: HTMLButtonElement;
-    const dirty = () => Boolean(this.keyDraft) || this.endpointDraft.trim() !== provider.baseUrl || this.protocolDraft !== apiProtocol(provider);
+    const dirty = () => Boolean(this.keyDraft) || this.endpointDraft.trim() !== provider.baseUrl || this.protocolDraft !== apiProtocol(provider) || (isPrivateHttpUrl(this.endpointDraft) && this.allowPrivateHttp !== isPrivateHttpUrl(provider.baseUrl));
     const refresh = () => { save.disabled = Boolean(this.busy) || !dirty(); };
     if (!preset.local || provider.provider === "magpie") {
       const keyField = field(form, provider.provider === "magpie" ? at("gatewayKey") : "API Key", currentKey ? `当前 ${maskKey(currentKey)}` : "未填写");
@@ -495,9 +553,21 @@ export class ProviderModal extends Modal {
         setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), "arrow-up-right");
       }
     }
-    const endpoint = labeledInput(field(form, "接口地址"), "接口地址", "url", "qa-ms-input is-mono");
+    const endpointField = field(form, "接口地址");
+    const endpoint = labeledInput(endpointField, "接口地址", "url", "qa-ms-input is-mono");
     endpoint.value = this.endpointDraft;
-    endpoint.addEventListener("input", () => { this.endpointDraft = endpoint.value.trim(); refresh(); });
+    const updateNotice = renderPrivateHttpNotice(form, () => this.endpointDraft, () => this.allowPrivateHttp, (val) => { this.allowPrivateHttp = val; refresh(); }, () => {
+      if (this.error.includes("局域网")) { this.error = ""; form.querySelector(".qa-inline-error")?.remove(); }
+    });
+    endpoint.addEventListener("input", () => {
+      const prev = this.endpointDraft;
+      this.endpointDraft = endpoint.value.trim();
+      if (isPrivateHttpUrl(prev) !== isPrivateHttpUrl(this.endpointDraft)) {
+        this.allowPrivateHttp = false;
+      }
+      updateNotice();
+      refresh();
+    });
     if (provider.provider === "custom") {
       const types = field(form, "接口类型").createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
       labelGroup(types, "接口类型");
@@ -554,8 +624,13 @@ export class ProviderModal extends Modal {
 
   private async saveConnection(provider: ProviderConfig): Promise<void> {
     if (this.busy) return;
+    if (isPrivateHttpUrl(this.endpointDraft) && !this.allowPrivateHttp) {
+      this.error = "检测到局域网私有地址，请确认允许使用 HTTP 连接";
+      this.draw();
+      return;
+    }
     let endpoint: string;
-    try { endpoint = validateApiUrl(this.endpointDraft); }
+    try { endpoint = validateApiUrl(this.endpointDraft, this.allowPrivateHttp); }
     catch (error) { this.error = error instanceof Error ? error.message : "接口地址无效"; this.draw(); return; }
     const oldKey = this.secret(provider);
     const changedEndpoint = endpoint !== provider.baseUrl;

@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
 import { getRuntimeRequire } from "./runtime-require";
 import { connectionText as t } from "../i18n/connection";
+import { isLocalOrPrivateHost } from "./network-hosts";
 
 type Listener = (...args: any[]) => void;
 export interface NativeRequest {
@@ -100,7 +101,7 @@ async function bufferedApiFetch(url: string, init: RequestInit): Promise<Respons
 export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const request = input instanceof Request ? input : null;
   const url = new URL(request?.url ?? String(input));
-  if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("API requires HTTPS (HTTP is allowed only on localhost)");
+  if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalOrPrivateHost(url.hostname)))) throw new Error("API requires HTTPS (HTTP is allowed only on localhost or private networks)");
   const options: RequestInit = { ...init, method: init.method ?? request?.method, headers: init.headers ?? request?.headers, signal: init.signal ?? request?.signal };
   if (request && init.body === undefined && !["GET", "HEAD"].includes(options.method ?? "GET")) options.body = await request.text();
   const headers = new Headers(options.headers);
