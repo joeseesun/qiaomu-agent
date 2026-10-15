@@ -1,7 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { AlertCircle, ChevronRight, Circle, CircleCheck } from "lucide-react";
+import { AlertCircle, ChevronRight, Circle, CircleCheck, FilePenLine, Search, Terminal, Wrench, Image } from "lucide-react";
 import type { AgentMessage } from "../services/chat-transport";
 import type { ApprovalState, ChatActivity, ChatPlan, QuestionState } from "../types";
+
+import { Trace, TraceLine, TraceIcon, TraceTitle, TraceDescription, TraceCollapsible, TraceCollapsibleTrigger, TraceCollapsibleContent } from "../components/ui/trace";
+import { ToolOutput } from "../components/ui/code-block";
 
 /** A reply in the order it happened: text runs, groups of steps, the plan and questions for the user. */
 export type ReplySegment =
@@ -126,9 +129,9 @@ function rows(steps: ChatActivity[]): Row[] {
 }
 
 function StepList({ steps, running }: { steps: ChatActivity[]; running: boolean }) {
-  return <div className="qa-steps qa-reply-segment">{rows(steps).map((row) => row.kind === "one"
+  return <Trace className="qa-steps qa-reply-segment">{rows(steps).map((row) => row.kind === "one"
     ? <StepRow key={row.step.id} step={row.step} running={running} />
-    : <ExploreRow key={row.steps[0]!.id} steps={row.steps} running={running} />)}</div>;
+    : <ExploreRow key={row.steps[0]!.id} steps={row.steps} running={running} />)}</Trace>;
 }
 
 const VERBS: Record<NonNullable<ChatActivity["kind"]>, [string, string]> = {
@@ -140,20 +143,24 @@ function StepRow({ step, running }: { step: ChatActivity; running: boolean }) {
   const live = running && step.status === "running";
   const verb = step.kind ? VERBS[step.kind][live ? 0 : 1] : "";
   const target = step.kind === "image" ? "" : step.label;
-  const line = <>
-    {verb && <span className={live ? "qa-shimmer" : "qa-step-verb"}>{verb}</span>}
-    {target && (step.kind === "command"
-      ? <code className="qa-step-target" title={target}>{target}</code>
-      : <span className={`qa-step-target${live && !verb ? " qa-shimmer" : ""}`} title={target}>{target}</span>)}
-    {step.kind === "edit" && (step.added || step.removed) ? <span className="qa-diffstat"><span className="is-added">+{step.added ?? 0}</span><span className="is-removed">−{step.removed ?? 0}</span></span> : null}
+  const Icon = step.kind === "command" ? Terminal : step.kind === "edit" ? FilePenLine : step.kind === "search" || step.kind === "explore" ? Search : step.kind === "image" ? Image : Wrench;
+  const line = <TraceLine status={step.status === "failed" ? "error" : live ? "running" : undefined}>
+    <TraceIcon><Icon size={14} /></TraceIcon>
+    <TraceTitle>
+      {verb && <span className={live ? "qa-shimmer" : "qa-step-verb"}>{verb}</span>}
+      {target && (step.kind === "command"
+        ? <code className="qa-step-target" title={target}>{target}</code>
+        : <span className={`qa-step-target${live && !verb ? " qa-shimmer" : ""}`} title={target}>{target}</span>)}
+    </TraceTitle>
+    {step.kind === "edit" && (step.added || step.removed) ? <TraceDescription className="qa-diffstat"><span className="is-added">+{step.added ?? 0}</span><span className="is-removed">−{step.removed ?? 0}</span></TraceDescription> : null}
     {step.status === "failed" && <span className="qa-step-failed"><AlertCircle size={13} aria-hidden="true" /><span className="qiaomu-agent__sr-only">失败</span></span>}
     {step.status === "cancelled" && <span className="qa-step-note">已取消</span>}
-  </>;
+  </TraceLine>;
   if (!step.detail) return <div className={`qa-step is-${step.status}`}>{line}</div>;
-  return <details className={`qa-step is-${step.status}`}>
-    <summary>{line}<ChevronRight className="qa-chevron" size={13} aria-hidden="true" /></summary>
-    <pre className="qa-step-detail">{step.detail}</pre>
-  </details>;
+  return <TraceCollapsible className={`qa-step is-${step.status}`}>
+    <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+    <TraceCollapsibleContent><ToolOutput value={step.detail} label={step.status === "failed" ? "错误详情" : "输出"} /></TraceCollapsibleContent>
+  </TraceCollapsible>;
 }
 
 function ExploreRow({ steps, running }: { steps: ChatActivity[]; running: boolean }) {
@@ -165,14 +172,15 @@ function ExploreRow({ steps, running }: { steps: ChatActivity[]; running: boolea
   const lists = actions.filter((a) => a.type === "list").length;
   const counts = [reads && `${reads} 个文件`, searches && `${searches} 次搜索`, lists && `${lists} 个目录`].filter(Boolean).join("，");
   const current = live ? steps[steps.length - 1]!.label : counts;
-  return <details className="qa-step qa-explore" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>
+  return <TraceCollapsible className="qa-step qa-explore" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <TraceCollapsibleTrigger>
+      <TraceLine status={live ? "running" : undefined}><TraceIcon><Search size={14} /></TraceIcon>
       <span className={live ? "qa-shimmer" : "qa-step-verb"}>{live ? "正在探索" : "已探索"}</span>
       <span className="qa-step-target" title={current}>{current}</span>
-      <ChevronRight className="qa-chevron" size={13} aria-hidden="true" />
-    </summary>
-    {open && <div className="qa-explore-list">{steps.map((step) => <StepRow key={step.id} step={{ ...step, kind: undefined }} running={running} />)}</div>}
-  </details>;
+      </TraceLine>
+    </TraceCollapsibleTrigger>
+    {open && <TraceCollapsibleContent className="qa-explore-list">{steps.map((step) => <StepRow key={step.id} step={{ ...step, kind: undefined }} running={running} />)}</TraceCollapsibleContent>}
+  </TraceCollapsible>;
 }
 
 function PlanCard({ plan, running }: { plan: ChatPlan; running: boolean }) {

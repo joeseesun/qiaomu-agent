@@ -76,8 +76,7 @@
 .qiaomu-agent--react .qa-diffstat { flex: none; display: inline-flex; gap: 4px; font-family: var(--font-monospace); font-size: 12px; }
 .qiaomu-agent--react .qa-diffstat .is-added { color: var(--color-green); }
 .qiaomu-agent--react .qa-diffstat .is-removed { color: var(--color-red); }
-.qiaomu-agent--react .qa-step-detail { max-height: 240px; margin: 2px 0 8px; padding: 8px 10px; overflow: auto; border-radius: 8px; background: var(--background-secondary); color: var(--text-muted); font-size: 12px; white-space: pre; }
-.qiaomu-agent--react .qa-explore-list { margin: 0 0 4px 12px; padding-left: 10px; border-left: 1px solid var(--background-modifier-border); }
+.qiaomu-agent--react .qa-explore-list { margin: 0 0 4px 20px; }
 .qiaomu-agent--react .qa-worked > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 28px; color: var(--text-muted); font-size: 13px; cursor: pointer; border-radius: 6px; }
 .qiaomu-agent--react .qa-worked > summary:hover { color: var(--text-normal); }
 .qiaomu-agent--react .qa-worked-body { margin: 4px 0 6px; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
@@ -359,3 +358,24 @@
 
 /* Transcript text remains selectable inside native custom views. */
 .qiaomu-agent--react .qa-message-content { -webkit-user-select: text; user-select: text; }
+
+/* shadcn Trace / Code Block, adapted to the Obsidian sidebar. */
+.qiaomu-agent--react .qa-trace, .qiaomu-agent--react [data-slot="trace-collapsible-content"] { min-width: 0; }
+.qiaomu-agent--react .qa-trace-line { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 1; }
+.qiaomu-agent--react [data-slot="trace-icon"] { display: inline-flex; flex: none; color: var(--text-muted); }
+.qiaomu-agent--react [data-slot="trace-title"] { display: flex; gap: 6px; min-width: 0; }
+.qiaomu-agent--react [data-slot="trace-description"] { flex: none; font-variant-numeric: tabular-nums; }
+.qiaomu-agent--react .qa-code-block { min-width: 0; margin: 4px 0 8px; overflow: hidden; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); }
+.qiaomu-agent--react [data-slot="code-block-header"] { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; border-bottom: 1px solid var(--background-modifier-border); }
+.qiaomu-agent--react [data-slot="code-block-title"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-muted); }
+.qiaomu-agent--react [data-slot="code-block-actions"] { display: flex; gap: 4px; margin-left: auto; flex: none; }
+.qiaomu-agent--react [data-slot="code-block-actions"] button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 6px; border: 0; border-radius: 4px; background: transparent; box-shadow: none; color: var(--text-muted); }
+.qiaomu-agent--react [data-slot="code-block-actions"] button:hover, .qiaomu-agent--react [data-slot="code-block-actions"] button[aria-pressed="true"] { color: var(--text-normal); background: var(--background-modifier-hover); }
+.qiaomu-agent--react [data-slot="code-block-actions"] button:active { background: var(--background-modifier-active-hover); }
+.qiaomu-agent--react [data-slot="code-block-content"] { max-height: 240px; min-width: 0; margin: 0; padding: 10px; overflow: auto; white-space: pre; color: var(--text-normal); background: transparent; font: 12px/1.6 var(--font-monospace); text-align: left; border: 0; border-radius: 0; }
+.qiaomu-agent--react [data-slot="code-block-content"] code { padding: 0; color: inherit; background: transparent; font: inherit; white-space: inherit; }
+.qiaomu-agent--react [data-slot="code-block-content"][data-wrap] { white-space: pre-wrap; overflow-wrap: anywhere; }
+.qiaomu-agent--react [data-slot="code-block-content"]:focus-visible { outline: 1px solid var(--text-muted); outline-offset: -2px; }
+.qiaomu-agent--react [data-slot="code-block-actions"] button:focus-visible { outline: 1px solid var(--text-muted); outline-offset: 1px; }
+.qiaomu-agent--react .qa-code-error { margin: 0; padding: 6px 10px; color: var(--text-error); font-size: 12px; }
+@media (pointer: coarse) { .qiaomu-agent--react [data-slot="code-block-actions"] button { width: 40px; height: 40px; } }
