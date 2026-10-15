@@ -7,7 +7,8 @@ import type { QuestionAnswers, QuestionState, UserQuestion } from "../types";
  * Questions the agent needs answered before it continues (Claude Code AskUserQuestion,
  * Codex request_user_input, the API `ask_user` tool). One question at a time, lettered
  * options, a typed answer when allowed, skip, and a progress ring for several questions.
- * AI Elements has no question component; the layout follows Kobra's Question Card.
+ * Layout follows Kobra's Question Card. shadcn Questionnaire now exists but requires
+ * React 19; retain this React 18 host adapter (see the October 2026 research note).
  */
 
 interface Draft { picked: string[]; other: string; otherOn: boolean }

@@ -29,3 +29,9 @@ Not bundled. Diagrams are rendered with the Mermaid copy that Obsidian ships (`l
 Design reference only, no code copied: [magpie](https://github.com/yetone/magpie) (MIT) for the provider list, one-field provider setup and grouped model picker.
 
 Account and gateway protocol research (no upstream authentication code copied): Magpie `4ee3a76b7f50d42c5ecadd5105548c98978a77eb`, Magpie community plugins `bcc94e593339539fbe4c074ea666846455b6c167`, and Qiaomu Clipper `d97772a`. Sources and local design choices are recorded in [the integration research](docs/research/2026-10-11-account-and-gateway-access.md).
+
+## shadcn/ui Trace and Code Block
+
+`src/components/ui/trace.tsx` and `src/components/ui/code-block.tsx` adapt selected source and composition from [shadcn/ui](https://github.com/shadcn-ui/ui/tree/c2477f311c19982ef6e246085438e6cfec3e35ea/apps/v4/registry/bases/base/ui), commit `c2477f311c19982ef6e246085438e6cfec3e35ea` (2026-10-15 retrieval), MIT, Copyright (c) 2023 shadcn. The complete license is in `licenses/shadcn-ui-LICENSE`; bundled source comments retain attribution.
+
+Local modifications: native details/summary replaces Base UI disclosure; Obsidian-scoped CSS replaces Tailwind, cn and cva; Lucide replaces the registry's icon placeholder; only used primitives are retained. Tool output uses literal text without a new highlighting engine, a wrapping toggle, owner-document clipboard access, Chinese accessible labels, visible copy errors and async/unmount guards. No @shadcn/react or Base UI dependency is installed. Existing Apache-licensed AI SDK Elements adaptations keep their original attribution.

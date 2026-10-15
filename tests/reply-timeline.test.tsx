@@ -85,3 +85,17 @@ it("keeps unanswered questions visible while working and after stopping", () => 
   rerender(<ReplyTimeline {...props} message={message} active={false} />);
   expect(screen.getByRole("button", { name: "回答问题" }).closest("details")).toBeNull();
 });
+it("preserves an expanded tool output and wrapping when streamed output updates", async () => {
+  const step = { id: "stream", kind: "command" as const, label: "read result", status: "running" as const, detail: "first\n" };
+  const message: AgentMessage = { ...initial, parts: [{ type: "data-activity", data: step }] };
+  const { container, rerender } = render(<ReplyTimeline {...props} message={message} />);
+  fireEvent.click(container.querySelector(".qa-live-work > summary")!);
+  const disclosure = container.querySelector("details.qa-step") as HTMLDetailsElement;
+  fireEvent.click(disclosure.querySelector("summary")!);
+  fireEvent.click(screen.getByRole("button", { name: "自动换行" }));
+  rerender(<ReplyTimeline {...props} message={{ ...message, parts: [{ type: "data-activity", data: { ...step, detail: "first\nsecond\n" } }] }} />);
+  expect(container.querySelector("details.qa-step")).toBe(disclosure);
+  expect(disclosure.open).toBe(true);
+  expect(disclosure.querySelector("pre")!.textContent).toBe("first\nsecond\n");
+  expect(disclosure.querySelector("pre")!.dataset.wrap).toBe("true");
+});

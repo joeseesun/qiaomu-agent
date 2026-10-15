@@ -2,10 +2,10 @@
 
 ## 现成组件优先
 
-- 开发任何新功能前，尽可能先阅读 https://elements.ai-sdk.dev/components/，寻找匹配的现成组件及官方用法。
+- 开发任何新功能前，优先阅读 https://ui.shadcn.com/docs/ai-elements 及对应基础组件文档，寻找匹配的现成组件及官方用法；https://elements.ai-sdk.dev/components/ 仅作为既有 AI SDK Elements 的历史来源。
 - 优先复用 AI Elements 源码与组合方式，再做最小 Obsidian 适配；不因为已有手写实现而跳过组件调查。
 - 没有对应组件，或组件与宿主、移动端、可访问性、权限或性能要求冲突时，说明理由，再采用宿主原生组件或自行实现。
-- 复用时记录来源版本、许可证及本地修改；示例 UI 不代表后端能力已经实现。
+- 复用时记录来源 commit、许可证及本地修改；示例 UI 不代表后端能力已经实现。先核对 React 等 peer dependencies，不为局部 UI 迁移强行升级宿主运行栈。
 - 样式限制在插件范围，保留 Obsidian 主题、中文排版和原生笔记语义。
 
 ## 图标规范
