@@ -30,28 +30,28 @@ export function ToolOutput({ value, label = "输出" }: { value: string; label?:
     const timeout = window.setTimeout(() => setCopyState("idle"), 2000);
     return () => window.clearTimeout(timeout);
   }, [copyState]);
+  const copy = async (clipboard: Clipboard | undefined) => {
+    if (copying.current) return;
+    copying.current = true;
+    const current = generation.current;
+    setCopyState("copying");
+    try {
+      if (!clipboard) throw new Error("Clipboard unavailable");
+      await clipboard.writeText(value);
+      if (current === generation.current) setCopyState("copied");
+    } catch {
+      if (current === generation.current) setCopyState("failed");
+    } finally {
+      if (current === generation.current) copying.current = false;
+    }
+  };
   const copyLabel = copyState === "copied" ? "已复制输出" : copyState === "failed" ? "重试复制输出" : "复制输出";
   return <CodeBlock>
     <CodeBlockHeader>
       <span id={labelId} data-slot="code-block-title">{label}</span>
       <div data-slot="code-block-actions">
         <button type="button" className="clickable-icon" aria-label="自动换行" aria-pressed={wrap} onClick={() => setWrap(!wrap)}><WrapText size={14} aria-hidden="true" /></button>
-        <button type="button" className="clickable-icon" aria-label={copyLabel} disabled={copyState === "copying"} onClick={async (event) => {
-          if (copying.current) return;
-          copying.current = true;
-          const current = generation.current;
-          const clipboard = event.currentTarget.ownerDocument.defaultView?.navigator.clipboard;
-          setCopyState("copying");
-          try {
-            if (!clipboard) throw new Error("Clipboard unavailable");
-            await clipboard.writeText(value);
-            if (current === generation.current) setCopyState("copied");
-          } catch {
-            if (current === generation.current) setCopyState("failed");
-          } finally {
-            if (current === generation.current) copying.current = false;
-          }
-        }}>{copyState === "copied" ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}</button>
+        <button type="button" className="clickable-icon" aria-label={copyLabel} disabled={copyState === "copying"} onClick={(event) => { void copy(event.currentTarget.ownerDocument.defaultView?.navigator.clipboard); }}>{copyState === "copied" ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}</button>
       </div>
     </CodeBlockHeader>
     <CodeBlockContent wrap={wrap} aria-labelledby={labelId}>{value}</CodeBlockContent>
