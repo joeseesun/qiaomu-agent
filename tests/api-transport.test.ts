@@ -104,3 +104,19 @@ describe("buffered host fallback and actionable errors", () => {
     expect(connectionError(new Error("bad sk-super-secret"))).not.toContain("sk-super-secret");
   });
 });
+
+
+describe("private HTTP request authorization", () => {
+  it("sends only to the explicitly approved private origin", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{"data":[]}'));
+    vi.stubGlobal("fetch", fetcher);
+    const approved = "http://192.168.1.20:8000/v1";
+    await expect(apiFetch(`${approved}/models`)).rejects.toThrow();
+    await expect(apiFetch("http://192.168.1.21:8000/v1/models", {}, approved)).rejects.toThrow();
+    await expect(apiFetch("http://192.168.1.20:8001/v1/models", {}, approved)).rejects.toThrow();
+    await expect(apiFetch("http://fda.gov/v1/models", {}, "http://fda.gov/v1")).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect((await apiFetch(`${approved}/models`, {}, approved)).status).toBe(200);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+});

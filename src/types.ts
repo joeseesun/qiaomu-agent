@@ -7,6 +7,8 @@ export interface ApiConnection {
   provider: string;
   protocol?: "openai-chat" | "openai-responses" | "anthropic" | "google";
   baseUrl: string;
+  /** Exact private HTTP endpoint explicitly confirmed in connection settings. */
+  privateHttpApprovedUrl?: string;
   model: string;
   secretId: string;
 }

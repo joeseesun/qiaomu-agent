@@ -1,3 +1,6 @@
+import { connectionText as ct } from "../i18n/connection";
+import { isPrivateHttpUrl, isLocalOrPrivateHost } from "./network-hosts";
+
 export interface McpServerEntry {
   name: string;
   kind: "http" | "stdio";
@@ -28,14 +31,15 @@ export function listMcpServers(raw: string): McpServerEntry[] {
   });
 }
 
-export function saveMcpServer(raw: string, entry: McpServerEntry): string {
+export function saveMcpServer(raw: string, entry: McpServerEntry, allowPrivateHttp = false): string {
   const name = entry.name.trim();
   if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(name)) throw new Error("名称请使用英文字母、数字、- 或 _，并以字母开头");
   const target = entry.target.trim();
   if (entry.kind === "http") {
     const url = new URL(target);
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
-      throw new Error("远程地址需要 HTTPS，本机可使用 HTTP");
+    if (isPrivateHttpUrl(target) && !allowPrivateHttp) throw new Error(ct("privateHttpRequired"));
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalOrPrivateHost(url.hostname)))
+      throw new Error("远程地址需要 HTTPS，本机或局域网可使用 HTTP");
   } else if (!target || /\s/.test(target)) throw new Error("请填写可执行命令；参数单独填写");
   const config = readMcpConfig(raw);
   const servers = object(config.mcpServers) ?? {};

@@ -75,14 +75,14 @@ export class ApiBackend implements ChatBackend {
   async listModels(_request?: ChatRequest, signal?: AbortSignal): Promise<ModelChoice[]> {
     const credential = await accessToken(this.connection, this.apiKey, this.app?.secretStorage);
     if (!credential && !permitsEmptyKey(this.connection)) throw new Error("请先配置 API Key");
-    if (this.connection.provider === "magpie") await detectMagpie(this.connection.baseUrl, credential, signal ?? AbortSignal.timeout(5000));
+    if (this.connection.provider === "magpie") await detectMagpie(this.connection.baseUrl, credential, signal ?? AbortSignal.timeout(5000), this.connection.privateHttpApprovedUrl);
     const base = apiBaseUrl(this.connection);
     const provider = this.connection.provider;
     const protocol = apiProtocol(this.connection);
     const headers: Record<string, string> = protocol === "anthropic"
       ? { "x-api-key": credential, "anthropic-version": "2023-06-01", ...anthropicHeaders(provider, credential) }
       : protocol === "google" ? { "x-goog-api-key": credential } : credential ? { Authorization: `Bearer ${credential}` } : {};
-    const response = await apiFetch(`${base}/models`, { headers, redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
+    const response = await apiFetch(`${base}/models`, { headers, redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) }, this.connection.privateHttpApprovedUrl);
     if (!response.ok) throw apiStatusError(response.status);
     const body = await response.json() as { data?: { id: string; name?: string; display_name?: string; max_output_tokens?: number; supported_reasoning_levels?: Array<{ effort: string }>; effort?: { supported_levels?: string[] } }[]; models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
     if (!body || !Array.isArray(body.data) && !Array.isArray(body.models)) throw new Error(ct("invalidResponse"));
@@ -123,7 +123,7 @@ export class ApiBackend implements ChatBackend {
       return apiFetch(input, { ...init, headers, body: siwc ? chatgptBody(outgoingBody) : withBodyExtras(init?.body, {
       ...thinking.body,
       ...(this.connection.provider === "openrouter" && searching ? { tools: [{ type: "openrouter:web_search", parameters: { max_results: 5, max_total_results: 10 } }, { type: "openrouter:web_fetch" }] } : {}),
-    }), redirect: "error" }).then(async (response) => { if (!response.ok) { await response.body?.cancel(); throw apiStatusError(response.status); } return siwc ? completeChatGPTStream(response) : response; }); } };
+    }), redirect: "error" }, this.connection.privateHttpApprovedUrl).then(async (response) => { if (!response.ok) { await response.body?.cancel(); throw apiStatusError(response.status); } return siwc ? completeChatGPTStream(response) : response; }); } };
     const googleImageModel = /(?:-image|nano-banana)/i.test(modelId);
     if (editingImage && this.connection.provider !== "openai" && !(protocol === "google" && googleImageModel)) {
       throw new Error("当前模型尚未接入图片编辑；请切换 Codex、OpenAI 或 Gemini 图片模型");

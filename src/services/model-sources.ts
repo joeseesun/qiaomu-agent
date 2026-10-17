@@ -1,3 +1,4 @@
+import { hasPrivateHttpConsent } from "./network-hosts";
 import { connectionText as ct } from "../i18n/connection";
 import type { ApiConnection, ModelChoice, ProviderConfig, QiaomuSettings } from "../types";
 import { providerModels } from "./provider-models";
@@ -71,10 +72,10 @@ export function exposedModels(provider: ProviderConfig): ModelChoice[] {
 export function addProviderConnection(
   settings: QiaomuSettings, presetId: string, key: string,
   setSecret: (id: string, value: string) => void,
-  endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string } = {},
+  endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string; privateHttpApprovedUrl?: string } = {},
 ): ProviderConfig {
   const provider = { ...newProvider(presetId, settings.providers), ...endpoint, models: [], enabledModels: [] };
-  provider.baseUrl = validateApiUrl(provider.baseUrl);
+  provider.baseUrl = validateApiUrl(provider.baseUrl, hasPrivateHttpConsent(provider));
   if (!key.trim() && !permitsEmptyKey(provider)) throw new Error(ct("missingKey"));
   setSecret(provider.secretId, key.trim());
   upsertProvider(settings, provider);
@@ -103,7 +104,7 @@ export async function persistProviderChange(
 }
 
 function connectionOf(provider: ProviderConfig): ApiConnection {
-  return { provider: provider.provider, protocol: provider.protocol ?? apiProtocol(provider), baseUrl: provider.baseUrl, model: provider.model, secretId: provider.secretId };
+  return { provider: provider.provider, protocol: provider.protocol ?? apiProtocol(provider), baseUrl: provider.baseUrl, privateHttpApprovedUrl: provider.privateHttpApprovedUrl, model: provider.model, secretId: provider.secretId };
 }
 
 function sameEndpoint(a: ApiConnection, b: ApiConnection): boolean {

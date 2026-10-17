@@ -20,3 +20,10 @@ describe("MCP connection configuration", () => {
     expect(() => listMcpServers("{broken")).toThrow();
   });
 });
+
+
+it("saves confirmed private MCP without leaking consent into server config", () => {
+  const entry = { name: "lan", kind: "http" as const, target: "http://192.168.1.20/mcp", args: [] };
+  expect(JSON.parse(saveMcpServer("{}", entry, true)).mcpServers.lan).toEqual({ url: entry.target });
+  expect(() => saveMcpServer("{}", { ...entry, target: "http://fda.gov/mcp" }, true)).toThrow();
+});

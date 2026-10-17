@@ -1,3 +1,4 @@
+import { renderPrivateHttpNotice } from "./private-http-notice";
 import { App, Menu, Modal, Notice, Platform, setIcon } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
 import { getRuntimeRequire } from "../services/runtime-require";
@@ -342,12 +343,16 @@ export class CapabilitiesModal extends Modal {
     const targetField = wideField(form, "地址");
     const target = targetField.createEl("input", { type: "text", cls: "qa-ms-input is-mono", attr: { placeholder: "https://example.com/mcp", spellcheck: "false" } });
     labelField(targetField, target);
+    let allowPrivateHttp = false;
+    const updateNotice = renderPrivateHttpNotice(form, () => kind === "http" ? target.value : "", () => allowPrivateHttp, value => { allowPrivateHttp = value; });
+    target.addEventListener("input", () => { allowPrivateHttp = false; updateNotice(); });
     const argsField = wideField(form, "参数", "每行一个");
     const args = argsField.createEl("textarea", { cls: "qa-ms-textarea is-mono", attr: { rows: "3", spellcheck: "false" } });
     labelField(argsField, args);
     argsField.hide();
     segments(kindField, "连接方式", [["http", "远程地址"], ["stdio", "本机程序"]], kind, (value) => {
       kind = value;
+      allowPrivateHttp = false; updateNotice();
       const remote = value === "http";
       targetField.querySelector(".qa-ms-wide-label")?.setText(remote ? "地址" : "命令");
       target.placeholder = remote ? "https://example.com/mcp" : "npx";
@@ -361,7 +366,7 @@ export class CapabilitiesModal extends Modal {
       const entry: McpServerEntry = { name: name.value.trim(), kind, target: target.value.trim(), args: args.value.split(/\r?\n/).map((part) => part.trim()).filter(Boolean) };
       try {
         if (scope === "codex" && codexPath) {
-          saveMcpServer("{}", entry); // Validate before changing Codex's global configuration.
+          saveMcpServer("{}", entry, allowPrivateHttp); // Validate before changing Codex's global configuration.
           submit.disabled = true;
           try {
             await addCodexMcp(codexPath, entry);
@@ -370,7 +375,7 @@ export class CapabilitiesModal extends Modal {
           } finally { submit.disabled = false; }
         } else {
           if (listMcpServers(this.settings.mcpConfig).some((item) => item.name === entry.name)) throw new Error("已有同名连接");
-          this.settings.mcpConfig = saveMcpServer(this.settings.mcpConfig, entry);
+          this.settings.mcpConfig = saveMcpServer(this.settings.mcpConfig, entry, allowPrivateHttp);
           await this.plugin.saveSettings();
         }
         this.go("list");

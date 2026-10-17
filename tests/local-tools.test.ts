@@ -51,10 +51,15 @@ let vaultRoot: string;
 let trashed: string[];
 
 function nodeHost(): LocalHost {
+  const isWin = process.platform === "win32";
+  const shell = isWin ? process.env.ComSpec || "cmd.exe" : "/bin/sh";
   return {
     fs, path, home, platform: process.platform, isRoot: false,
-    exec: (command, { cwd, timeoutMs }) => new Promise((resolve) => execFile("/bin/sh", ["-c", command], { cwd, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) =>
-      resolve({ code: error ? (typeof error.code === "number" ? error.code : null) : 0, stdout, stderr, timedOut: false }))),
+    exec: (command, { cwd, timeoutMs }) => new Promise((resolve) => {
+      const args = isWin ? ["/d", "/s", "/c", command] : ["-c", command];
+      execFile(shell, args, { cwd, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) =>
+        resolve({ code: error ? (typeof error.code === "number" ? error.code : null) : 0, stdout, stderr, timedOut: false }));
+    }),
     trash: async (target) => { trashed.push(target); await fs.rm(target, { recursive: true }); },
   };
 }
@@ -133,9 +138,11 @@ describe("full access tools", () => {
   });
   it("runs shell commands in the vault by default", async () => {
     const { run } = setup("full");
-    const result = await run("run_shell", { command: "pwd && ls Notes" });
+    const isWin = process.platform === "win32";
+    const command = isWin ? "cd && dir Notes" : "pwd && ls Notes";
+    const result = await run("run_shell", { command });
     expect(result.exit_code).toBe(0);
-    expect(String(result.stdout)).toContain(vaultRoot);
+    expect(String(result.stdout).toLowerCase()).toContain(vaultRoot.toLowerCase());
     expect(String(result.stdout)).toContain("a.md");
   });
   it("moves deletions to the trash and asks only for critical ones", async () => {
