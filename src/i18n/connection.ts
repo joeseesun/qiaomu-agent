@@ -1,6 +1,11 @@
 import * as obsidian from "obsidian";
 
 const zh = {
+  editModel: "编辑模型", deleteModel: "删除模型", modelMissing: "此模型已被移除，请返回模型列表。",
+  modelSaved: "模型已保存", modelDeleted: "模型已删除", saveModel: "保存修改", cancel: "取消",
+  deleteModelConfirm: "确认删除", deleteModelHint: "删除此模型及其参数。刷新列表不会恢复，可通过手动添加重新加入。",
+  deleteModelDefault: "这是默认模型，删除后将使用其余已启用模型；若没有，则需要重新选择模型。",
+  modelSettings: "模型参数", deleteModelPrompt: "删除模型：",
   privateHttpNotice: "此地址使用未加密的 HTTP，网络中的其他设备可能读取 API Key 和传输内容。",
   privateHttpAllow: "允许在此局域网地址上使用 HTTP",
   privateHttpRequired: "局域网私有地址请确认允许使用 HTTP 连接",
@@ -23,6 +28,11 @@ const zh = {
   retryHelp: "可重试，或手动指定模型后测试。", saveTest: "测试模型并保存", responses: "OpenAI Responses",
 } as const;
 const en: Record<keyof typeof zh, string> = {
+  editModel: "Edit model", deleteModel: "Delete model", modelMissing: "This model was removed. Return to the model list.",
+  modelSaved: "Model saved", modelDeleted: "Model deleted", saveModel: "Save changes", cancel: "Cancel",
+  deleteModelConfirm: "Confirm deletion", deleteModelHint: "Delete this model and its parameters. Refreshing will not restore it; you can add it again manually.",
+  deleteModelDefault: "This is the default model. Another enabled model will be used; if none remain, choose a model before chatting.",
+  modelSettings: "Model parameters", deleteModelPrompt: "Delete model:",
   privateHttpNotice: "This address uses unencrypted HTTP. Other devices on the network may read API keys and transmitted content.",
   privateHttpAllow: "Allow HTTP for this local network address",
   privateHttpRequired: "Confirm that HTTP is allowed for this local network address",

@@ -77,6 +77,7 @@ export function normalizeSettings(raw: unknown): QiaomuSettings {
       .map((item) => ({
         ...item,
         manualModels: manualProviderModels(item),
+        removedModels: Array.isArray(item.removedModels) ? [...new Set(item.removedModels.filter(id => typeof id === "string"))] : [],
         enabledModels: Array.isArray(item.enabledModels) ? item.enabledModels : recommendedModels(item.provider, item.models ?? []),
         showInPicker: item.showInPicker !== false,
         modelOptions: Object.fromEntries(Object.entries(item.modelOptions ?? {}).filter(([id, value]) => typeof id === "string" && value && typeof value === "object")
