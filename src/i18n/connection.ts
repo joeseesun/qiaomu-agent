@@ -1,6 +1,9 @@
 import * as obsidian from "obsidian";
 
 const zh = {
+  privateHttpNotice: "此地址使用未加密的 HTTP，网络中的其他设备可能读取 API Key 和传输内容。",
+  privateHttpAllow: "允许在此局域网地址上使用 HTTP",
+  privateHttpRequired: "局域网私有地址请确认允许使用 HTTP 连接",
   readSave: "保存连接", saveManage: "保存并管理模型", saved: "连接配置已保存", saving: "正在保存…",
   missingKey: "请输入 API Key", duplicateModel: "此模型 ID 已在列表中，请直接启用已有条目。",
   getModels: "获取模型列表", addManual: "手动添加", displayName: "显示名称（可选）", manualEntry: "手动添加", modelAdded: "模型已添加，尚未检测", modelEmpty: "获取模型列表，或手动添加服务商提供的模型 ID。", modelHelp: "列表发现和手动添加可同时使用，只有启用的模型会出现在对话中。",
@@ -20,6 +23,9 @@ const zh = {
   retryHelp: "可重试，或手动指定模型后测试。", saveTest: "测试模型并保存", responses: "OpenAI Responses",
 } as const;
 const en: Record<keyof typeof zh, string> = {
+  privateHttpNotice: "This address uses unencrypted HTTP. Other devices on the network may read API keys and transmitted content.",
+  privateHttpAllow: "Allow HTTP for this local network address",
+  privateHttpRequired: "Confirm that HTTP is allowed for this local network address",
   readSave: "Save connection", saveManage: "Save and manage models", saved: "Connection configuration saved", saving: "Saving…",
   missingKey: "Enter an API key", duplicateModel: "This exact model ID already exists. Enable the existing entry instead.",
   getModels: "Get model list", addManual: "Add manually", displayName: "Display name (optional)", manualEntry: "Manually added", modelAdded: "Model added; not tested yet", modelEmpty: "Get the model list or manually add an exact model ID from your provider.", modelHelp: "Discovery and manual models work together. Only enabled models appear in chat.",

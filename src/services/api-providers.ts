@@ -1,4 +1,7 @@
+import { connectionText as ct } from "../i18n/connection";
 import type { ApiConnection } from "../types";
+import { hasPrivateHttpConsent, isLocalHost, isPrivateNetworkHost } from "./network-hosts";
+export { isLocalHost, isPrivateNetworkHost, isPrivateHttpUrl } from "./network-hosts";
 
 export type ProviderGroup = "cn" | "global" | "relay" | "local" | "custom" | "account" | "plan";
 
@@ -69,7 +72,7 @@ export function permitsEmptyKey(connection: ApiConnection): boolean {
  * their version segment (the Claude Code convention), which would send requests to `/messages`.
  */
 export function apiBaseUrl(connection: ApiConnection): string {
-  const base = validateApiUrl(connection.baseUrl).replace(/\/(?:chat\/completions|responses|messages|models)$/, "").replace(/(\/v1)+$/, "/v1");
+  const base = validateApiUrl(connection.baseUrl, hasPrivateHttpConsent(connection)).replace(/\/(?:chat\/completions|responses|messages|models)$/, "").replace(/(\/v1)+$/, "/v1");
   const path = new URL(base).pathname.replace(/\/$/, "");
   const versioned = /\/v\d+[a-z0-9]*$/i.test(path);
   // Anthropic-compatible paths never carry the version (…/api/anthropic); OpenAI-compatible ones do
@@ -79,11 +82,20 @@ export function apiBaseUrl(connection: ApiConnection): string {
   return !versioned && path === "" ? `${base}/v1` : base;
 }
 
-export function validateApiUrl(value: string): string {
+export function validateApiUrl(value: string, options?: { allowPrivateHttp?: boolean } | boolean): string {
+  const allowPrivate = typeof options === "boolean" ? options : Boolean(options?.allowPrivateHttp);
   const url = new URL(value.trim());
   if (url.username || url.password || url.search || url.hash) throw new Error("API 地址不能包含账号、密钥或查询参数");
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) {
-    throw new Error("远程 API 请使用 HTTPS；HTTP 仅用于本机服务");
+  if (url.protocol !== "https:") {
+    if (url.protocol !== "http:") throw new Error("API 地址协议必须是 HTTP 或 HTTPS");
+    if (!isLocalHost(url.hostname)) {
+      if (isPrivateNetworkHost(url.hostname)) {
+        if (!allowPrivate) throw new Error(ct("privateHttpRequired"));
+      } else {
+        throw new Error("远程 API 请使用 HTTPS；HTTP 仅用于本机服务");
+      }
+    }
   }
   return url.toString().replace(/\/+$/, "");
 }
+

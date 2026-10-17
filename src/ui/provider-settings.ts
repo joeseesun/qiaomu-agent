@@ -1,3 +1,5 @@
+import { renderPrivateHttpNotice } from "./private-http-notice";
+import { hasPrivateHttpConsent } from "../services/network-hosts";
 import { accountText as at } from "../i18n/accounts";
 import { loginKind, signInAccount, readAccount, signOutAccount } from "../services/provider-auth";
 import { magpieAddress, detectMagpie } from "../services/magpie";
@@ -9,7 +11,7 @@ import { connectionError } from "../services/api-transport";
 import { Modal, Notice, Platform, setIcon, type App } from "obsidian";
 import type QiaomuAgentPlugin from "../main";
 import type { ApiConnection, ChatRequest, CliDetection, ModelChoice, ModelOptions, ProviderConfig } from "../types";
-import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, type ProviderGroup } from "../services/api-providers";
+import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, isPrivateHttpUrl, type ProviderGroup } from "../services/api-providers";
 import { ApiBackend } from "../services/api-backend";
 import { compactTokens, resolveModel } from "../services/model-capabilities";
 import { isChatModel, recommendedModels } from "../services/key-detection";
@@ -56,8 +58,6 @@ function labelGroup(group: HTMLElement, label: string): void {
   group.createSpan({ cls: "qiaomu-agent__sr-only", text: label, attr: { id } });
   group.setAttribute("aria-labelledby", id);
 }
-
-
 
 /** Modal title with an optional back control in the same row. */
 function modalTitle(modal: Modal, text: string, icon?: { key: string | undefined; fallback: string }, back?: () => void): void {
@@ -201,7 +201,8 @@ export class ProviderChooserModal extends Modal {
   private error = "";
   private changed = false;
   private loginOperation: AbortController | null = null;
-  private drafts = new Map<string, { key: string; url: string; name: string }>();
+  private allowPrivateHttp = false;
+  private drafts = new Map<string, { key: string; url: string; name: string; allowPrivateHttp?: boolean }>();
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly onChange: () => void) { super(app); }
 
   private disposeMobile = () => {};
@@ -218,6 +219,7 @@ export class ProviderChooserModal extends Modal {
     const choose = (id: string) => {
       this.selected = id; this.error = "";
       const draft = this.drafts.get(id); this.key = draft?.key ?? ""; this.url = draft?.url ?? API_PROVIDERS[id]?.baseUrl ?? ""; this.name = draft?.name ?? "";
+      this.allowPrivateHttp = draft?.allowPrivateHttp ?? false;
       this.draw();
     };
     const group = (title: string) => {
@@ -270,7 +272,7 @@ export class ProviderChooserModal extends Modal {
     modalTitle(this, this.selected === "custom" ? "自定义接口" : preset.label, { key: preset.icon, fallback: this.selected === "custom" ? "settings-2" : "boxes" },
       () => { if (this.busy && !this.loginOperation) return;
         this.loginOperation?.abort(); this.loginOperation = null; this.busy = false;
-        this.drafts.set(this.selected, { key: this.key, url: this.url, name: this.name });
+        this.drafts.set(this.selected, { key: this.key, url: this.url, name: this.name, allowPrivateHttp: this.allowPrivateHttp });
         this.selected = ""; this.error = ""; this.draw(); });
     const back = this.titleEl.querySelector<HTMLButtonElement>(".qa-modal-back");
     if (back) back.disabled = this.busy && !this.loginOperation;
@@ -293,9 +295,20 @@ export class ProviderChooserModal extends Modal {
         });
         option.addEventListener("click", () => { this.protocol = value; this.error = ""; this.draw(); this.contentEl.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(); });
       }
-      const url = labeledInput(field(form, "接口地址"), "接口地址", "url", "qa-ms-input is-mono", { placeholder: this.protocol === "anthropic" ? "https://api.example.com" : "https://api.example.com/v1" });
+      const urlField = field(form, "接口地址");
+      const url = labeledInput(urlField, "接口地址", "url", "qa-ms-input is-mono", { placeholder: this.protocol === "anthropic" ? "https://api.example.com" : "https://api.example.com/v1" });
       url.value = this.url;
-      url.addEventListener("input", () => { this.url = url.value.trim(); });
+      const updateNotice = renderPrivateHttpNotice(form, () => this.url, () => this.allowPrivateHttp, (val) => { this.allowPrivateHttp = val; }, () => {
+        if (this.error === ct("privateHttpRequired")) { this.error = ""; form.querySelector(".qa-inline-error")?.remove(); }
+      });
+      url.addEventListener("input", () => {
+        const prev = this.url;
+        this.url = url.value.trim();
+        if (prev !== this.url) {
+          this.allowPrivateHttp = false;
+        }
+        updateNotice();
+      });
     }
     const kind = loginKind(this.selected);
     if (kind) {
@@ -379,9 +392,14 @@ export class ProviderChooserModal extends Modal {
     if (this.busy) return;
     const preset = API_PROVIDERS[this.selected] ?? API_PROVIDERS.custom!;
     if (!preset.local && !this.key) { this.error = "请输入 API Key"; this.draw(); this.contentEl.querySelector<HTMLElement>(Platform.isMobile ? ".qa-secret-paste" : ".qa-secret-input input")?.focus(); return; }
-    let endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string } = this.name ? { name: this.name } : {};
+    let endpoint: { baseUrl?: string; protocol?: ApiConnection["protocol"]; name?: string; privateHttpApprovedUrl?: string } = this.name ? { name: this.name } : {};
     if (this.selected === "custom") {
-      try { endpoint = { baseUrl: validateApiUrl(this.url), protocol: this.protocol, name: this.name || undefined }; }
+      if (isPrivateHttpUrl(this.url) && !this.allowPrivateHttp) {
+        this.error = ct("privateHttpRequired");
+        this.draw();
+        return;
+      }
+      try { endpoint = { baseUrl: validateApiUrl(this.url, this.allowPrivateHttp), protocol: this.protocol, name: this.name || undefined, privateHttpApprovedUrl: isPrivateHttpUrl(this.url) ? this.url : undefined }; }
       catch (error) { this.error = error instanceof Error ? error.message : String(error); this.draw(); return; }
     }
     if (this.selected === "magpie") {
@@ -425,6 +443,7 @@ export class ProviderModal extends Modal {
   private accountOperation: AbortController | null = null;
   private busy = "";
   private error = "";
+  private allowPrivateHttp = false;
 
   constructor(app: App, private readonly plugin: QiaomuAgentPlugin, private readonly id: string, private readonly onChange: () => void) { super(app); }
 
@@ -436,7 +455,11 @@ export class ProviderModal extends Modal {
     this.closed = false;
     this.modalEl.addClass("qa-provider-modal");
     const provider = this.provider;
-    if (provider) { this.endpointDraft = provider.baseUrl; this.protocolDraft = apiProtocol(provider); }
+    if (provider) {
+      this.endpointDraft = provider.baseUrl;
+      this.protocolDraft = apiProtocol(provider);
+      this.allowPrivateHttp = hasPrivateHttpConsent(provider);
+    }
     this.draw();
     this.disposeMobile = mobileProviderModal(this.modalEl, this.contentEl);
   }
@@ -483,7 +506,7 @@ export class ProviderModal extends Modal {
     if (provider.provider === "chatgpt") return;
     const form = section.createDiv({ cls: "qa-ms-form" });
     let save!: HTMLButtonElement;
-    const dirty = () => Boolean(this.keyDraft) || this.endpointDraft.trim() !== provider.baseUrl || this.protocolDraft !== apiProtocol(provider);
+    const dirty = () => Boolean(this.keyDraft) || this.endpointDraft.trim() !== provider.baseUrl || this.protocolDraft !== apiProtocol(provider) || (isPrivateHttpUrl(this.endpointDraft) && this.allowPrivateHttp !== hasPrivateHttpConsent(provider));
     const refresh = () => { save.disabled = Boolean(this.busy) || !dirty(); };
     if (!preset.local || provider.provider === "magpie") {
       const keyField = field(form, provider.provider === "magpie" ? at("gatewayKey") : "API Key", currentKey ? `当前 ${maskKey(currentKey)}` : "未填写");
@@ -495,9 +518,21 @@ export class ProviderModal extends Modal {
         setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), "arrow-up-right");
       }
     }
-    const endpoint = labeledInput(field(form, "接口地址"), "接口地址", "url", "qa-ms-input is-mono");
+    const endpointField = field(form, "接口地址");
+    const endpoint = labeledInput(endpointField, "接口地址", "url", "qa-ms-input is-mono");
     endpoint.value = this.endpointDraft;
-    endpoint.addEventListener("input", () => { this.endpointDraft = endpoint.value.trim(); refresh(); });
+    const updateNotice = renderPrivateHttpNotice(form, () => this.endpointDraft, () => this.allowPrivateHttp, (val) => { this.allowPrivateHttp = val; refresh(); }, () => {
+      if (this.error === ct("privateHttpRequired")) { this.error = ""; form.querySelector(".qa-inline-error")?.remove(); }
+    });
+    endpoint.addEventListener("input", () => {
+      const prev = this.endpointDraft;
+      this.endpointDraft = endpoint.value.trim();
+      if (prev !== this.endpointDraft) {
+        this.allowPrivateHttp = false;
+      }
+      updateNotice();
+      refresh();
+    });
     if (provider.provider === "custom") {
       const types = field(form, "接口类型").createDiv({ cls: "qa-segments", attr: { role: "radiogroup" } });
       labelGroup(types, "接口类型");
@@ -554,8 +589,13 @@ export class ProviderModal extends Modal {
 
   private async saveConnection(provider: ProviderConfig): Promise<void> {
     if (this.busy) return;
+    if (isPrivateHttpUrl(this.endpointDraft) && !this.allowPrivateHttp) {
+      this.error = ct("privateHttpRequired");
+      this.draw();
+      return;
+    }
     let endpoint: string;
-    try { endpoint = validateApiUrl(this.endpointDraft); }
+    try { endpoint = validateApiUrl(this.endpointDraft, this.allowPrivateHttp); }
     catch (error) { this.error = error instanceof Error ? error.message : "接口地址无效"; this.draw(); return; }
     const oldKey = this.secret(provider);
     const changedEndpoint = endpoint !== provider.baseUrl;
@@ -565,7 +605,7 @@ export class ProviderModal extends Modal {
       this.error = changedEndpoint ? "修改接口地址后，请填写新地址的 API Key" : "请填写 API Key";
       this.draw(); return;
     }
-    const candidate = { ...provider, baseUrl: endpoint, protocol: this.protocolDraft };
+    const candidate = { ...provider, baseUrl: endpoint, protocol: this.protocolDraft, privateHttpApprovedUrl: isPrivateHttpUrl(endpoint) ? endpoint : undefined };
     this.busy = "connection"; this.error = ""; this.draw();
     const nextSecretId = this.keyDraft || changedEndpoint ? providerSecretId(provider.id) : provider.secretId;
     let saved = false;

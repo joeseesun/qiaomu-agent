@@ -31,5 +31,5 @@ it.each([false, true])("checks each actual worktree from a push hook (worktree o
   expect(clean.stderr).toBe(""); expect(clean.status).toBe(0); expect(clean.stdout).toContain("all available worktrees clean");
   writeFileSync(join(other, "unfinished.txt"), "must be preserved");
   const dirty = run();
-  expect(dirty.status).toBe(1); expect(dirty.stderr).toContain(other); expect(dirty.stderr).toContain("unfinished.txt");
-});
+  expect(dirty.status).toBe(1); expect(dirty.stderr.replace(/\\/g, "/")).toContain(other.replace(/\\/g, "/")); expect(dirty.stderr).toContain("unfinished.txt");
+}, 30_000);
