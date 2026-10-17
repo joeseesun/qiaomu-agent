@@ -21,6 +21,8 @@ export interface ProviderConfig extends ApiConnection {
   models?: ModelChoice[];
   /** Explicit user models, independent of the remote discovery cache. */
   manualModels?: Array<Pick<ModelChoice, "id" | "name">>;
+  /** Explicit removals survive discovery refresh; manual re-add restores the ID. */
+  removedModels?: string[];
   /** Models shown in the picker; empty means none. */
   enabledModels?: string[];
   /** Hide this provider from the composer without deleting its credentials. */

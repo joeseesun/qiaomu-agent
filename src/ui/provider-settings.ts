@@ -4,7 +4,7 @@ import { accountText as at } from "../i18n/accounts";
 import { loginKind, signInAccount, readAccount, signOutAccount } from "../services/provider-auth";
 import { magpieAddress, detectMagpie } from "../services/magpie";
 import { mobileProviderModal } from "./mobile-provider-modal";
-import { providerModels, manualProviderModels, refreshProviderModels, addManualProviderModel } from "../services/provider-models";
+import { providerModels, manualProviderModels, refreshProviderModels, addManualProviderModel, editProviderModel, removeProviderModel } from "../services/provider-models";
 import { secretInput } from "./secret-input";
 import { connectionText as ct } from "../i18n/connection";
 import { connectionError } from "../services/api-transport";
@@ -15,7 +15,7 @@ import { API_PROVIDERS, apiProtocol, permitsEmptyKey, validateApiUrl, isPrivateH
 import { ApiBackend } from "../services/api-backend";
 import { compactTokens, resolveModel } from "../services/model-capabilities";
 import { isChatModel, recommendedModels } from "../services/key-detection";
-import { agentShown, addProviderConnection, persistProviderChange, persistProviderRemoval, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, providerSecretId, upsertProvider } from "../services/model-sources";
+import { agentShown, addProviderConnection, persistProviderChange, persistProviderRemoval, persistProviderModelChange, DEFAULT_VISIBLE_AGENT_IDS, maskKey, providerHost, providerIcon, providerLabel, providerSecretId, upsertProvider } from "../services/model-sources";
 import { nativeTransportFor, nativeTransportLabel } from "../services/native-agent-backend";
 import { agentIconKey } from "./brand-icon";
 import { BRAND_ICONS } from "./brand-icons";
@@ -426,7 +426,37 @@ export class ProviderChooserModal extends Modal {
   }
 }
 
-/** One provider on one page: connection, then its models; every change applies immediately. */
+/** Confirmation names the exact model; failure stays open and permits a safe retry. */
+class ModelRemovalModal extends Modal {
+  private busy = false;
+  constructor(app: App, private readonly label: string, private readonly modelId: string, private readonly isDefault: boolean, private readonly removeModel: () => Promise<void>) { super(app); }
+
+  override onOpen(): void {
+    this.modalEl.addClass("qa-provider-modal", "qa-model-removal-modal");
+    modalTitle(this, ct("deleteModel"));
+    this.contentEl.createEl("p", { text: `${ct("deleteModelPrompt")} ${this.label}`, cls: "qa-ms-removal-name" });
+    if (this.label !== this.modelId) this.contentEl.createEl("p", { text: this.modelId, cls: "qa-ms-note qa-ms-removal-name" });
+    this.contentEl.createEl("p", { text: ct("deleteModelHint"), cls: "qa-ms-note" });
+    if (this.isDefault) this.contentEl.createEl("p", { text: ct("deleteModelDefault"), cls: "qa-ms-note" });
+    const error = this.contentEl.createDiv({ cls: "qa-inline-error", attr: { role: "alert" } });
+    const actions = this.contentEl.createDiv({ cls: "qa-ms-form-actions" });
+    const cancel = actions.createEl("button", { cls: "qa-ms-button", text: ct("cancel"), attr: { type: "button" } });
+    cancel.addEventListener("click", () => { if (!this.busy) this.close(); });
+    const confirm = actions.createEl("button", { cls: "qa-ms-button is-danger-strong", text: ct("deleteModelConfirm"), attr: { type: "button" } });
+    confirm.addEventListener("click", async () => {
+      if (this.busy) return;
+      this.busy = true; cancel.disabled = true; confirm.disabled = true; error.empty();
+      try { await this.removeModel(); this.close(); }
+      catch (failure) { error.setText(connectionError(failure)); }
+      finally { this.busy = false; cancel.disabled = false; confirm.disabled = false; }
+    });
+    cancel.focus();
+  }
+
+  override onClose(): void { this.contentEl.empty(); }
+}
+
+/** One provider on one page, with explicit identity saves and immediate parameter updates. */
 export class ProviderModal extends Modal {
   private modelIdDraft = "";
   private modelNameDraft = "";
@@ -435,6 +465,7 @@ export class ProviderModal extends Modal {
   private closed = false;
   private query = "";
   private detailModel = "";
+  private modelEditDraft: { id: string; name: string } | null = null;
   private keyDraft = "";
   private endpointDraft = "";
   private protocolDraft: ApiConnection["protocol"] = "openai-chat";
@@ -714,6 +745,7 @@ export class ProviderModal extends Modal {
     const on = enabled.has(id);
     const label = model?.name && model.name !== id ? model.name : id;
     const row = list.createDiv({ cls: `qa-ms-model${on ? " is-on" : ""}` });
+    row.dataset.modelId = id;
     const text = row.createDiv({ cls: "qa-ms-row-text" });
     const name = text.createDiv({ cls: "qa-ms-row-name" });
     name.createSpan({ cls: "qa-ms-model-name", text: label });
@@ -731,7 +763,31 @@ export class ProviderModal extends Modal {
     const check = iconAction(tools, "flask-conical", `${label} · 测试`);
     check.disabled = Boolean(this.busy);
     check.addEventListener("click", () => void this.testModel({ ...provider, model: id }, this.secret(provider)));
-    if (on) { const options = iconAction(tools, "sliders-horizontal", `${label} 的参数`); options.disabled = Boolean(this.busy); options.addEventListener("click", () => { this.detailModel = id; this.draw(); }); }
+    const edit = iconAction(tools, "pencil", `${ct("editModel")} · ${label}`, "qa-model-edit");
+    edit.disabled = Boolean(this.busy);
+    edit.addEventListener("click", () => {
+      this.detailModel = id; this.modelEditDraft = { id, name: model?.name ?? id }; this.modelError = "";
+      this.draw();
+      if (!Platform.isMobile) this.contentEl.querySelector<HTMLInputElement>(".qa-ms-model-identity input")?.focus();
+    });
+    const remove = iconAction(tools, "trash-2", `${ct("deleteModel")} · ${label}`, "qa-model-delete");
+    remove.disabled = Boolean(this.busy);
+    remove.addEventListener("click", () => {
+      new ModelRemovalModal(this.app, label, id, provider.model === id, async () => {
+        if (this.busy || this.closed) throw new Error(ct("cancelled"));
+        const latest = this.provider;
+        if (!latest) throw new Error(ct("modelMissing"));
+        this.busy = "delete-model";
+        this.draw();
+        try {
+          await persistProviderModelChange(this.plugin.settings, removeProviderModel(latest, id), id, undefined, () => this.plugin.saveSettings());
+          new Notice(ct("modelDeleted"));
+        } finally {
+          this.busy = "";
+          if (!this.closed) { this.draw(); this.contentEl.querySelector<HTMLButtonElement>(".qa-model-edit")?.focus(); }
+        }
+      }).open();
+    });
     hostSwitch(tools, on, `在对话中使用 ${label}`, async (checked) => {
       if (this.busy) return;
       if (checked) enabled.add(id); else enabled.delete(id);
@@ -753,20 +809,27 @@ export class ProviderModal extends Modal {
   private drawModelPage(provider: ProviderConfig): void {
     const id = this.detailModel;
     const model = providerModels(provider).find((item) => item.id === id);
-    modalTitle(this, model?.name || id, undefined, () => { this.detailModel = ""; this.draw(); });
+    modalTitle(this, model?.name || id, undefined, () => { if (!this.busy) this.returnToModels(id); });
+    this.drawModelIdentity(id, model?.name ?? id);
+    const section = this.contentEl.createDiv({ cls: "qa-ms-section qa-ms-model-parameters" });
+    sectionHead(section, ct("modelSettings"));
     const options = provider.modelOptions?.[id] ?? {};
     const save = async (patch: Partial<ModelOptions>) => {
-      const latest = this.provider ?? provider;
+      if (this.busy) return;
+      const latest = this.provider;
+      if (!latest || !providerModels(latest).some(model => model.id === id)) return;
       const next: ModelOptions = { ...(latest.modelOptions?.[id] ?? {}), ...patch };
       for (const key of Object.keys(next) as Array<keyof ModelOptions>) if (next[key] === undefined) delete next[key];
-      await this.save({ ...latest, modelOptions: { ...latest.modelOptions, [id]: next } });
-      this.draw();
+      this.busy = "save-model"; this.modelError = ""; this.draw();
+      try { await this.save({ ...latest, modelOptions: { ...latest.modelOptions, [id]: next } }); }
+      catch (error) { this.modelError = connectionError(error); }
+      finally { this.busy = ""; if (!this.closed) this.draw(); }
     };
     const auto = resolveModel({ provider: provider.provider, models: provider.models }, id);
     const reported = [model?.contextWindow ? `${compactTokens(model.contextWindow)} 上下文` : "", model?.maxOutputTokens ? `最多输出 ${compactTokens(model.maxOutputTokens)}` : "", model?.reasoning ? "支持思考" : "", model?.vision ? "支持图片" : ""].filter(Boolean);
-    const intro = this.contentEl.createDiv({ cls: "qa-ms-note" });
+    const intro = section.createDiv({ cls: "qa-ms-note" });
     intro.setText(`${model?.name && model.name !== id ? `${id} · ` : ""}${reported.length ? `服务商提供：${reported.join("、")}` : "服务商没有提供能力信息，可以在下面手动指定"}`);
-    const list = this.contentEl.createDiv({ cls: "qa-ms-list qa-ms-options" });
+    const list = section.createDiv({ cls: "qa-ms-list qa-ms-options" });
 
     const detected = (value: boolean | undefined) => value === undefined ? "未知" : value ? "支持" : "不支持";
     this.tristate(list, "思考模式", `自动：${detected(auto.thinking)}`, options.reasoning, ["开启", "关闭"], (value) => void save({ reasoning: value }));
@@ -789,6 +852,48 @@ export class ProviderModal extends Modal {
     if (provider.provider !== "chatgpt") number("最大输出 Token", "留空：服务商默认", options.maxOutputTokens, { min: "1", max: String(model?.maxOutputTokens ?? 1_000_000), step: "1" }, (value) => void save({ maxOutputTokens: value }));
     // Thinking models fix their own sampling temperature.
     if (provider.provider !== "chatgpt" && !resolveModel(provider, id).efforts.length) number("温度", "0–2，留空：服务商默认", options.temperature, { min: "0", max: "2", step: "0.1" }, (value) => void save({ temperature: value }));
+    if (this.busy) this.contentEl.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach(control => { control.disabled = true; });
+  }
+
+  private returnToModels(focusId: string): void {
+    this.detailModel = ""; this.modelEditDraft = null; this.modelError = "";
+    this.draw();
+    [...this.contentEl.querySelectorAll<HTMLElement>(".qa-ms-model")].find(row => row.dataset.modelId === focusId)?.querySelector<HTMLButtonElement>(".qa-model-edit")?.focus();
+  }
+
+  private drawModelIdentity(id: string, name: string): void {
+    const draft = this.modelEditDraft ??= { id, name };
+    const form = this.contentEl.createDiv({ cls: "qa-ms-form qa-ms-model-identity" });
+    const modelId = labeledInput(field(form, ct("modelId")), ct("modelId"), "text", "qa-ms-input is-mono", { autocomplete: "off", spellcheck: "false" });
+    modelId.value = draft.id;
+    const displayName = labeledInput(field(form, ct("displayName")), ct("displayName"), "text", "qa-ms-input");
+    displayName.value = draft.name;
+    if (this.modelError) form.createDiv({ cls: "qa-inline-error", text: this.modelError, attr: { role: "alert" } });
+    const actions = form.createDiv({ cls: "qa-ms-form-actions" });
+    const cancel = actions.createEl("button", { cls: "qa-ms-button is-quiet", text: ct("cancel"), attr: { type: "button" } });
+    cancel.addEventListener("click", () => { if (!this.busy) this.returnToModels(id); });
+    const submit = actions.createEl("button", { cls: "qa-ms-button", text: this.busy === "edit-model" ? ct("saving") : ct("saveModel"), attr: { type: "button" } });
+    const refresh = () => { submit.disabled = Boolean(this.busy) || (draft.id.trim() === id && draft.name.trim() === name); };
+    modelId.addEventListener("input", () => { draft.id = modelId.value; refresh(); });
+    displayName.addEventListener("input", () => { draft.name = displayName.value; refresh(); });
+    const save = async () => {
+      if (this.busy) return;
+      const latest = this.provider;
+      if (!latest) return;
+      this.busy = "edit-model"; this.modelError = ""; this.draw();
+      try {
+        const next = editProviderModel(latest, id, draft.id, draft.name);
+        await persistProviderModelChange(this.plugin.settings, next, id, draft.id.trim(), () => this.plugin.saveSettings());
+        this.detailModel = ""; this.modelEditDraft = null;
+        new Notice(ct("modelSaved"));
+      } catch (error) { this.modelError = connectionError(error); }
+      finally { this.busy = ""; if (!this.closed) { if (this.detailModel) this.draw(); else this.returnToModels(draft.id.trim()); } }
+    };
+    submit.addEventListener("click", () => void save());
+    form.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.isComposing && (event.target === modelId || event.target === displayName) && !submit.disabled) { event.preventDefault(); void save(); }
+    });
+    refresh();
   }
 
   private optionRow(list: HTMLElement, title: string, hint: string): HTMLElement {

@@ -170,6 +170,37 @@ export function upsertProvider(settings: QiaomuSettings, provider: ProviderConfi
   if (wasActive || settings.providers.length === 1) settings.api = connectionOf(provider);
 }
 
+/** Persist model identity changes and the chat's independent pointers as one recoverable edit. */
+export async function persistProviderModelChange(
+  settings: QiaomuSettings, provider: ProviderConfig, previousId: string, nextId: string | undefined,
+  persist: () => Promise<void>,
+): Promise<void> {
+  const before = { selections: settings.modelSelections, recent: settings.recentModels };
+  const key = apiSelectionKey(provider);
+  const selection = settings.modelSelections?.[key];
+  const active = activeProvider(settings);
+  const ownsSelection = !active || active.id === provider.id || apiSelectionKey(active) !== key;
+  const selections = ownsSelection && selection?.model === previousId && nextId !== previousId
+    ? { ...settings.modelSelections, [key]: { model: nextId ?? provider.model, effort: "" } }
+    : settings.modelSelections;
+  const source = `api:${provider.id}`;
+  const recent = settings.recentModels.flatMap(item => item.source === source && item.model === previousId
+    ? nextId ? [{ ...item, model: nextId }] : [] : [item])
+    .filter((item, index, all) => all.findIndex(other => other.source === item.source && other.model === item.model) === index);
+  try {
+    await persistProviderChange(settings, () => {
+      settings.modelSelections = selections;
+      settings.recentModels = recent;
+      upsertProvider(settings, provider);
+      return provider;
+    }, persist);
+  } catch (error) {
+    if (settings.modelSelections === selections) settings.modelSelections = before.selections;
+    if (settings.recentModels === recent) settings.recentModels = before.recent;
+    throw error;
+  }
+}
+
 export function removeProvider(settings: QiaomuSettings, id: string): void {
   const removed = findProvider(settings, id);
   settings.providers = settings.providers.filter((item) => item.id !== id);

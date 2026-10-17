@@ -876,6 +876,12 @@ details[open] > .qa-disclosure .qa-disclosure-chevron { transform: rotate(90deg)
 .qa-ms-link:hover { color: var(--qa-ink); text-decoration: underline; text-underline-offset: 3px; }
 .qa-ms-link svg { width: 12px; height: 12px; }
 .qa-ms-form-actions { display: flex; justify-content: flex-end; }
+.qa-provider-modal .qa-ms-form-actions { gap: 8px; flex-wrap: wrap; }
+.qa-provider-modal .qa-ms-model-identity, .qa-provider-modal .qa-ms-model-parameters, .qa-ms-model-parameters .qa-ms-options { flex: none; }
+.qa-provider-modal .qa-ms-model-parameters .qa-ms-head { align-items: flex-start; gap: 0; }
+.qa-model-removal-modal .modal-content { gap: 14px; }
+.qa-model-removal-modal p { margin: 0; }
+.qa-model-removal-modal .qa-ms-removal-name { overflow-wrap: anywhere; }
 .qa-provider-modal .qa-segments { align-self: flex-start; }
 
 .qa-ms-search { margin: 0; }
@@ -935,6 +941,8 @@ details[open] > .qa-disclosure .qa-disclosure-chevron { transform: rotate(90deg)
   .qa-ms-model { flex-wrap: wrap; }
   .qa-ms-model-tools { margin-left: auto; }
   .qa-ms-option { flex-wrap: wrap; }
+  .qa-ms-model-parameters .qa-ms-option { flex-direction: column; align-items: stretch; gap: 8px; }
+  .qa-ms-model-parameters .qa-ms-number { align-self: flex-start; }
 }
 
 /* Chat and tools settings, skills and tool connections: same rows as the model page. */
