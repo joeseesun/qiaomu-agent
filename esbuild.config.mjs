@@ -7,6 +7,7 @@ const production = process.argv[2] === "production";
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
+  banner: { js: `/*! Pele 1.6.0\n${await readFile("licenses/pele-LICENSE", "utf8")}\n*/` },
   external: ["obsidian", "electron", "@codemirror/state", "@codemirror/view"],
   format: "cjs",
   target: "es2022",

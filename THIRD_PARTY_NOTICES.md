@@ -20,7 +20,13 @@ AI SDK, React, Lucide and use-stick-to-bottom are dependencies, not unmodified A
 
 ## Mermaid
 
-Not bundled. Diagrams are rendered with the Mermaid copy that Obsidian ships (`loadMermaid()`), themed per diagram with an init directive so Obsidian's global configuration is not changed. Output is displayed only as an inert `<img>` in chat.
+Not bundled. Diagram types outside the initial Pele adoption and compatible rendering failures use the Mermaid copy that Obsidian ships (`loadMermaid()`), themed per diagram without changing Obsidian's global configuration. Fallback output remains an inert `<img>` in chat. Resource-limit failures do not fall back.
+
+## Pele
+
+[Pele](https://github.com/obsidianmd/pele) 1.6.0, inspected at commit `458322a5b8abb1ae57ddf127c32017ab9fb14a92` (2026-10-18). Copyright (c) 2026 kepano, MIT License; its bundled zoom reset icon also carries the Lucide ISC notice. The full upstream license is in `licenses/pele-LICENSE` and embedded in the distributed `main.js` banner.
+
+The dependency is pinned and unmodified. Only core, flowchart, sequence and mindmap entry points are imported. Local adapters apply Obsidian SVG sanitization, disable links and images, retain bounded source/edge/output limits, map scoped theme/font variables, clean up lifecycle observers, and provide Lucide controls with Chinese/English host tooltips. No React upgrade or remote script loading is required. See `docs/research/2026-10-18-pele.md`.
 
 ## Lobe Icons
 

@@ -277,8 +277,26 @@
 .qiaomu-agent--react .qa-control-popover button > span { flex: 1; }
 .qiaomu-agent--react .qa-popover-section { margin: 6px 8px 2px; padding-top: 8px; border-top: 1px solid var(--background-modifier-border); color: var(--text-muted); font-size: 11px; }
 .qiaomu-agent--react .qa-control-popover .qa-full-access { color: var(--text-warning); }
-.qiaomu-agent--react .qa-mermaid { margin-block: 8px; min-width: 0; }
-.qiaomu-agent--react .qa-mermaid iframe { display: block; width: 100%; height: 160px; border: 0; background: transparent; }
+.qiaomu-agent--react .qa-mermaid { margin-block: 8px; min-width: 0; max-width: 100%; }
+.qiaomu-agent--react .qa-diagram-canvas {
+  min-width: 0; width: 100%; padding: 8px; overflow: hidden; border-radius: 6px;
+  --pele-bg: var(--background-primary); --pele-fg: var(--text-normal); --pele-muted: var(--text-muted);
+  --pele-line: var(--text-muted); --pele-surface: var(--background-secondary); --pele-surface-alt: var(--background-primary-alt);
+  --pele-border: var(--background-modifier-border-hover); --pele-accent: var(--text-normal); --pele-error: var(--text-error);
+  --pele-font: var(--qa-chat-font); --pele-font-mono: var(--qa-code-font, monospace);
+}
+.qiaomu-agent--react .qa-diagram-canvas > svg { display: block; max-width: 100%; margin-inline: auto; }
+.qiaomu-agent--react .qa-diagram-canvas > svg:focus-visible { outline: 1px solid var(--text-muted); outline-offset: -1px; }
+.qiaomu-agent--react .qa-diagram-fallback img { display: block; height: auto; }
+.qiaomu-agent--react .qa-diagram-footer { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; }
+.qiaomu-agent--react .qa-diagram-footer details { flex: 1; min-width: 0; }
+.qiaomu-agent--react .qa-diagram-footer summary { min-height: 28px; align-content: center; }
+.qiaomu-agent--react .qa-diagram-actions { display: flex; gap: 2px; flex: none; }
+.qiaomu-agent--react .qa-diagram-actions button { width: 28px; height: 28px; padding: 6px; color: var(--text-muted); background: transparent; border: 0; }
+.qiaomu-agent--react .qa-diagram-actions button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.qiaomu-agent--react .qa-diagram-actions button:focus-visible, .qiaomu-agent--react .qa-mermaid summary:focus-visible { outline: 1px solid var(--text-muted); outline-offset: 1px; }
+.qiaomu-agent--react .qa-diagram-error { color: var(--text-error); font-size: 13px; }
+@media (pointer: coarse) { .qiaomu-agent--react .qa-diagram-actions button { width: 44px; height: 44px; padding: 14px; } }
 .qiaomu-agent--react .qa-mermaid summary { color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .qiaomu-agent--react .qa-mermaid pre { max-height: 300px; overflow: auto; white-space: pre-wrap; }
 .qiaomu-agent--react .qa-model-control .qa-effort-label { color: var(--text-muted); font-size: 11px; line-height: 16px; font-weight: 400; white-space: nowrap; }
