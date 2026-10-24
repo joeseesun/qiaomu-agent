@@ -1,6 +1,6 @@
 {
   "name": "qiaomu-agent",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "A calm, native AI agent sidebar for Obsidian.",
   "type": "module",
   "main": "main.js",
@@ -44,5 +44,9 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "use-stick-to-bottom": "1.1.6"
+  },
+  "overrides": {
+    "zod": "4.6.6",
+    "undici": "7.30.1"
   }
 }

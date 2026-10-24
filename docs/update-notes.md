@@ -8,6 +8,8 @@ Only `update-notes.json` inside the plugin folder stores seen version and the au
 
 Validation: `node scripts/test-update-notes.mjs`, the normal repository checks, and real Obsidian QA. The component has no network requests or desktop-only dependencies. Desktop host coverage and mobile-layout coverage are separate from physical-device verification.
 
-## 0.6.6 validation (2026-10-25)
+## 0.6.7 validation (2026-10-25)
 
 The normal repository checks and the update-note regression script pass. In Obsidian 1.13.7, the eight candidate plugins loaded together and displayed one update dialog at a time, with focus inside each dialog. Re-enabling all eight produced no repeat dialogs. Every About entry reopened the correct notes, including from the separate Settings window. Light, dark and a 390px window were checked without horizontal overflow. Language fixtures covered English, Traditional Chinese, Japanese, Korean, Spanish, French, German, Portuguese, Russian and Arabic (RTL). Opt-out persisted across a simulated upgrade; Escape closed the dialog. These are desktop-host and layout checks, not physical mobile-device tests.
+
+Production dependency audit: Zod 4.6.6 and, for Agent, Undici 7.30.1 replace versions flagged by the registry advisory audit. The intermediate 0.6.6 candidate was never published.
