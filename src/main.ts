@@ -1,3 +1,5 @@
+import { UpdateNotes } from './update-notes';
+import { UPDATE_ENTRIES } from './update-notes-release';
 import { cancelAccountLogins } from "./services/provider-auth";
 import { watchPaneDividers } from "./pane-dividers";
 import { FuzzySuggestModal, MarkdownView, Menu, Notice, Platform, Plugin, TFile, WorkspaceLeaf, type Editor, type MarkdownFileInfo } from "obsidian";
@@ -22,6 +24,7 @@ import { byUsage, isEnabled, legacyPrompts, promptCatalog, SOURCE_NAMES, type Pr
 import type { PromptHost } from "./ui/prompt-library-panel";
 
 export default class QiaomuAgentPlugin extends Plugin {
+  updateNotes!: UpdateNotes;
   override settings: QiaomuSettings = { ...DEFAULT_SETTINGS, api: { ...DEFAULT_SETTINGS.api } };
   backendService!: BackendService;
   skillService!: SkillService;
@@ -62,6 +65,7 @@ export default class QiaomuAgentPlugin extends Plugin {
       },
     });
     this.qiaomuHome = createHomeProvider(this);
+    this.updateNotes = new UpdateNotes(this, UPDATE_ENTRIES, () => 'zh');
     this.addSettingTab(new QiaomuSettingTab(this.app, this));
 
     this.addRibbonIcon("tree-deciduous", "打开乔木 Agent", () => void this.activateView());

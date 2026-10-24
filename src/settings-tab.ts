@@ -148,7 +148,7 @@ export class QiaomuSettingTab extends PluginSettingTab {
       setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), icon);
       link.createSpan({ text: label });
     };
-    action("更新日志", "history", "https://github.com/joeseesun/qiaomu-agent/releases");
+    this.plugin.updateNotes.addButton(actions);
     action("反馈问题", "bug", "https://github.com/joeseesun/qiaomu-agent/issues/new");
     action("使用说明", "book-open", "https://github.com/joeseesun/qiaomu-agent#readme");
 
