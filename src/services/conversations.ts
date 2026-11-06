@@ -39,6 +39,21 @@ export function startConversation(settings: QiaomuSettings, messages: ChatMessag
   settings.activeConversation = { id: crypto.randomUUID(), title: "", createdAt: Date.now() };
 }
 
+/** Drops one archived conversation. The active one is cleared separately; forks keep their own copy. */
+export function deleteConversation(settings: QiaomuSettings, id: string): boolean {
+  const before = settings.conversations ?? [];
+  const next = before.filter((item) => item.id !== id);
+  if (next.length === before.length) return false;
+  settings.conversations = next;
+  return true;
+}
+
+/** Empties the active conversation without archiving it into history. */
+export function clearActiveConversation(settings: QiaomuSettings): void {
+  settings.lastConversation = [];
+  settings.activeConversation = { id: crypto.randomUUID(), title: "", createdAt: Date.now() };
+}
+
 /** Swap an archived conversation into the active slot without duplicating either record. */
 export function openConversation(settings: QiaomuSettings, messages: ChatMessage[], id: string): ChatMessage[] | null {
   const target = settings.conversations?.find((item) => item.id === id);
