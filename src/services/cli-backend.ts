@@ -1,4 +1,5 @@
 import { getCliProcesses } from "./cli-process";
+import { connectionText } from "../i18n/connection";
 import type { ChatBackend, ChatCallbacks, ChatRequest, CliDetection, CliProfile, ModelChoice } from "../types";
 import { stripAnsi } from "../utils";
 import { getRuntimeRequire } from "./runtime-require";
@@ -61,8 +62,11 @@ export class CliBackend implements ChatBackend {
         if (error) { reject(new Error(stripAnsi(stderr || stdout).trim() || "请先在 Antigravity CLI 中登录")); return; }
         const models = isPi
           ? stdout.split(/\r?\n/).slice(1).map((line) => line.trim().split(/\s+/)).filter((parts) => parts.length >= 2 && parts[0] && parts[1]).map(([provider, model]) => ({ id: `${provider}/${model}`, name: `${provider}/${model}`, efforts: [] }))
-          : stdout.split(/\r?\n/).map((line) => line.trim().match(/^([^\s]+)\s{2,}(.+)$/)).filter((m): m is RegExpMatchArray => Boolean(m))
-            .map((match) => ({ id: match[1]!, name: match[2]!, efforts: [] }));
+          : stripAnsi(stdout).split(/\r?\n/).flatMap((line) => {
+            const match = line.trim().match(/^(\S+)(?:\t+| {2,})(.+)$/);
+            if (!match || /^(?:id|model|models|name|[-=]+)$/i.test(match[1]!)) return [];
+            return [{ id: match[1]!, name: match[2]!.trim(), efforts: [] }];
+          });
         resolve(models);
       }));
   }
@@ -74,6 +78,7 @@ export class CliBackend implements ChatBackend {
     const childProcess = getCliProcesses(require) as ChildProcessModule;
     const temporaryMcpFile = this.createTemporaryMcpFile(require, request);
     const args = [...(this.detection.argsPrefix ?? []), ...this.profile.buildArgs(request, temporaryMcpFile ?? undefined)];
+    const isAntigravity = this.profile.id === "antigravity";
     callbacks.onStatus(`正在通过 ${this.profile.label} 处理…`);
 
     try {
@@ -91,6 +96,7 @@ export class CliBackend implements ChatBackend {
         let emitted = false;
         let terminalReceived = false;
         let reportedError: string | null = null;
+        let permissionDenied = false;
         let lastText = "";
 
         const abort = (): void => {
@@ -105,7 +111,7 @@ export class CliBackend implements ChatBackend {
           for (const line of lines) {
             const event = parseCliOutputLine(line);
             if (event.error) reportedError = event.error;
-            if (event.text && !(this.detection.id === "antigravity" && emitted && /"event"\s*:\s*"result"/.test(line)) && event.text !== lastText) {
+            if (event.text && !(isAntigravity && emitted && /"event"\s*:\s*"result"/.test(line)) && event.text !== lastText) {
               emitted = true;
               lastText = event.text;
               callbacks.onText(event.text);
@@ -118,6 +124,7 @@ export class CliBackend implements ChatBackend {
         });
         processHandle.stderr.on("data", (chunk) => {
           stderr += stderrDecoder.decode(chunk, { stream: true });
+          if (isAntigravity && !permissionDenied && /soft-denying tool confirmation/i.test(stripAnsi(stderr))) permissionDenied = true;
           if (stderr.length > 16_000) stderr = stderr.slice(-16_000);
         });
         processHandle.on("error", (error) => reject(error));
@@ -126,15 +133,19 @@ export class CliBackend implements ChatBackend {
           if (stdoutBuffer.trim()) {
             const event = parseCliOutputLine(stdoutBuffer);
             if (event.error) reportedError = event.error;
-            if (event.text && !(this.detection.id === "antigravity" && emitted && /"event"\s*:\s*"result"/.test(stdoutBuffer)) && event.text !== lastText) {
+            if (event.text && !(isAntigravity && emitted && /"event"\s*:\s*"result"/.test(stdoutBuffer)) && event.text !== lastText) {
               emitted = true;
               callbacks.onText(event.text);
             }
           }
           if (signal.aborted) {
             resolve();
+          } else if (permissionDenied) {
+            reject(new Error(connectionText("antigravityToolDenied")));
           } else if (reportedError) {
             reject(new Error(reportedError));
+          } else if ((code === 0 || terminalReceived) && isAntigravity && !emitted) {
+            reject(new Error(connectionText("antigravityNoReply")));
           } else if (code === 0 || terminalReceived) {
             if (!emitted) callbacks.onText("已完成，但该 CLI 没有返回可显示的文本。");
             resolve();

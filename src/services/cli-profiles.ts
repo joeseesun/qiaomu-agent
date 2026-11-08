@@ -35,6 +35,14 @@ export function promptWithContext(request: ChatRequest): string {
   return sections.join("\n\n");
 }
 
+function antigravityPrompt(request: ChatRequest): string {
+  // Print mode cannot answer RunCommand confirmations, including Obsidian CLI calls.
+  const access = request.permissionMode === "plan"
+    ? "This turn is read-only. Do not modify files."
+    : "Only edit files inside the current workspace, after inspecting the target.";
+  return `${promptWithContext({ ...request, obsidianCli: undefined })}\n\nUse native file tools for ordinary note reads and edits. ${access} Preserve Obsidian links and vault conventions; do not permanently delete files. If an operation requires command approval, report the blocker instead of claiming completion.`;
+}
+
 function modelArgs(request: ChatRequest, flag = "--model"): string[] {
   return request.model?.trim() ? [flag, request.model.trim()] : [];
 }
@@ -192,8 +200,9 @@ export const CLI_PROFILES: CliProfile[] = [
     versionArgs: ["--version"],
     supportsMcpFile: false,
     buildArgs: (request) => [
-      "-p", `${request.systemPrompt}\n\n${promptWithContext(request)}`,
+      "-p", `${request.systemPrompt}\n\n${antigravityPrompt(request)}`,
       "--output-format", "stream-json",
+      "--mode", request.permissionMode === "plan" ? "plan" : "accept-edits",
       ...(request.model ? ["--model", request.model] : []),
     ],
   },

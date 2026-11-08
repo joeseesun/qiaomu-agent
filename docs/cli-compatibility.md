@@ -87,3 +87,25 @@ Windows discovery checks PATH using PATHEXT and also checks `%APPDATA%\npm` and 
 Detection and Agent startup resolve the same npm entry and run it with `node.exe` next to the shim, or with `node.exe` on PATH. Arguments stay separate: prompts, quotes, spaces, newlines, percent signs and other shell syntax never pass through `cmd.exe`. Arbitrary batch scripts and other wrapper formats are rejected; custom npm prefixes need to be on PATH, and npm CLIs require an available Node runtime.
 
 The regression suite simulates Windows paths and discovery on every host. A separate Windows CI smoke test launches a fixture Node CLI through both callback and streaming process APIs, checks literal argument round trips, and verifies that a shell-injection marker is not created. These checks do not replace Windows 11 Obsidian validation with the actual installed Claude, Codex, Gemini and Pi packages, login state, or cancellation behavior.
+
+## Antigravity CLI Windows acceptance (#51)
+
+Use a dedicated Windows test vault with the candidate build of Qiaomu Agent and a signed-in `agy`. The reported environment was Obsidian 1.14.5 with installer 1.14.4 and `agy 1.4.8`. Record the versions and the candidate commit. Create `测试笔记.md` with this content:
+
+```markdown
+## 导读
+旧导读。
+
+## 这一期给读者的几个抓手
+- 旧要点。
+
+## 保留
+这段保持原样。
+```
+
+1. Run `agy models` in a terminal, then refresh the Antigravity models in plugin settings. Check that the displayed names and model IDs match the CLI rows.
+2. Enable the plugin's Obsidian CLI option and confirm the connection. Set file permissions to “可修改当前库”, choose Antigravity, and ask “把《测试笔记》的导读改成‘新导读。’，第二节标题改成‘本篇干货’，直接保存，其他内容原样保留。” Check the file on disk, including the unchanged final section. Repeat after restoring the fixture with the Obsidian CLI option off.
+3. Restore the fixture, switch to “只读”, and send the same prompt. Check that the file is byte-for-byte unchanged and the reply does not claim it was saved.
+4. In the edit mode, with the Antigravity account configured to ask for terminal commands, use a separate chat to explicitly request the shell command `echo QIAOMU_AGY_APPROVAL_CHECK`. Check the local CLI log for a soft-denied `RunCommand` and confirm the chat shows a permission error. If the model declines to call the tool or the local policy allows it, the denial case has not been exercised.
+
+Edit mode uses `accept-edits` and asks the model to use native file tools for ordinary note edits. Read-only mode requests `plan` and explicitly tells the model to leave files unchanged. Antigravity still applies its own permission rules. A chat reply alone does not verify a write.
