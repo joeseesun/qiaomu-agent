@@ -26,6 +26,8 @@ const zh = {
   redirect: "接口返回了跳转，请填写最终 API 地址后重试。", cancelled: "请求已取消",
   loaded: "模型列表已读取", tested: "模型调用成功", manualHelp: "不读取模型列表，直接测试此模型。",
   retryHelp: "可重试，或手动指定模型后测试。", saveTest: "测试模型并保存", responses: "OpenAI Responses",
+  antigravityToolDenied: "Antigravity CLI 的工具权限请求被拒绝，任务未完整执行。请检查文件权限。需要审批的命令请在 Antigravity CLI 中手动确认。",
+  antigravityNoReply: "Antigravity CLI 没有返回回复，无法确认任务已完成。若请求修改笔记，请先检查文件内容再重试。",
 } as const;
 const en: Record<keyof typeof zh, string> = {
   editModel: "Edit model", deleteModel: "Delete model", modelMissing: "This model was removed. Return to the model list.",
@@ -53,6 +55,8 @@ const en: Record<keyof typeof zh, string> = {
   redirect: "The API redirected the request. Enter the final API URL and retry.", cancelled: "Request cancelled",
   loaded: "Model list loaded", tested: "Model call succeeded", manualHelp: "Test this model directly without loading the model list.",
   retryHelp: "Retry, or specify and test a model manually.", saveTest: "Test model and save", responses: "OpenAI Responses",
+  antigravityToolDenied: "Antigravity CLI was denied tool permission, so the task did not complete. Check file permissions. Approve any commands that require confirmation in Antigravity CLI.",
+  antigravityNoReply: "Antigravity CLI returned no reply, so completion could not be confirmed. If you requested an edit, check the note before retrying.",
 };
 export function connectionText(key: keyof typeof zh): string {
   const lang = typeof obsidian.getLanguage === "function" ? obsidian.getLanguage() : "zh";

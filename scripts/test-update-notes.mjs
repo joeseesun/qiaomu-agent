@@ -79,7 +79,7 @@ const manifest = JSON.parse(readFileSync('manifest.json'));
 const release = readFileSync(`${dir}/update-notes-release.ts`, 'utf8'); assert.ok(release.includes(`version: '${manifest.version}'`));
 const translations = await build({ entryPoints: [`${dir}/update-notes-i18n.ts`], bundle: true, write: false, format: 'cjs' });
 const translated = { module: { exports: {} } }; vm.runInNewContext(translations.outputFiles[0].text, translated);
-for (const locale of translated.module.exports.UPDATE_LOCALES) for (const key of ['title', 'view', 'done', 'automatic', 'saveError', 'introduced', 'revisit', 'control', 'fallback']) assert.ok(translated.module.exports.updateText(locale, key));
+for (const locale of translated.module.exports.UPDATE_LOCALES) for (const key of ['title', 'view', 'done', 'automatic', 'saveError', 'introduced', 'revisit', 'control', 'antigravityFix', 'fallback']) assert.ok(translated.module.exports.updateText(locale, key));
 assert.equal(translated.module.exports.updateText('zh-Hant', 'title'), '更新內容');
 assert.equal(translated.module.exports.updateText('unknown', 'title'), 'What’s new');
 console.log('Update notes passed: versions, skipped updates, once-only, opt-out, manual reopen, queue, unload, corrupt data, write errors, isolated storage, all locales, release version.');
