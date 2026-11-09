@@ -57,4 +57,4 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Check Windows CLI resolution and literal argument round trips
-        run: npx vitest run tests/cli-process.test.ts tests/cli-process-windows.test.ts tests/cli-discovery.test.ts tests/json-rpc-process.test.ts
+        run: npx vitest run tests/cli-process.test.ts tests/cli-process-windows.test.ts tests/cli-discovery.test.ts tests/json-rpc-process.test.ts tests/antigravity-backend.test.ts

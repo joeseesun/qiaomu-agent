@@ -1,5 +1,18 @@
 // Component dictionary; its locale comes from each plugin's existing language resolver.
 const messages = {
+  antigravityFix: [
+    '修复 Antigravity 模型列表读取和笔记编辑。工具权限被拒绝时，对话会明确提示。',
+    'Fixed Antigravity model discovery and note editing. Chat now reports tool permission denials.',
+    '修正 Antigravity 模型清單讀取及筆記編輯。工具權限遭拒時，對話會明確提示。',
+    'Antigravity のモデル一覧の取得とノート編集を修正しました。ツールの権限が拒否されるとチャットに表示します。',
+    'Antigravity 모델 목록과 노트 편집을 수정했습니다. 도구 권한이 거부되면 채팅에 표시됩니다.',
+    'Se corrigieron la lista de modelos y la edición de notas de Antigravity. El chat avisa si se deniega un permiso.',
+    'La liste des modèles et la modification des notes avec Antigravity ont été corrigées. Le chat signale les refus de permission.',
+    'Die Modellliste und die Notizbearbeitung mit Antigravity wurden korrigiert. Der Chat meldet verweigerte Berechtigungen.',
+    'Corrigimos a lista de modelos e a edição de notas no Antigravity. O chat informa quando uma permissão é negada.',
+    'Исправлены список моделей и редактирование заметок через Antigravity. Чат сообщает об отказе в доступе к инструменту.',
+    'أُصلحت قائمة النماذج وتحرير الملاحظات في Antigravity. تعرض المحادثة رسالة عند رفض إذن الأداة.',
+  ],
   title: ['更新内容', 'What’s new', '更新內容', '新着情報', '업데이트 내용', 'Novedades', 'Nouveautés', 'Neuerungen', 'Novidades', 'Что нового', 'ما الجديد'],
   view: ['查看更新内容', 'View what’s new', '查看更新內容', '更新内容を見る', '업데이트 내용 보기', 'Ver novedades', 'Voir les nouveautés', 'Neuerungen ansehen', 'Ver novidades', 'Посмотреть изменения', 'عرض المستجدات'],
   done: ['知道了', 'Got it', '知道了', '確認', '확인', 'Entendido', 'Compris', 'Verstanden', 'Entendi', 'Понятно', 'حسنًا'],
