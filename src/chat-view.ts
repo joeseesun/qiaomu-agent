@@ -33,6 +33,7 @@ import { activeProvider, agentShown, chooseModel, exposedModels, findProvider, p
 import { nativeTransportFor } from "./services/native-agent-backend";
 import { agentIconKey } from "./ui/brand-icon";
 import { activeIdentity, conversationTitle, forkConversation, openConversation, startConversation } from "./services/conversations";
+import { ConversationHistoryModal } from "./ui/history-modal";
 import type { PickerSelection } from "./ui/model-picker";
 
 export const VIEW_TYPE_QIAOMU_AGENT = "qiaomu-agent-view";
@@ -493,13 +494,15 @@ export class ChatView extends ItemView {
     menu.addItem((item) => item.setTitle("管理技能与工具连接…").setIcon("settings-2").onClick(() => new CapabilitiesModal(this.app, this.plugin).open()));
     menu.showAtMouseEvent(event);
   }
-  private openHistory(event: MouseEvent): void {
-    const menu = new Menu();
-    const history = this.plugin.settings.conversations ?? [];
-    if (!history.length) menu.addItem((item) => item.setTitle("暂无历史对话").setDisabled(true));
-    for (const entry of history) menu.addItem((item) => item.setTitle(entry.title).setIcon(entry.fork ? "git-branch" : "messages-square")
-      .onClick(() => this.openConversation(entry.id)));
-    menu.showAtMouseEvent(event);
+  private openHistory(_event: MouseEvent): void { this.openHistoryModal(); }
+  /** Lists the active conversation plus the archived history, and deletes either one. */
+  openHistoryModal(): void {
+    new ConversationHistoryModal(this.app, this.plugin.settings, {
+      persist: () => this.plugin.saveSettings(),
+      activeMessages: () => this.chat.messages.map(toStoredMessage),
+      open: (id) => this.openConversation(id),
+      cleared: () => this.showConversation([]),
+    }).open();
   }
   private resolveAttachment(attachment: ChatAttachment): ChatAttachment {
     return attachment.vaultPath

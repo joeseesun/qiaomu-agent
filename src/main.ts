@@ -85,6 +85,11 @@ export default class QiaomuAgentPlugin extends Plugin {
       callback: () => void this.activateView().then(() => this.eachView((view) => view.requestAdd(kind))),
     });
     this.addCommand({
+      id: "manage-conversations",
+      name: "管理对话历史",
+      callback: () => void this.activateView().then(() => this.eachView((view) => view.openHistoryModal())),
+    });
+    this.addCommand({
       id: "manage-capabilities",
       name: "管理技能与工具连接",
       callback: () => new CapabilitiesModal(this.app, this).open(),

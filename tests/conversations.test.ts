@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeSettings } from "../src/defaults";
-import { forkConversation, openConversation, startConversation } from "../src/services/conversations";
+import { clearActiveConversation, deleteConversation, forkConversation, openConversation, startConversation } from "../src/services/conversations";
 import type { ChatMessage } from "../src/types";
 
 const message = (id: string, role: "user" | "assistant", content: string): ChatMessage => ({ id, role, content, createdAt: 1 });
@@ -57,5 +57,36 @@ describe("conversation branching", () => {
     expect(settings.activeConversation?.title).toBe("主题 · 分支 1.1");
     const legacy = normalizeSettings({ activeConversation: { ...settings.activeConversation, title: "主题 · 分支 1 · 分支 1" } });
     expect(legacy.activeConversation?.title).toBe("主题 · 分支 1.1");
+  });
+});
+
+describe("conversation deletion", () => {
+  it("drops one archived conversation and leaves the active one alone", () => {
+    const settings = normalizeSettings({});
+    const original = [message("u1", "user", "主题"), message("a1", "assistant", "回答")];
+    forkConversation(settings, original, "a1");
+    const archivedId = settings.conversations![0]!.id;
+    const activeId = settings.activeConversation!.id;
+
+    expect(deleteConversation(settings, "missing")).toBe(false);
+    expect(settings.conversations).toHaveLength(1);
+
+    expect(deleteConversation(settings, archivedId)).toBe(true);
+    expect(settings.conversations).toEqual([]);
+    expect(settings.activeConversation?.id).toBe(activeId);
+  });
+
+  it("clears the active conversation without archiving it", () => {
+    const settings = normalizeSettings({});
+    forkConversation(settings, [message("u1", "user", "主题"), message("a1", "assistant", "回答")], "a1");
+    const archivedCount = settings.conversations!.length;
+    const activeId = settings.activeConversation!.id;
+    settings.lastConversation = [message("u1", "user", "主题"), message("a1", "assistant", "回答")];
+
+    clearActiveConversation(settings);
+    expect(settings.lastConversation).toEqual([]);
+    expect(settings.activeConversation?.id).not.toBe(activeId);
+    expect(settings.activeConversation?.title).toBe("");
+    expect(settings.conversations).toHaveLength(archivedCount);
   });
 });
